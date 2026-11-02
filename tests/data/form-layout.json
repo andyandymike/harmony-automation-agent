@@ -1,0 +1,25 @@
+{
+  "attributes": {
+    "type": "WindowScene", "bundleName": "org.example.form",
+    "hostWindowId": "21", "displayId": "0", "bounds": "[0,0][1000,2000]"
+  },
+  "children": [
+    {
+      "attributes": {"type": "Column", "key": "row.first", "bounds": "[0,0][1000,500]"},
+      "children": [
+        {"attributes": {"type": "Text", "key": "first.label", "text": "First form"}},
+        {"attributes": {"type": "Button", "key": "first.submit", "text": "Submit", "clickable": "true", "enabled": "true", "bounds": "[20,300][300,400]"}}
+      ]
+    },
+    {
+      "attributes": {"type": "Column", "key": "row.second", "bounds": "[0,500][1000,1000]"},
+      "children": [
+        {"attributes": {"type": "TextInput", "key": "fixture.input", "text": "", "hint": "输入名字", "focused": "false", "bounds": "[20,520][900,620]"}},
+        {"attributes": {"type": "Button", "key": "second.submit", "text": "Submit", "clickable": "true", "enabled": "true", "bounds": "[20,800][300,900]"}}
+      ]
+    },
+    {"attributes": {"type": "Text", "key": "fixture.counter", "text": "Counter: 0", "clickable": "false"}},
+    {"attributes": {"type": "Toggle", "id": "fixture.toggle", "checkable": "true", "checked": "false", "enabled": "true"}},
+    {"attributes": {"type": "List", "key": "fixture.list", "scrollable": "true", "selected": ""}}
+  ]
+}

@@ -1,0 +1,70 @@
+# Changelog
+
+## 0.1.0a2 — local development candidate
+
+Prepared on 2026-11-03. This candidate has not been published to GitHub or a package registry. Candidate results must be recorded separately from the historical alpha1 results below.
+
+### Documentation and distribution preparation
+
+- Added a compatibility matrix separating the recorded Windows/API24 emulator from untested physical devices, hosts and API versions.
+- Added source provenance, the fixed fixture revision, package-content boundaries and an explicit reused-material licensing check.
+- Added a six-package release-readiness record covering input, Skill, agent acceptance, installation, external trials and release preparation.
+- Documented isolated installation, wheel installation without dependency downloads, upgrade/uninstall behavior and the distinction between a completed diagnostic command and a ready device.
+- Checked the candidate GitHub repository and official PyPI JSON/Simple endpoints on 2026-11-03. They returned no candidate repository/project. This does not reserve the name or guarantee registration.
+
+### Acceptance status
+
+- On the dedicated API24 emulator, Xiaoyi basic mode and its 26-key layout were configured. Chinese fill, replacement and clearing then passed readback on both ordinary and native real TextInputs: six operations in total. This is native-injection coverage, not a Pinyin/keyboard-composition or general success-rate claim.
+- Ordinary-field elapsed times for fill/replace/clear: 4174.26 / 6663.33 / 5595.02 ms. Native-field times: 4249.18 / 6580.03 / 5584.71 ms. Each figure is one functional operation sample.
+- Offline regression: 147 tests passed in 2.717 seconds. Input-inclusive device smoke: 40 steps passed, 0 failed, 1 skipped, in 85.641 seconds. The skip is the independent ordinary-IME suite; the separate ordinary-field checks above are not relabeled as a smoke pass.
+- The offline release checker completed 14 checks for 0.1.0a2 using a fresh virtual environment. The frozen artifact's final installation report and hashes are recorded through [the alpha2 validation report](docs/validation-alpha2.md); no final-run elapsed time or hash is inferred from an earlier build.
+- Ordinary agent guides are available. Personal Skill installation did not complete in this environment; no installed Skill is claimed.
+- Independent agent task batches, command/output metrics and unknown-receipt recovery are recorded in [the alpha2 validation report](docs/validation-alpha2.md). That report preserves observed errors and distinguishes test-recorder faults from CLI outcomes. Do not infer all planned tasks completed from this changelog. External human trial, hosted CI execution and public publication remain pending until actual results exist.
+
+### Execution changes
+
+- Increased the default `fill` input-phase budget from 5 to 15 seconds. Standalone `wait` keeps its 5-second default; nested `expect.timeoutMs` remains an independent 5-second default.
+- Added a focus check after Ctrl+A and before Delete, in addition to the retained-focus check before insertion.
+- Invalidated stored refs after failed/cancelled reads rather than allowing stale observations to authorize later operations.
+- Record a boot identity when it first becomes available after attachment, enabling comparison on subsequent checks.
+
+## 0.1.0a1 — unreleased development alpha
+
+Initial native Python / HDC implementation is available as a local development alpha. It has not been published to a package registry.
+
+The alpha provides device diagnostics and explicit sessions, normalized UI observations, element selection, basic actions, deterministic expectations, and local failure evidence. Input remains experimental and blocked in the tested first-run IME environment. See installed CLI help for the command surface.
+
+### Input implementation notes
+
+- Native `uiInput inputText` appends, and an empty string does not clear text. The experimental CLI replacement path uses tap, focus verification, Ctrl+A / Delete when necessary, empty-value and retained-focus verification, text injection, and final readback. Empty fields skip clearing keys; insertion stops if focus is lost; substeps share the operation budget.
+- Input preparation and internal verification are included in `timings.actionMs`; this is not pure dispatch latency.
+- Native Unicode or long-text injection may overwrite the device clipboard. Clipboard restoration is not guaranteed.
+- The normal fixture input encountered Xiaoyi keyboard privacy onboarding in the emulator. The tool did not auto-accept it; the attempt failed with evidence. This is a negative-path observation, not a successful IME test.
+- A second real TextInput, `fixture.input.native`, disables soft-keyboard display and shares the same value. It was also blocked by first-run IME onboarding: one attempt reached focus verification but clearing triggered the prompt, and a later clean launch was blocked during focus. Disabling soft-keyboard display does not bypass the IME. Chinese input, replacement, and clearing remain unaccepted and experimental.
+
+### Validation record
+
+Measured on 2026-11-02. Implementation and validation results are recorded separately; the device results below cover the stated scenarios, not the full release acceptance matrix.
+
+- Offline suite: 112 tests passed on the development host.
+- Windows + API24 emulator: five fresh observations and five press-plus-counter-expectation operations completed; all five counter expectations passed. Further device smoke coverage is recorded separately by the integrator.
+- Native TextInput Chinese replacement/clear/readback (`fixture.input.native`): BLOCKED by first-run IME onboarding; no successful insertion, replacement, or clear acceptance claimed.
+- Normal soft-keyboard TextInput (`fixture.input`): blocked by first-run privacy onboarding; no successful IME coverage claimed.
+- Physical devices: NOT_RUN.
+- Other Harmony/API combinations: NOT_RUN.
+- Hosted CI: workflow defined; not claimed as executed.
+- Wheel build and isolated virtual-environment installation: passed, including installed CLI help and version checks. The development wheel was approximately 33 KB; final rebuilt artifact size may differ.
+- External user trial and package-registry release: NOT_RUN.
+
+Earlier agent-device or Midscene experiments do not establish validation of this implementation.
+
+### Device timing sample
+
+Environment: Windows, Python 3.12.10, HDC 3.2.0d, UiTest 6.0.2.3, Harmony API24 emulator, 4 CPU cores, 4 GB RAM, 1256 × 2760 display.
+
+| Operation | Five wall-clock samples (ms) | Median (ms) |
+| --- | --- | --- |
+| Fresh observation | 1117.04, 1107.56, 1034.83, 1058.40, 1100.41 | 1100.41 |
+| Press + counter expectation | 2307.59, 2278.28, 2257.27, 2316.33, 2315.96 | 2307.59 |
+
+These are five samples from one emulator configuration. Five passed counter assertions are not a general accuracy estimate, and these timings do not establish physical-device performance, Unicode input support, or a controlled advantage over another tool.

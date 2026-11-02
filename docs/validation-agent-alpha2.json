@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.0a2",
+  "date": "2026-11-03",
+  "timezone": "Asia/Tokyo",
+  "agentGroups": [
+    {
+      "group": "A",
+      "recordedCommands": 25,
+      "commandsWithMissingTiming": 1,
+      "totalCliCommands": 26,
+      "recordedCliElapsedMs": 38502.74,
+      "cliWindowElapsedMs": 503614.14,
+      "cliStdoutBytes": 596529,
+      "emittedBytesRecorded": 552918,
+      "injectedReplyLosses": 1,
+      "notes": [
+        "One invalid-argument CLI reply was retained, but an evaluation-wrapper parsing bug omitted its timing row. Fixed with regression test; first-run failure retained."
+      ]
+    },
+    {
+      "group": "B",
+      "recordedCommands": 19,
+      "commandsWithMissingTiming": 0,
+      "totalCliCommands": 19,
+      "recordedCliElapsedMs": 41702.65,
+      "cliWindowElapsedMs": 402570.79,
+      "cliStdoutBytes": 565263,
+      "emittedBytesRecorded": 565263,
+      "injectedReplyLosses": 0,
+      "notes": [
+        "One PowerShell output-capture decoding error; agent observed the device value before continuing and did not repeat fill. UTF-8 capture guidance added and separately checked."
+      ]
+    }
+  ],
+  "actualModelTokens": null,
+  "modelTokensNote": "Not available; outputBytes are UTF-8 CLI bytes, not model tokens.",
+  "scope": "Two internal fresh agents, five tasks each, one emulator; not external human testing or population accuracy.",
+  "tasks": [
+    {
+      "group": "A",
+      "name": "counter_to_3",
+      "passed": true,
+      "evidence": "independent final device read"
+    },
+    {
+      "group": "A",
+      "name": "notifications_on",
+      "passed": true,
+      "evidence": "independent final device read"
+    },
+    {
+      "group": "A",
+      "name": "choose_order_b",
+      "passed": true,
+      "evidence": "independent final device read"
+    },
+    {
+      "group": "A",
+      "name": "delayed_ready",
+      "passed": true,
+      "evidence": "independent final device read"
+    },
+    {
+      "group": "A",
+      "name": "scroll_end",
+      "passed": true,
+      "evidence": "independent final device read"
+    },
+    {
+      "group": "B",
+      "name": "standard_input_submit",
+      "passed": true,
+      "evidence": "reviewed recorded fresh device observation and exact requested value"
+    },
+    {
+      "group": "B",
+      "name": "replace_without_append",
+      "passed": true,
+      "evidence": "reviewed recorded fresh device observation and exact requested value"
+    },
+    {
+      "group": "B",
+      "name": "standard_clear",
+      "passed": true,
+      "evidence": "reviewed recorded fresh device observation and exact requested value"
+    },
+    {
+      "group": "B",
+      "name": "native_input_submit",
+      "passed": true,
+      "evidence": "reviewed recorded fresh device observation and exact requested value"
+    },
+    {
+      "group": "B",
+      "name": "reset_initial_state",
+      "passed": true,
+      "evidence": "independent final device read"
+    }
+  ],
+  "counts": {
+    "passed": 10,
+    "failed": 0,
+    "total": 10
+  },
+  "replyLossRecovery": {
+    "nextCommand": "observe",
+    "observedCounterOne": true,
+    "incrementAcknowledgmentsIncludingDroppedReply": 3,
+    "finalCounter": "Counter: 3",
+    "duplicateIncrementObserved": false
+  },
+  "timingNote": "CLI window spans first recorded CLI start to final CLI completion, including agent thinking/tool gaps between calls; excludes initial prompt/guide reading and final prose. Recorded CLI latency excludes the one unlogged wrapper failure."
+}

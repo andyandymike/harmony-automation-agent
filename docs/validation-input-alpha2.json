@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.0a2",
+  "date": "2026-11-03",
+  "timezone": "Asia/Tokyo",
+  "environment": {
+    "host": "Windows",
+    "python": "3.12.10",
+    "hdc": "3.2.0d",
+    "uitest": "6.0.2.3",
+    "api": "24",
+    "deviceType": "emulator"
+  },
+  "setup": "IME basic mode with 26-key layout initialized in dedicated test instance",
+  "scope": "six functional samples, not a population success-rate estimate",
+  "results": [
+    {
+      "target": "id=fixture.input.native",
+      "value": "你好 Harmony 123",
+      "assertion": {
+        "status": "passed",
+        "property": "text",
+        "actual": "你好 Harmony 123",
+        "expected": "你好 Harmony 123",
+        "attempts": 1
+      },
+      "input": {
+        "mode": "replace",
+        "phase": "completed",
+        "clipboardMayChange": true,
+        "sideEffectAcknowledged": true,
+        "alreadyEmpty": true
+      },
+      "wallMs": 4249.18,
+      "status": "pass"
+    },
+    {
+      "target": "id=fixture.input.native",
+      "value": "替换 XYZ 456",
+      "assertion": {
+        "status": "passed",
+        "property": "text",
+        "actual": "替换 XYZ 456",
+        "expected": "替换 XYZ 456",
+        "attempts": 1
+      },
+      "input": {
+        "mode": "replace",
+        "phase": "completed",
+        "clipboardMayChange": true,
+        "sideEffectAcknowledged": true
+      },
+      "wallMs": 6580.03,
+      "status": "pass"
+    },
+    {
+      "target": "id=fixture.input.native",
+      "value": "",
+      "assertion": {
+        "status": "passed",
+        "property": "text",
+        "actual": "",
+        "expected": "",
+        "attempts": 1
+      },
+      "input": {
+        "mode": "replace",
+        "phase": "completed",
+        "clipboardMayChange": false,
+        "sideEffectAcknowledged": true
+      },
+      "wallMs": 5584.71,
+      "status": "pass"
+    },
+    {
+      "target": "id=fixture.input",
+      "value": "你好 Harmony 123",
+      "assertion": {
+        "status": "passed",
+        "property": "text",
+        "actual": "你好 Harmony 123",
+        "expected": "你好 Harmony 123",
+        "attempts": 1
+      },
+      "input": {
+        "mode": "replace",
+        "phase": "completed",
+        "clipboardMayChange": true,
+        "sideEffectAcknowledged": true,
+        "alreadyEmpty": true
+      },
+      "wallMs": 4174.26,
+      "status": "pass"
+    },
+    {
+      "target": "id=fixture.input",
+      "value": "替换 XYZ 456",
+      "assertion": {
+        "status": "passed",
+        "property": "text",
+        "actual": "替换 XYZ 456",
+        "expected": "替换 XYZ 456",
+        "attempts": 1
+      },
+      "input": {
+        "mode": "replace",
+        "phase": "completed",
+        "clipboardMayChange": true,
+        "sideEffectAcknowledged": true
+      },
+      "wallMs": 6663.33,
+      "status": "pass"
+    },
+    {
+      "target": "id=fixture.input",
+      "value": "",
+      "assertion": {
+        "status": "passed",
+        "property": "text",
+        "actual": "",
+        "expected": "",
+        "attempts": 1
+      },
+      "input": {
+        "mode": "replace",
+        "phase": "completed",
+        "clipboardMayChange": false,
+        "sideEffectAcknowledged": true
+      },
+      "wallMs": 5595.02,
+      "status": "pass"
+    }
+  ]
+}

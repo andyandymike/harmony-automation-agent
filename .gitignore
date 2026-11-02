@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.harmony-agent/
+build/
+dist/
+*.hap
+*.p12
+*.p7b
+node_modules/
+.hvigor/
+.ohpm/

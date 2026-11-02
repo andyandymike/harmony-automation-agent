@@ -1,0 +1,233 @@
+"""Semantic observation tests run without a device or model."""
+from copy import deepcopy
+import json
+from pathlib import Path
+import unittest
+
+from harmony_agent.errors import AgentError
+from harmony_agent.observation import (
+    normalize_layout, select_nodes, resolve_target, diff_observations, project_observation,
+)
+
+
+class ObservationTests(unittest.TestCase):
+    def setUp(self):
+        self.raw = json.loads((Path(__file__).parent / "data" / "form-layout.json").read_text(encoding="utf-8"))
+        self.observation = normalize_layout(self.raw, "f1")
+
+    def assertAgentError(self, code, callback):
+        with self.assertRaises(AgentError) as error:
+            callback()
+        self.assertEqual(code, error.exception.code)
+        return error.exception
+
+    def test_unknown_boolean_is_not_false(self):
+        root = self.observation["nodes"][0]
+        self.assertIsNone(root["checked"])
+        self.assertIsNone(root["clickable"])
+        toggle = resolve_target(self.observation, "id=fixture.toggle")
+        self.assertIs(toggle["checked"], False)
+        self.assertIs(toggle["checkable"], True)
+        self.assertEqual([toggle], select_nodes(self.observation, {"checked": False}))
+
+    def test_key_fallback_bounds_and_inherited_context(self):
+        button = resolve_target(self.observation, "id=first.submit")
+        self.assertEqual("first.submit", button["key"])
+        self.assertEqual({"left": 20, "top": 300, "right": 300, "bottom": 400}, button["bounds"])
+        self.assertEqual({"x": 160, "y": 350}, button["center"])
+        self.assertEqual("org.example.form", button["bundleName"])
+        self.assertEqual("21", button["hostWindowId"])
+        self.assertEqual("0", button["displayId"])
+
+    def test_duplicate_labels_require_context(self):
+        error = self.assertAgentError("TARGET_AMBIGUOUS", lambda: resolve_target(self.observation, "text=Submit"))
+        self.assertEqual(2, error.details["count"])
+        self.assertTrue(all(c["parent"] for c in error.details["candidates"]))
+        selected = resolve_target(self.observation, {"text": "Submit", "within": "id=row.second"})
+        self.assertEqual("second.submit", selected["id"])
+
+    def test_container_selector_does_not_mutate_request(self):
+        request = {"text": "Submit", "within": {"id": "row.first"}}
+        before = deepcopy(request)
+        select_nodes(self.observation, request)
+        self.assertEqual(before, request)
+
+    def test_ref_is_valid_only_in_issuing_frame(self):
+        ref = resolve_target(self.observation, "id=first.submit")["ref"]
+        self.assertEqual("first.submit", resolve_target(self.observation, ref)["id"])
+        current = normalize_layout(self.raw, "f2")
+        self.assertAgentError("STALE_REF", lambda: resolve_target(current, ref))
+        self.assertAgentError("STALE_REF", lambda: resolve_target(current, "@e1"))
+
+    def test_unknown_ref_in_current_frame_is_not_found(self):
+        self.assertAgentError("TARGET_NOT_FOUND", lambda: resolve_target(self.observation, "@e999~f1"))
+
+    def test_counter_survives_interactive_projection(self):
+        view = project_observation(self.observation, interactive=True)
+        self.assertEqual("Counter: 0", resolve_target(view, "id=fixture.counter")["text"])
+        counter_ref = resolve_target(view, "id=fixture.counter")["ref"]
+        self.assertIn(counter_ref, view["facts"])
+        self.assertNotIn(counter_ref, view["controls"])
+
+    def test_input_value_does_not_use_hint(self):
+        node = resolve_target(self.observation, "id=fixture.input")
+        self.assertEqual("", node["value"])
+        self.assertEqual("输入名字", node["hint"])
+        self.assertIs(node["editable"], True)
+        self.assertIn(node, self.observation["controls"])
+
+    def test_diff_detects_counter_change_without_ref_churn(self):
+        updated = deepcopy(self.raw)
+        updated["children"][2]["attributes"]["text"] = "Counter: 1"
+        current = normalize_layout(updated, "f2")
+        diff = diff_observations(self.observation, current)
+        self.assertTrue(diff["comparable"])
+        self.assertEqual([], diff["added"])
+        self.assertEqual([], diff["removed"])
+        self.assertEqual(1, len(diff["changed"]))
+        self.assertEqual({"text": "Counter: 0"}, diff["changed"][0]["before"])
+        self.assertEqual({"text": "Counter: 1"}, diff["changed"][0]["after"])
+
+    def test_full_to_interactive_never_reports_false_removals(self):
+        interactive = project_observation(self.observation, interactive=True)
+        diff = diff_observations(self.observation, interactive)
+        self.assertFalse(diff["comparable"])
+        self.assertEqual("projection-mismatch", diff["reason"])
+        self.assertEqual([], diff["removed"])
+
+    def test_anonymous_insertion_does_not_invent_stable_identity(self):
+        old = normalize_layout({"type": "Column", "children": [{"type": "Text", "text": "A"}]}, "f1")
+        new = normalize_layout({"type": "Column", "children": [{"type": "Text", "text": "B"}, {"type": "Text", "text": "A"}]}, "f2")
+        diff = diff_observations(old, new)
+        self.assertTrue(diff["comparable"])
+        self.assertFalse(diff["complete"])
+        self.assertEqual([], diff["removed"])
+        self.assertEqual([], diff["changed"])
+        self.assertEqual({"previous": 2, "current": 3}, diff["unmatched"])
+
+    def test_duplicate_ids_have_no_invented_occurrence_identity(self):
+        raw = [{"id": "same", "text": "first"}, {"id": "same", "text": "second"}]
+        result = normalize_layout(raw, "f1")
+        self.assertTrue(all(n["identity"] is None for n in result["nodes"]))
+        self.assertAgentError("TARGET_AMBIGUOUS", lambda: resolve_target(result, "id=same"))
+
+    def test_projection_is_bounded_and_does_not_mutate_full_frame(self):
+        before = deepcopy(self.observation)
+        view = project_observation(self.observation, max_nodes=2)
+        self.assertEqual(2, len(view["nodes"]))
+        self.assertTrue(view["quality"]["truncated"])
+        self.assertFalse(view["quality"]["complete"])
+        returned_refs = {n["ref"] for n in view["nodes"]}
+        self.assertTrue(set(view["controls"]).issubset(returned_refs))
+        self.assertTrue(set(view["facts"]).issubset(returned_refs))
+        self.assertEqual(len(before["nodes"]) - 2, view["quality"]["omittedNodes"])
+        self.assertEqual(len(before["facts"]) - len(view["facts"]), view["quality"]["omittedFacts"])
+        self.assertEqual(len(before["controls"]) - len(view["controls"]), view["quality"]["omittedControls"])
+        self.assertEqual(before, self.observation)
+        self.assertFalse(diff_observations(view, view)["comparable"])
+
+    def test_budget_prefers_state_over_empty_containers(self):
+        raw = {"type": "Column", "children": [{"type": "Column"} for _ in range(100)] + [
+            {"type": "Text", "key": "counter", "text": "Counter: 3"}]}
+        view = project_observation(normalize_layout(raw, "f1"), max_nodes=1)
+        self.assertEqual("counter", view["nodes"][0]["id"])
+        self.assertTrue(view["quality"]["truncated"])
+        self.assertEqual(1, view["quality"]["missingContextNodes"])
+        self.assertEqual(0, view["quality"]["omittedFacts"])
+
+    def test_find_includes_ancestor_context(self):
+        view = project_observation(self.observation, query="输入名字")
+        self.assertEqual({None, "row.second", "fixture.input"}, {n["id"] for n in view["nodes"]})
+        self.assertFalse(view["quality"]["truncated"])
+
+    def test_app_scope_excludes_other_apps_and_retains_context(self):
+        raw = {"type": "Root", "children": [
+            {"bundleName": "app.one", "id": "one", "children": [{"id": "child"}]},
+            {"bundleName": "app.two", "id": "two"}]}
+        view = normalize_layout(raw, "f1", scope={"app": "app.one"})
+        self.assertEqual({None, "one", "child"}, {n["id"] for n in view["nodes"]})
+        self.assertEqual("app.one", resolve_target(view, "id=child")["bundleName"])
+
+    def test_scopes_are_part_of_diff_contract(self):
+        scoped = normalize_layout(self.raw, "f2", scope="org.example.form")
+        self.assertFalse(diff_observations(self.observation, scoped)["comparable"])
+
+    def test_unknown_selector_keys_do_not_match_everything(self):
+        self.assertAgentError("INVALID_SELECTOR", lambda: select_nodes(self.observation, {"test": "x"}))
+        self.assertAgentError("INVALID_SELECTOR", lambda: select_nodes(self.observation, {}))
+        self.assertAgentError("INVALID_SELECTOR", lambda: select_nodes(self.observation, "Submit"))
+        self.assertAgentError("INVALID_SELECTOR", lambda: select_nodes(self.observation, {"enabled": "maybe"}))
+
+    def test_boolean_string_and_context_aliases(self):
+        nodes = select_nodes(self.observation, {"text": "Submit", "enabled": "true", "app": "org.example.form", "window": 21})
+        self.assertEqual(2, len(nodes))
+
+    def test_invalid_bounds_are_unknown(self):
+        for bounds in ("broken", "[5,5][1,1]", [0, 0, float("nan"), 1], {"left": 0}):
+            with self.subTest(bounds=bounds):
+                node = normalize_layout({"id": "x", "bounds": bounds}, "f1")["nodes"][0]
+                self.assertIsNone(node["bounds"])
+                self.assertIsNone(node["center"])
+
+    def test_malformed_children_mark_incomplete(self):
+        result = normalize_layout({"id": "root", "children": "bad"}, "f1")
+        self.assertFalse(result["quality"]["complete"])
+        self.assertEqual("INVALID_CHILDREN", result["quality"]["warnings"][0]["code"])
+
+    def test_wrapped_roots_and_json_text(self):
+        result = normalize_layout(json.dumps({"roots": [{"id": "one"}, {"id": "two"}]}), "f1")
+        self.assertEqual(2, len(result["nodes"]))
+
+    def test_empty_dump_is_explicit_empty_observation(self):
+        result = normalize_layout([], "f1")
+        self.assertEqual([], result["nodes"])
+        self.assertEqual(0, result["quality"]["totalNodes"])
+        self.assertAgentError("INVALID_LAYOUT", lambda: normalize_layout("broken", "f1"))
+        self.assertAgentError("INVALID_LAYOUT", lambda: normalize_layout(None, "f1"))
+
+    def test_error_and_unknown_roots_cannot_look_like_complete_empty_tree(self):
+        for raw in ({"error": "dump failed"}, {"success": False, "roots": []},
+                    {"status": "failed", "roots": []}, {"text": "dump failed", "code": 5},
+                    {"roots": [], "error": "device disconnected"}, {"unexpected": "payload"},
+                    {}, {"attributes": {}}, {"children": []}, [{"error": "dump failed"}]):
+            with self.subTest(raw=raw):
+                self.assertAgentError("INVALID_LAYOUT", lambda: normalize_layout(raw, "f1"))
+
+    def test_unrecognized_child_marks_partial_layout_incomplete(self):
+        raw = {"attributes": {"type": "Column"}, "children": [
+            {"attributes": {"id": "valid", "text": "OK"}}, {"error": "partial dump failed"}]}
+        result = normalize_layout(raw, "f1")
+        self.assertFalse(result["quality"]["complete"])
+        self.assertEqual("OK", resolve_target(result, "id=valid")["text"])
+        self.assertEqual("UNRECOGNIZED_NODE_FORMAT", result["quality"]["warnings"][0]["code"])
+        self.assertFalse(diff_observations(result, result)["comparable"])
+
+    def test_explicit_empty_roots_and_structure_only_parent_are_supported(self):
+        empty = normalize_layout({"roots": []}, "f1")
+        self.assertEqual([], empty["nodes"])
+        self.assertTrue(empty["quality"]["complete"])
+        container = normalize_layout({"children": [{"id": "valid"}]}, "f1")
+        self.assertEqual(2, len(container["nodes"]))
+        self.assertTrue(container["quality"]["complete"])
+
+    def test_public_projection_removes_only_internal_or_duplicate_fields(self):
+        view = project_observation(self.observation)
+        old = resolve_target(self.observation, "id=fixture.counter")
+        current = resolve_target(view, "id=fixture.counter")
+        for internal in ("identity", "path", "sources"):
+            self.assertIn(internal, old)
+            self.assertNotIn(internal, current)
+        self.assertEqual("fixture.counter", old["key"])
+        self.assertNotIn("key", current)
+        self.assertEqual(old["text"], current["text"])
+        self.assertIsNone(current["checked"])
+        self.assertIs(current["clickable"], False)
+        self.assertEqual(old["bundleName"], current["bundleName"])
+        self.assertEqual(old["bounds"], current["bounds"])
+        self.assertEqual(old["parent"], current["parent"])
+        distinct = normalize_layout({"id": "id", "key": "different-key", "text": ""}, "f3")
+        self.assertEqual("different-key", project_observation(distinct)["nodes"][0]["key"])
+
+
+if __name__ == "__main__":
+    unittest.main()

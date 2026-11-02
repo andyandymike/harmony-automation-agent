@@ -1,0 +1,297 @@
+{
+  "schemaVersion": 1,
+  "suite": "fixture-v2",
+  "at": "2026-11-02T16:02:03.337141+00:00",
+  "status": "pass",
+  "counts": {
+    "pass": 40,
+    "fail": 0,
+    "skip": 1
+  },
+  "elapsedMs": 85641.0,
+  "inputIncluded": true,
+  "steps": [
+    {
+      "name": "attach",
+      "command": "attach",
+      "status": "pass",
+      "elapsedMs": 156.0
+    },
+    {
+      "name": "open_fixture",
+      "command": "open",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 1235.0
+    },
+    {
+      "name": "prepare_top.observe",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1094.0
+    },
+    {
+      "name": "prepare_top",
+      "status": "pass",
+      "assertion": "passed",
+      "scrollCount": 0,
+      "elapsedMs": 0
+    },
+    {
+      "name": "ready",
+      "command": "wait",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 1046.0
+    },
+    {
+      "name": "reset",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2250.0
+    },
+    {
+      "name": "observe_increment",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1110.0
+    },
+    {
+      "name": "increment_expect",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2265.0
+    },
+    {
+      "name": "stale_ref_rejected",
+      "command": "press",
+      "status": "pass",
+      "errorCode": "STALE_REF",
+      "dispatched": "no",
+      "assertion": "not_requested",
+      "elapsedMs": 125.0
+    },
+    {
+      "name": "switch_on",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2235.0
+    },
+    {
+      "name": "delayed_ready",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2234.0
+    },
+    {
+      "name": "rows_visible.observe",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1031.0
+    },
+    {
+      "name": "rows_visible",
+      "status": "pass",
+      "assertion": "passed",
+      "scrollCount": 0,
+      "elapsedMs": 0
+    },
+    {
+      "name": "ambiguous_choose_rejected",
+      "command": "press",
+      "status": "pass",
+      "errorCode": "TARGET_AMBIGUOUS",
+      "dispatched": "no",
+      "assertion": "not_requested",
+      "elapsedMs": 1047.0
+    },
+    {
+      "name": "choose_row_a",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2250.0
+    },
+    {
+      "name": "scroll_end.observe",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1078.0
+    },
+    {
+      "name": "scroll_end.scroll.1",
+      "command": "scroll",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 5094.0
+    },
+    {
+      "name": "scroll_end.observe.1",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1047.0
+    },
+    {
+      "name": "scroll_end.scroll.2",
+      "command": "scroll",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 5047.0
+    },
+    {
+      "name": "scroll_end.observe.2",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1031.0
+    },
+    {
+      "name": "scroll_end.scroll.3",
+      "command": "scroll",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 5047.0
+    },
+    {
+      "name": "scroll_end.observe.3",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1016.0
+    },
+    {
+      "name": "scroll_end",
+      "status": "pass",
+      "assertion": "passed",
+      "scrollCount": 3,
+      "elapsedMs": 0
+    },
+    {
+      "name": "end_text",
+      "command": "wait",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 1093.0
+    },
+    {
+      "name": "screenshot",
+      "command": "screenshot",
+      "status": "pass",
+      "elapsedMs": 563.0
+    },
+    {
+      "name": "wrong_assertion_keeps_evidence",
+      "command": "wait",
+      "status": "pass",
+      "errorCode": "ASSERTION_TIMEOUT",
+      "dispatched": "no",
+      "assertion": "failed",
+      "evidence": {
+        "observation": true,
+        "screenshot": true
+      },
+      "elapsedMs": 3156.0
+    },
+    {
+      "name": "native_input.top.observe",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1047.0
+    },
+    {
+      "name": "native_input.top.scroll.1",
+      "command": "scroll",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 5063.0
+    },
+    {
+      "name": "native_input.top.observe.1",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1062.0
+    },
+    {
+      "name": "native_input.top.scroll.2",
+      "command": "scroll",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 5109.0
+    },
+    {
+      "name": "native_input.top.observe.2",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1063.0
+    },
+    {
+      "name": "native_input.top.scroll.3",
+      "command": "scroll",
+      "status": "pass",
+      "assertion": "not_requested",
+      "elapsedMs": 5031.0
+    },
+    {
+      "name": "native_input.top.observe.3",
+      "command": "observe",
+      "status": "pass",
+      "elapsedMs": 1031.0
+    },
+    {
+      "name": "native_input.top",
+      "status": "pass",
+      "assertion": "passed",
+      "scrollCount": 3,
+      "elapsedMs": 0
+    },
+    {
+      "name": "native_input.reset",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2282.0
+    },
+    {
+      "name": "native_input.fill_chinese",
+      "command": "fill",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 5125.0
+    },
+    {
+      "name": "native_input.submit",
+      "command": "press",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 2297.0
+    },
+    {
+      "name": "native_input.replace",
+      "command": "fill",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 7656.0
+    },
+    {
+      "name": "native_input.clear",
+      "command": "fill",
+      "status": "pass",
+      "assertion": "passed",
+      "elapsedMs": 6625.0
+    },
+    {
+      "name": "standard_ime_input",
+      "status": "skip",
+      "reason": "separate_operator_configured_test_required",
+      "elapsedMs": 0
+    },
+    {
+      "name": "detach",
+      "command": "detach",
+      "status": "pass",
+      "elapsedMs": 0.0
+    }
+  ]
+}

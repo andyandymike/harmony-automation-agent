@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "harmony-automation-agent"
+version = "0.1.0a2"
+description = "Observe, operate and verify HarmonyOS applications from AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+harmony-agent = "harmony_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

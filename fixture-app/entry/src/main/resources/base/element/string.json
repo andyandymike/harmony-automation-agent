@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Deterministic UI fixture for HarmonyOS automation"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Harmony automation fixture entry ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Harmony Automation Fixture"
+    }
+  ]
+}

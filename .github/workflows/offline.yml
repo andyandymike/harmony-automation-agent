@@ -1,0 +1,59 @@
+name: Offline tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.10', '3.12']
+    env:
+      PYTHONPATH: src
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile source
+        run: python -m compileall -q src
+      - name: Run offline unit tests
+        run: python -m unittest discover -s tests -v
+
+  package:
+    name: Offline package check / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build prerequisite (CI bootstrap)
+        run: python -m pip install --disable-pip-version-check setuptools==80.9.0
+      - name: Build and validate without package downloads
+        run: python scripts/release-check.py --output-dir .harmony-agent/release-check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: package-check-${{ matrix.os }}
+          path: |
+            .harmony-agent/release-check/*/report.json
+            .harmony-agent/release-check/*/wheel/*.whl
+          if-no-files-found: warn
