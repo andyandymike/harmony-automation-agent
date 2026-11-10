@@ -1,6 +1,6 @@
 # Compatibility and validation boundaries
 
-Updated: 2026-11-03. Package version, request `schemaVersion`, fixture contract, and environment version are separate identifiers. Check the installed CLI with `harmony-agent --version --json` and `harmony-agent schema --json`.
+Updated: 2026-11-10. Package version, request `schemaVersion`, fixture contract, and environment version are separate identifiers. Check the installed CLI with `harmony-agent --version --json` and `harmony-agent schema --json`.
 
 ## Tested combinations
 
@@ -9,6 +9,7 @@ Updated: 2026-11-03. Package version, request `schemaVersion`, fixture contract,
 | Windows / Python 3.12.10 / HDC 3.2.0d / UiTest 6.0.2.3 / HarmonyOS 6.1.1 API24 emulator | 0.1.0a1: 112 offline tests; 27 device-smoke steps passed, 0 failed, 2 input checks skipped | Local alpha coverage for the recorded fixture scenarios; input and alpha2 changes need their own results |
 | Same dedicated API24 test emulator after Xiaoyi basic-mode and 26-key setup | 0.1.0a2: 147 offline tests; device smoke 40 passed, 0 failed, 1 skipped; six separate standard/native input readbacks passed | Native injection on these controls; the skipped ordinary-IME suite is not counted as passed |
 | Windows clean virtual environment | 0.1.0a2 release checker: 14 offline checks passed; frozen artifact metadata is linked from the current validation report | A clean venv on the same host is not a clean operating-system or SDK installation |
+| GitHub-hosted Windows / Ubuntu, Python 3.10 and 3.12 | 2026-11-10: all four 150-test matrix jobs passed; both Python 3.12 package-check jobs passed, [run and revision](publication-review-2026-11-10.md) | Offline execution only; no connected device, SDK discovery or signing acceptance |
 | Physical HarmonyOS devices | NOT_RUN | No physical-device support claim |
 | macOS / Linux hosts | NOT_RUN on a device | A Python/HDC port or CI definition does not establish device compatibility |
 | Other Python, HDC, UiTest or Harmony/API combinations | NOT_RUN unless a later report records the exact combination | Do not infer compatibility from a nearby version |

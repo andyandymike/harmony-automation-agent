@@ -21,6 +21,8 @@ The [fixed fixture source](https://github.com/andyandymike/harmony-automation/tr
 
 The candidate repository `andyandymike/harmony-automation-agent` returned HTTP 404 on 2026-11-03. On 2026-11-10, the selected [publication repository](https://github.com/andyandymike/harmony-automation-agent) was confirmed public and empty, with administration and push access. It is the destination for this project's source publication; package-registry publication is separate.
 
+Source was subsequently published to `main` on 2026-11-10. The exact source commit, successful hosted CI run and local wheel hash are recorded in the [publication review](publication-review-2026-11-10.md).
+
 ## Package-name checks
 
 Both official PyPI endpoints returned HTTP 404 on 2026-11-03:

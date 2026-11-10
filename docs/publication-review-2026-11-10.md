@@ -21,4 +21,11 @@ Publication preparation also adds clone instructions and package project links, 
 
 ## Publication state
 
-The destination was confirmed public and empty, and configured as local `origin`. On 2026-11-10, the owner confirmed copyright ownership of the reused fixture material and authorized MIT distribution. The fixture metadata, README and contribution/source records now consistently state MIT while preserving attribution. See [source provenance](source-provenance.md). Source push and hosted CI results will be recorded after completion.
+On 2026-11-10, the owner confirmed copyright ownership of the reused fixture material and authorized MIT distribution. The fixture metadata, README and contribution/source records now consistently state MIT while preserving attribution. See [source provenance](source-provenance.md).
+
+Source commit [`abe1348`](https://github.com/andyandymike/harmony-automation-agent/commit/abe134891dfb2750c8747b971d3088a120740f6e) was pushed to the public repository's `main` branch on 2026-11-10. GitHub recognizes its MIT license. The [first hosted CI run](https://github.com/andyandymike/harmony-automation-agent/actions/runs/42756499744) completed successfully with all six jobs passing:
+
+- Windows and Ubuntu unit tests on Python 3.10 and 3.12: four jobs.
+- Windows and Ubuntu offline package build/install checks: two jobs, with reports and wheels retained as workflow artifacts.
+
+These results belong to the source commit above. Later documentation updates do not change that evidence's revision. GitHub source publication is complete; no GitHub Release or PyPI publication was performed.

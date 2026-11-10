@@ -1,6 +1,6 @@
 # 0.1.0a2 release readiness
 
-Updated: 2026-11-10. This is an alpha candidate being prepared for source publication, not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
+Updated: 2026-11-10. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 
 Status meanings: **done** has a recorded result; **partial** has useful work completed but a named acceptance gap; **pending** has no completed result. A previous-version result is historical evidence, not acceptance of new code.
 
@@ -11,7 +11,7 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 | Agent acceptance and benchmark | done for the two recorded internal batches | Two fresh agents completed ten specified tasks; final state and recorded fresh observations were checked independently; a simulated lost receipt led to observation rather than a repeated press | Single fixture/emulator evidence; output token use was not available. First-run wrapper and PowerShell decoding issues are retained in the report |
 | Installation and compatibility | done for recorded local check | The 0.1.0a2 offline release checker completed 14 checks using a new venv; [compatibility matrix](compatibility.md) exists | The frozen artifact's final report is authoritative; clean host/SDK and physical-device validation remain separate checks |
 | External human trial | pending | Trial design is documented in the project plan | At least three independent users, with at least two completing the core flow without maintainer repair; no invitations have been sent |
-| Open-source release preparation | partial | Root and fixture licenses unified under MIT with owner authorization; contribution guide, issue template, CI definition, source attribution and package-name lookup; public GitHub source destination selected | Complete source push and hosted CI; retain source revision/build hashes; no package-registry release has been made |
+| Open-source release preparation | done for GitHub alpha source | Root and fixture licenses unified under MIT with owner authorization; source pushed to public `main`; all six hosted CI jobs passed; revision and build hash in the [publication review](publication-review-2026-11-10.md) | Stable-release trials remain separate; no GitHub Release or package-registry release has been made |
 
 ## Evidence map
 
@@ -37,4 +37,4 @@ The candidate should be built with a pinned source revision and tested in a new 
 
 For a machine-readable check, use `python scripts/release-check.py --help` and the options supported by that revision. The release checker must use the selected local toolchain, avoid implicit registry dependency downloads in offline mode, and report skipped or unavailable checks explicitly.
 
-For alpha source publication, record current offline tests, package/version metadata, JSON/error examples, package-content inspection, quick starts, known limitations and source attribution. Tie device claims to their recorded source and environment; source publication does not establish new device acceptance. External human trials remain a separate stable-release acceptance item. Hosted CI and public distribution stay pending until they actually run.
+For alpha source publication, record current offline tests, package/version metadata, JSON/error examples, package-content inspection, quick starts, known limitations and source attribution. Tie device claims to their recorded source and environment; source publication does not establish new device acceptance. External human trials remain a separate stable-release acceptance item. The [publication review](publication-review-2026-11-10.md) records the completed GitHub source push and hosted CI; package-registry publication remains unperformed.
