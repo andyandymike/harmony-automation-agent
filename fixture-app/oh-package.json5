@@ -2,7 +2,8 @@
   "modelVersion": "6.1.1",
   "name": "harmony-automation-fixture",
   "version": "1.0.0",
-  "description": "Deterministic ArkTS UI fixture for Appium E2E tests",
+  "description": "Deterministic ArkTS UI fixture for Harmony Automation Agent",
+  "license": "MIT",
   "dependencies": {},
   "devDependencies": {}
 }

@@ -5,6 +5,6 @@
   "description": "Harmony automation fixture entry module",
   "main": "",
   "author": "andyandymike",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {}
 }

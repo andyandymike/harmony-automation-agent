@@ -49,7 +49,7 @@ The workflow definition is not an execution result. Record the actual CI run or 
 
 Use the bug template with a minimal reproduction. Review evidence before sharing; automatic redaction cannot guarantee that every screenshot is safe to publish.
 
-Contributions to the original project implementation are provided under the project's [MIT License](LICENSE). Preserve third-party copyright and permission notices when adding reused code, and record the source/version. Do not assume a public repository grants redistribution permission. The fixture source and outstanding licensing boundary are recorded in [source provenance](docs/source-provenance.md). Official SDK binaries, emulator images, and personal signing assets are not project source.
+Contributions are provided under the project's [MIT License](LICENSE), including the fixture scaffold and resources. Preserve third-party copyright and permission notices when adding reused code, and record the source/version. Do not assume a public repository grants redistribution permission. The fixture's source and the owner's MIT authorization are recorded in [source provenance](docs/source-provenance.md). Official SDK binaries, emulator images, and personal signing assets are not project source.
 
 Human external trials require independent users following the documented setup. Report how much maintainer help they needed and whether the task was completed. Agent subtask evaluations are useful but are not evidence that a new human user can install and use the project unaided.
 

@@ -213,6 +213,11 @@ class Agent:
             if len(candidates) != 1:
                 raise AgentError("STALE_REF", "The target changed since the referenced frame; observe and select again.")
             node = candidates[0]
+        self._require_actionable(node)
+        return node, observation
+
+    @staticmethod
+    def _require_actionable(node):
         if node.get("visible") is False or node.get("enabled") is False:
             raise AgentError("TARGET_NOT_ACTIONABLE", "The target is hidden or disabled.")
         if not node.get("center") or not node.get("bounds"):
@@ -220,7 +225,6 @@ class Agent:
         b = node["bounds"]
         if b["right"] <= b["left"] or b["bottom"] <= b["top"]:
             raise AgentError("TARGET_NOT_ACTIONABLE", "The target has empty bounds.")
-        return node, observation
 
     @staticmethod
     def _context_signature(observation, node):
@@ -396,6 +400,7 @@ class Agent:
                     if len(candidates) != 1:
                         raise AgentError("SCROLL_CONTAINER_REQUIRED", "Specify a scrollable container when zero or multiple containers are visible.", details={"count": len(candidates)})
                     node = candidates[0]
+                    self._require_actionable(node)
             # The state write must succeed before dispatch. Never restore these refs on failure.
             session["frameValid"] = False
             self.store.save(name, session)

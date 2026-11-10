@@ -17,4 +17,8 @@ Project scaffold and resources derive from the user's
 [harmony-automation fixture](https://github.com/andyandymike/harmony-automation/tree/ddaecb946c59d76648bfbb5ffa6b2273de83272f/fixture-app).
 Index.ets was rewritten for this project. Baseline is HarmonyOS 6.1.1 / API24.
 
+The fixture code, scaffold and resources are covered by the repository's
+[MIT License](../LICENSE). The project owner confirmed ownership and MIT
+distribution authorization on 2026-11-10; the original source attribution is retained.
+
 Build and signing details are in [docs/fixture.md](../docs/fixture.md).

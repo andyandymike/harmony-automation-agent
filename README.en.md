@@ -4,11 +4,11 @@
 
 Observe, operate, and verify HarmonyOS applications from AI coding agents using native HDC / UiTest.
 
-**0.1.0a2 is a local development alpha.** Python 3.10+ is required. The runtime uses the standard library and does not require Appium, a visual model, or a model API key. This package has not been published to PyPI. See [the current validation report](docs/validation-alpha2.md), [CHANGELOG](CHANGELOG.md), [compatibility](docs/compatibility.md), and [release readiness](docs/release-readiness.md) for version-specific evidence.
+**0.1.0a2 is a development alpha.** Python 3.10+ is required. The runtime uses the standard library and does not require Appium, a visual model, or a model API key. This package has not been published to PyPI. See [the publication review](docs/publication-review-2026-11-10.md), [the recorded device validation](docs/validation-alpha2.md), [CHANGELOG](CHANGELOG.md), [compatibility](docs/compatibility.md), and [release readiness](docs/release-readiness.md) for version-specific evidence.
 
 On 2026-11-03, after configuring Xiaoyi basic mode and its 26-key layout on the dedicated API24 test emulator, Chinese fill, replacement and clearing passed readback on both real TextInputs: six operations in total, about 4.17–6.66 seconds each. These are functional samples for particular controls, not a general success-rate estimate. Input remains experimental; complete agent-task and candidate checks are reported separately.
 
-The current offline suite passed **147 tests**. Device smoke including native input recorded **40 passed steps, 0 failures and 1 skip** in 85.641 seconds. The separately recorded standard-field input checks do not replace the skipped independent IME suite. Consult [the current validation report](docs/validation-alpha2.md) for completed independent-agent task counts, recovery behavior, installation checks and final package metadata.
+The 2026-11-10 publication check passed **150 offline tests**, including new scroll-target validation regressions. Device smoke recorded on 2026-11-03 passed **40 steps, with 0 failures and 1 skip**, in 85.641 seconds; it has not been rerun after the current code change. The separately recorded standard-field input checks do not replace the skipped independent IME suite. See [the alpha2 validation report](docs/validation-alpha2.md) for historical device, agent and package results, and [the publication review](docs/publication-review-2026-11-10.md) for the new offline checks and package information.
 
 Historical alpha1 results, including 112 offline tests, 27 device steps and the first-run input block, remain in [the alpha1 validation report](docs/validation-alpha.md). They are not counted as new alpha2 results.
 
@@ -18,9 +18,11 @@ Historical alpha1 results, including 112 offline tests, 27 device steps and the 
 - Start and authorize a HarmonyOS device or emulator before using the CLI.
 - Install the application you intend to operate. Application building, signing, and device authorization remain separate steps.
 
-Use a separate environment from the repository root:
+Clone the source, then create a separate environment from the repository root:
 
 ```sh
+git clone https://github.com/andyandymike/harmony-automation-agent.git
+cd harmony-automation-agent
 python -m venv .venv
 .venv/bin/python -m pip install .
 .venv/bin/harmony-agent help
@@ -122,7 +124,7 @@ Action commands also accept `--expect <JSON>`. Request files avoid shell quoting
 
 ## Execution contract
 
-See [Agent usage](docs/agent-usage.md) for a compact calling workflow and the [Agent operating guide](docs/agent-operating-guide.md) for the task entry point. These are ordinary project guides. Personal Skill installation did not complete in this environment, so they must not be described as an installed callable Skill.
+See [Agent usage](docs/agent-usage.md) for a compact calling workflow and the [Agent operating guide](docs/agent-operating-guide.md) for the task entry point. The project provides CLI calling guides; an installable Agent Skill is not included yet.
 
 - JSON mode writes only JSON to stdout; diagnostic logs use stderr. Errors exit nonzero.
 - Inspect the separate assertion result before declaring a business outcome verified. An action acknowledgment is not a passed assertion.
@@ -150,4 +152,4 @@ The initial scope is a native CLI. MCP, visual assertions, workflow recording, a
 
 New CLI and runtime code is implemented for this project with design references to Playwright CLI, agent-device, Midscene, and OpenHarmony public interfaces. The fixture extends the project owner's [harmony-automation fixture](https://github.com/andyandymike/harmony-automation/tree/ddaecb946c59d76648bfbb5ffa6b2273de83272f/fixture-app). SDK binaries, emulator images, and signing materials are not included.
 
-The original implementation uses the [MIT License](LICENSE). Preserve the reused fixture scaffold/resource attribution and confirm the project owner's licensing intent before public redistribution. A public source repository does not automatically grant MIT permission for every asset. See [source provenance](docs/source-provenance.md).
+The project code, documentation, fixture scaffold and resources use the [MIT License](LICENSE). The project owner has confirmed ownership of the reused materials and authorized their distribution under MIT. Their original attribution is retained in [source provenance](docs/source-provenance.md).

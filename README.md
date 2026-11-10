@@ -4,11 +4,11 @@
 
 让 AI 编程助手通过原生 HDC / UiTest **观察、操作和验证鸿蒙应用**。
 
-当前版本为 **0.1.0a2，本地开发 alpha**。使用 Python 3.10+，运行时仅依赖标准库；基础流程不需要 Appium、视觉模型或模型 API key。尚未发布到 PyPI。请结合 [本版验证报告](docs/validation-alpha2.md)、[CHANGELOG](CHANGELOG.md)、[兼容性矩阵](docs/compatibility.md) 和 [发布准备状态](docs/release-readiness.md) 查看实际结果。
+当前版本为 **0.1.0a2，开发 alpha**。使用 Python 3.10+，运行时仅依赖标准库；基础流程不需要 Appium、视觉模型或模型 API key。尚未发布到 PyPI。请结合 [开源前检查](docs/publication-review-2026-11-10.md)、[本版设备验证报告](docs/validation-alpha2.md)、[CHANGELOG](CHANGELOG.md)、[兼容性矩阵](docs/compatibility.md) 和 [发布准备状态](docs/release-readiness.md) 查看实际结果。
 
 2026-11-03，在专用 API24 测试模拟器完成小艺输入法基础模式及 26 键布局初始化后，普通和 native 两个真实 TextInput 的中文写入、替换、清空共 6 次读回均通过。单次约 4.17–6.66 秒；这些是特定控件的功能样本，不是通用成功率。输入仍标为实验性，完整 Agent 任务与候选版验证分别记录。
 
-本版离线回归 **147 项通过**；含 native 输入的设备 smoke 为 **40 步通过、0 失败、1 项跳过**，耗时 85.641 秒。普通输入框的单独检查已记录，不能将它替代 smoke 中跳过的独立 IME 套件。独立 Agent 任务的完成数量、恢复行为、安装检查与最终包信息以 [本版验证报告](docs/validation-alpha2.md) 为准。
+2026-11-10 开源前检查的离线回归 **150 项通过**，包含新增的滚动目标校验回归。2026-11-03 记录的设备 smoke 为 **40 步通过、0 失败、1 项跳过**，耗时 85.641 秒；本次代码修改后未重跑设备流程。普通输入框的单独检查已记录，不能将它替代 smoke 中跳过的独立 IME 套件。历史设备、Agent 任务与构建信息见 [本版验证报告](docs/validation-alpha2.md)，本次离线验证与包信息见 [开源前检查](docs/publication-review-2026-11-10.md)。
 
 上一版 0.1.0a1 的 112 项离线测试、27 步设备流程及输入阻塞记录保留在 [历史验证报告](docs/validation-alpha.md)，不作为 alpha2 的新测试结果。
 
@@ -34,9 +34,11 @@
 
 ## 安装与环境检查
 
-建议在本项目根目录创建独立环境：
+先获取源码，再在项目根目录创建独立环境：
 
 ```powershell
+git clone https://github.com/andyandymike/harmony-automation-agent.git
+cd harmony-automation-agent
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
 .\.venv\Scripts\harmony-agent.exe help
@@ -152,7 +154,7 @@ harmony-agent schema --json
 
 ## Agent 使用约定
 
-面向外层 Agent 的简短调用流程见 [Agent usage](docs/agent-usage.md)，操作入口见 [Agent operating guide](docs/agent-operating-guide.md)。这些是普通项目指南；本轮个人 Skill 安装未完成，不能将它们视为已经安装的可调用 Skill。
+面向外层 Agent 的简短调用流程见 [Agent usage](docs/agent-usage.md)，操作入口见 [Agent operating guide](docs/agent-operating-guide.md)。项目提供 CLI 调用指南，暂未附带可安装的 Agent Skill。
 
 - `--json` 模式的 stdout 只输出 JSON；诊断日志写入 stderr。错误使用非零退出码。
 - `success` 表达命令结果；业务结果是否被证明，需要看独立的断言结果。未请求断言时不能声称业务验证通过。
@@ -181,4 +183,4 @@ python -m unittest discover -s tests -v
 
 fixture 工程基于项目所有者的 [harmony-automation](https://github.com/andyandymike/harmony-automation/tree/ddaecb946c59d76648bfbb5ffa6b2273de83272f/fixture-app) 进行扩展，来源与构建边界见 [fixture 文档](docs/fixture.md)。官方 SDK、模拟器镜像与签名材料不随源码发布。
 
-本项目原创实现采用 [MIT License](LICENSE)。复用的 fixture scaffold/resources 需要保留来源，并在公开分发前确认项目所有者的许可意图；现有来源仓库公开不等于所有材料已获得 MIT 授权。详见 [来源与分发边界](docs/source-provenance.md)。
+本项目代码、文档及 fixture 脚手架和资源统一采用 [MIT License](LICENSE)。项目所有者已确认复用材料的版权归属及 MIT 开源授权，原始来源记录保留在 [来源与分发边界](docs/source-provenance.md)。

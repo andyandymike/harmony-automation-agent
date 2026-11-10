@@ -11,3 +11,14 @@ dist/
 node_modules/
 .hvigor/
 .ohpm/
+oh_modules/
+.idea/
+local.properties
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.keystore
+*.jks

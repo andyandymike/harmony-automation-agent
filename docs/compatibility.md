@@ -24,7 +24,7 @@ The current device, agent and package results are in [validation-alpha2.md](vali
 | Press, basic container scroll, deterministic wait, screenshot | Emulator-validated scenarios | Not a guarantee for virtual lists, nested scrolling or arbitrary apps |
 | `fill` / Unicode replacement / clearing | Experimental; recorded API24 cases passed | Alpha1 was blocked before IME setup; alpha2 passed six standard/native-field readbacks after setup |
 | Window metadata / boot identity | Experimental / device-dependent | Metadata can be unknown; the tested device did not expose a readable boot identity |
-| Visual grounding, model planning, event watch, automatic recovery, MCP | Not implemented in alpha1 | Keep optional roadmap work separate from the native CLI contract |
+| Visual grounding, model planning, event watch, automatic recovery, MCP | Not implemented in alpha2 | Keep optional roadmap work separate from the native CLI contract |
 
 `doctor` and `capabilities` inspect tools and device help. A command listed in help is not proof that every control supports its semantics. The currently configured device and its actual UI remain the source for operation-time checks.
 

@@ -1,8 +1,16 @@
 # Changelog
 
+## Source publication preparation — 2026-11-10
+
+- Fixed automatic scroll-container selection bypassing the existing actionability checks. A disabled or zero-area container now fails with `TARGET_NOT_ACTIONABLE` before dispatch, matching an explicitly selected target.
+- Added regression coverage for rejected containers and single-dispatch scrolling in all four directions. The offline suite now passes 150 tests; no device execution was performed for this change.
+- Added repository installation steps and package project links, expanded private/local-file ignore rules, and updated public-facing alpha documentation.
+- Unified the fixture scaffold/resources and module metadata under MIT after the owner's explicit copyright and licensing confirmation; retained the original source attribution.
+- Selected `andyandymike/harmony-automation-agent` for GitHub source publication. See the [publication review](docs/publication-review-2026-11-10.md) for current checks and outstanding publication items. The package version remains `0.1.0a2`; the earlier frozen wheel below is historical evidence for different source bytes.
+
 ## 0.1.0a2 — local development candidate
 
-Prepared on 2026-11-03. This candidate has not been published to GitHub or a package registry. Candidate results must be recorded separately from the historical alpha1 results below.
+Prepared on 2026-11-03, when this candidate had not been published to GitHub or a package registry. These recorded candidate results are separate from subsequent publication checks and the historical alpha1 results below.
 
 ### Documentation and distribution preparation
 

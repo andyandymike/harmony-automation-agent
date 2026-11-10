@@ -222,6 +222,43 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(error.dispatched, "no")
         self.assertEqual(self.transport.mutations, [])
 
+    def test_scroll_rejects_disabled_container_before_dispatch(self):
+        tree = self.transport.node("fixture.list", "List", "", "[0,0][400,800]",
+                                   scrollable="true", enabled="false")
+        with patch.object(self.transport, "capture_layout", return_value=tree):
+            for target in (None, "id=fixture.list"):
+                with self.subTest(target=target):
+                    params = {} if target is None else {"target": target}
+                    error = self.assert_error("TARGET_NOT_ACTIONABLE", lambda: self.execute("scroll", direction="down", **params))
+                    self.assertEqual(error.dispatched, "no")
+                    self.assertEqual(error.details["action"], {"status": "not_dispatched", "dispatched": "no"})
+                    self.assertEqual(self.transport.mutations, [])
+
+    def test_scroll_rejects_zero_area_container_before_dispatch(self):
+        for bounds in ("[10,20][10,800]", "[10,20][400,20]"):
+            tree = self.transport.node("fixture.list", "List", "", bounds, scrollable="true")
+            with patch.object(self.transport, "capture_layout", return_value=tree):
+                for target in (None, "id=fixture.list"):
+                    with self.subTest(bounds=bounds, target=target):
+                        params = {} if target is None else {"target": target}
+                        error = self.assert_error("TARGET_NOT_ACTIONABLE", lambda: self.execute("scroll", direction="down", **params))
+                        self.assertEqual(error.dispatched, "no")
+                        self.assertEqual(self.transport.mutations, [])
+
+    def test_scroll_valid_container_dispatches_once_in_requested_direction(self):
+        tree = self.transport.node("fixture.list", "List", "", "[0,0][400,800]", scrollable="true")
+        coordinates = {"down": (200, 600, 200, 200), "up": (200, 200, 200, 600),
+                       "right": (300, 400, 100, 400), "left": (100, 400, 300, 400)}
+        with patch.object(self.transport, "capture_layout", return_value=tree):
+            for target in (None, "id=fixture.list"):
+                for direction, expected in coordinates.items():
+                    with self.subTest(target=target, direction=direction):
+                        self.transport.mutations.clear()
+                        params = {} if target is None else {"target": target}
+                        result = self.execute("scroll", direction=direction, **params)
+                        self.assertEqual(result["action"], {"status": "completed", "dispatched": "acknowledged"})
+                        self.assertEqual(self.transport.mutations, [("swipe", self.transport.serial, expected)])
+
     def test_ref_is_invalidated_on_disk_before_dispatch(self):
         old_ref = self.current_ref()
         state_during_dispatch = []

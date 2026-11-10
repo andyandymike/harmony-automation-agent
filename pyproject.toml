@@ -11,6 +11,11 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/andyandymike/harmony-automation-agent"
+Issues = "https://github.com/andyandymike/harmony-automation-agent/issues"
+Documentation = "https://github.com/andyandymike/harmony-automation-agent#readme"
+
 [project.scripts]
 harmony-agent = "harmony_agent.cli:main"
 
