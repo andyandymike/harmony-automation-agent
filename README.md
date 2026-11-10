@@ -4,7 +4,9 @@
 
 Observe, operate, and verify HarmonyOS applications from AI coding agents using native HDC / UiTest.
 
-**0.1.0a2 is a development alpha.** Python 3.10+ is required. The runtime uses the standard library and does not require Appium, a visual model, or a model API key. This package has not been published to PyPI. See [the publication review](docs/publication-review-2026-11-10.md), [the recorded device validation](docs/validation-alpha2.md), [CHANGELOG](CHANGELOG.md), [compatibility](docs/compatibility.md), and [release readiness](docs/release-readiness.md) for version-specific evidence.
+**0.1.0a3 is an unreleased development alpha.** Python 3.10+ is required. The runtime uses the standard library and does not require Appium, a visual model, or a model API key. This package has not been published to PyPI. See [the core-fix validation](docs/validation-alpha3.md), [CHANGELOG](CHANGELOG.md), [compatibility](docs/compatibility.md), and [release readiness](docs/release-readiness.md) for current evidence. Earlier source publication and device results are recorded separately.
+
+Alpha3 passed 187 offline tests and 14 isolated build/install checks. Its device smoke is NOT_RUN because no device was connected. The counts and device results below describe the earlier alpha2 source.
 
 On 2026-11-03, after configuring Xiaoyi basic mode and its 26-key layout on the dedicated API24 test emulator, Chinese fill, replacement and clearing passed readback on both real TextInputs: six operations in total, about 4.17–6.66 seconds each. These are functional samples for particular controls, not a general success-rate estimate. Input remains experimental; complete agent-task and candidate checks are reported separately.
 
@@ -31,7 +33,7 @@ python -m venv .venv
 On Windows use `.venv\Scripts\python.exe` and `.venv\Scripts\harmony-agent.exe`. Subsequent examples use `harmony-agent` as shorthand for the executable in that environment. The build may need setuptools; the installed runtime has no third-party Python dependencies. If the current candidate wheel already exists, install it offline with:
 
 ```sh
-.venv/bin/python -m pip install --no-index --no-deps dist/harmony_automation_agent-0.1.0a2-py3-none-any.whl
+.venv/bin/python -m pip install --no-index --no-deps dist/harmony_automation_agent-0.1.0a3-py3-none-any.whl
 ```
 
 Use the wheel built from the candidate source; do not substitute a previous version when checking acceptance. For source-only use, set `PYTHONPATH=src` and run `python -m harmony_agent` instead of `harmony-agent`.

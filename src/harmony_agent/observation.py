@@ -82,6 +82,14 @@ def _fact(node):
             or any(node.get(k) is True for k in ("checked", "selected", "focused")))
 
 
+def _node_identity(node):
+    context = [node.get(k) for k in ("bundleName", "hostWindowId", "displayId")]
+    for key in ("id", "uniqueId", "accessibilityId"):
+        if node.get(key):
+            return json.dumps([key, *context, node[key]], ensure_ascii=False, separators=(",", ":"))
+    return None
+
+
 def _scope(scope):
     if scope is None or scope in ("screen", "all"):
         return {"kind": "screen"}
@@ -192,15 +200,9 @@ def normalize_layout(raw, frame_id, *, scope=None):
         nodes = [n for n in nodes if n["ref"] in selected]
     # Resource ids are context scoped. Duplicate ids never become fake stable
     # identities by appending an arbitrary occurrence index.
-    def identity(node):
-        context = [node.get(k) for k in ("bundleName", "hostWindowId", "displayId")]
-        for key in ("id", "uniqueId", "accessibilityId"):
-            if node.get(key):
-                return json.dumps([key, *context, node[key]], ensure_ascii=False, separators=(",", ":"))
-        return None
-    counts = Counter(identity(n) for n in nodes if identity(n) is not None)
+    counts = Counter(_node_identity(n) for n in nodes if _node_identity(n) is not None)
     for node in nodes:
-        candidate = identity(node)
+        candidate = _node_identity(node)
         node["identity"] = candidate if candidate and counts[candidate] == 1 else None
     return {"frameId": frame_id, "nodes": nodes,
             "controls": [n for n in nodes if _actionable(n)],
@@ -210,7 +212,8 @@ def normalize_layout(raw, frame_id, *, scope=None):
                         "totalNodes": len(nodes), "returnedNodes": len(nodes)}}
 
 
-def _selector(selector):
+def parse_selector(selector):
+    """Return a validated selector with canonical field names."""
     if isinstance(selector, str):
         if selector.startswith("@"):
             return {"ref": selector}
@@ -221,9 +224,9 @@ def _selector(selector):
     if not isinstance(selector, dict) or not selector:
         raise AgentError("INVALID_SELECTOR", "A nonempty selector is required.")
     if selector.get("kind") == "selector" and set(selector) == {"kind", "selector"}:
-        return _selector(selector["selector"])
+        return parse_selector(selector["selector"])
     if selector.get("kind") == "ref" and set(selector) == {"kind", "ref"}:
-        return {"ref": selector["ref"]}
+        return parse_selector({"ref": selector["ref"]})
     parsed = {}
     for key, value in selector.items():
         name = ALIASES.get(key, key)
@@ -244,15 +247,27 @@ def _selector(selector):
     return parsed
 
 
+_selector = parse_selector
+
+
+def selector_uses_refs(selector):
+    """Whether a selector depends on refs from one observation frame."""
+    parsed = parse_selector(selector)
+    return (bool(parsed.get("ref")) or parsed.get("parent") is not None
+            or parsed.get("within") is not None and selector_uses_refs(parsed["within"]))
+
+
 def select_nodes(observation, selector):
     """Select exact matches; within restricts matches to descendants of a container."""
-    parsed = _selector(selector)
-    ref = parsed.get("ref")
-    if ref is not None:
+    parsed = parse_selector(selector)
+    for field in ("ref", "parent"):
+        ref = parsed.get(field)
+        if ref is None:
+            continue
         match = _REF.fullmatch(ref)
         if not match or match.group(1) != observation.get("frameId"):
             raise AgentError("STALE_REF", "The reference does not belong to the current frame.",
-                             details={"frameId": observation.get("frameId"), "ref": ref})
+                             details={"frameId": observation.get("frameId"), "ref": ref, "field": field})
     within = parsed.pop("within", None)
     nodes = observation.get("nodes", [])
     matches = [n for n in nodes if all(n.get(k) == v for k, v in parsed.items())]
@@ -293,8 +308,15 @@ def diff_observations(previous, current):
     if any(not o.get("quality", {}).get("complete", False) or o.get("quality", {}).get("truncated", False)
            for o in (previous, current)):
         return {"comparable": False, "reason": "incomplete-observation", "added": [], "removed": [], "changed": []}
-    before = {n["identity"]: n for n in previous["nodes"] if n.get("identity")}
-    after = {n["identity"]: n for n in current["nodes"] if n.get("identity")}
+    identity_counts = [Counter(_node_identity(n) for n in o["nodes"]
+                               if _node_identity(n) is not None) for o in (previous, current)]
+    ambiguous = {identity for counts in identity_counts for identity, count in counts.items() if count > 1}
+    # An identity becoming ambiguous is not evidence that its old node vanished.
+    # Exclude that identity from both sides, including the formerly unique node.
+    before = {n["identity"]: n for n in previous["nodes"]
+              if n.get("identity") and n["identity"] not in ambiguous}
+    after = {n["identity"]: n for n in current["nodes"]
+             if n.get("identity") and n["identity"] not in ambiguous}
     changed = []
     for identity in before.keys() & after.keys():
         old, new = before[identity], after[identity]
@@ -302,13 +324,51 @@ def diff_observations(previous, current):
         if fields:
             changed.append({"identity": identity, "id": new.get("id"), "ref": new["ref"],
                             "before": {k: old.get(k) for k in fields}, "after": {k: new.get(k) for k in fields}})
-    unknown_before = sum(n.get("identity") is None for n in previous["nodes"])
-    unknown_after = sum(n.get("identity") is None for n in current["nodes"])
+    unknown_before = sum(not n.get("identity") or n["identity"] in ambiguous for n in previous["nodes"])
+    unknown_after = sum(not n.get("identity") or n["identity"] in ambiguous for n in current["nodes"])
     return {"comparable": True, "complete": not (unknown_before or unknown_after),
             "added": [_summary(after[k]) for k in sorted(after.keys() - before.keys())],
             "removed": [_summary(before[k]) for k in sorted(before.keys() - after.keys())],
             "changed": sorted(changed, key=lambda c: c["identity"]),
-            "unmatched": {"previous": unknown_before, "current": unknown_after}}
+            "unmatched": {"previous": unknown_before, "current": unknown_after},
+            "ambiguous": {"identities": len(ambiguous),
+                          "previous": sum(identity_counts[0][key] for key in ambiguous),
+                          "current": sum(identity_counts[1][key] for key in ambiguous)}}
+
+
+def project_diff(diff, previous_public, current_public, *, max_changes):
+    """Limit a full diff to displayed refs and one shared change budget.
+
+    Added/changed refs belong to the current frame; removed refs belong to the
+    previous frame. Filtering and budget omission are counted separately:
+    total = matched + filtered, matched = returned + omitted. A filtered or
+    truncated diff cannot claim to describe all changes in the full frames.
+    """
+    if type(max_changes) is not int or max_changes < 1:
+        raise AgentError("INVALID_ARGUMENT", "max_changes must be a positive integer.")
+    previous_refs = {n["ref"] for n in previous_public.get("nodes", [])}
+    current_refs = {n["ref"] for n in current_public.get("nodes", [])}
+    out = deepcopy(diff)
+    total = matched = returned = 0
+    for kind in ("added", "removed", "changed"):
+        changes = diff.get(kind, [])
+        allowed_refs = previous_refs if kind == "removed" else current_refs
+        eligible = [change for change in changes if change.get("ref") in allowed_refs]
+        selected = eligible[:max_changes - returned]
+        out[kind] = deepcopy(selected)
+        total += len(changes)
+        matched += len(eligible)
+        returned += len(selected)
+    omitted = matched - returned
+    filtered = total - matched
+    complete = (diff.get("comparable") is True and diff.get("complete") is True
+                and not omitted and not filtered)
+    out.update(previousFrameId=previous_public.get("frameId"),
+               currentFrameId=current_public.get("frameId"), complete=complete,
+               quality={"total": total, "matched": matched, "returned": returned,
+                        "omitted": omitted, "filtered": filtered,
+                        "truncated": bool(omitted), "complete": complete})
+    return out
 
 
 def project_observation(observation, *, max_nodes=80, interactive=False, query=None):

@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-10",
+  "timezone": "Asia/Tokyo",
+  "version": "0.1.0a3",
+  "baseRevision": "72405a4",
+  "validation": "offline-only",
+  "host": {
+    "os": "Windows",
+    "python": "3.12.10"
+  },
+  "unitTests": {
+    "run": 187,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "elapsedSeconds": 4.016,
+    "passed": true
+  },
+  "environment": {
+    "hdcVersion": "3.2.0d",
+    "ready": false,
+    "connectedTargets": 0
+  },
+  "deviceSmoke": {
+    "status": "NOT_RUN",
+    "reason": "No connected device or emulator was available."
+  },
+  "sourceSha256": {
+    "pyproject.toml": "4184836f91da2e1f4edf3c64abecab910e87b0e74aa59d0398c5914b945a3e95",
+    "src/harmony_agent/__init__.py": "1c1e08bef0c9bca0dbe4b8edab28df8813df55c3a5e66ab91da132f6a141a40d",
+    "src/harmony_agent/__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+    "src/harmony_agent/cli.py": "409fc16f8c9406d29981f05a6a45831eb5027d24bb0151127648921d1119efe6",
+    "src/harmony_agent/core.py": "46dc176ab7d97085a8a8f4b296fc093b99cb24dd5f4b92151458bd0450382d25",
+    "src/harmony_agent/errors.py": "50f9a8083d691c1e1607464af822a5a07f57cef9f3c5d57dcc38c03152a5e3a0",
+    "src/harmony_agent/observation.py": "672d98a1acd952bc9a183ef3ec1c9d81b8a49c593bd7decd2ff64c51f213a494",
+    "src/harmony_agent/schema.py": "12a20602899258004fd3aca461af3065be814cfb453ed0f0a75ea9ea3e13b3e1",
+    "src/harmony_agent/state.py": "b4a77fe68f2e673eaa1eb1944071ece1ffda7e9a5ce51325802c77420909ff1a",
+    "src/harmony_agent/transport.py": "1b7f6834be0e5c746112090e75361729a3cc9df46290f8065b8c8e643cf7079c",
+    "tests/test_agent_eval_cli.py": "acf7d975aa686ba49b520ba465306c86c5b7a380ca5d48c8ad32603c383f1f91",
+    "tests/test_cli.py": "87746df8913ab17a4b41aaf1b2cf85f3a114c4fa423e489c7b7f41397500646b",
+    "tests/test_core.py": "265e91f8692a2c1b187b0532cdf95191612f4e86f815d98a4d678ca358102378",
+    "tests/test_observation.py": "2e699e96c8ecd6b3358e85b4f33cd43b8b84d1742696527adeb76915a652fc05",
+    "tests/test_release_check.py": "54626cc91aab1454271d4c1eadb54d9d926a8493a4eeab159c536aeaaba610a8",
+    "tests/test_review_regressions.py": "945466bb8c73a10aa62de9a19bd2643f52da06c18e91a05f6fd5aac363bd0dc0",
+    "tests/test_state.py": "fe74300275e6df5b1ff1a9f516c1ddb0aba9c135ec018f3530346a18105211db",
+    "tests/test_transport.py": "88385ff77d525f9141fc1ff41501f1ae2f4ac745f1995f32f35eb3ed41438fb2"
+  }
+}

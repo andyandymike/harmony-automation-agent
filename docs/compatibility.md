@@ -4,6 +4,8 @@ Updated: 2026-11-10. Package version, request `schemaVersion`, fixture contract,
 
 ## Tested combinations
 
+Current source is the unreleased `0.1.0a3` candidate. Its [validation record](validation-alpha3.md) separates current offline/package results from the alpha2 device/hosted-CI history below. No device was connected during the alpha3 environment check.
+
 | Combination | Recorded evidence | Current boundary |
 | --- | --- | --- |
 | Windows / Python 3.12.10 / HDC 3.2.0d / UiTest 6.0.2.3 / HarmonyOS 6.1.1 API24 emulator | 0.1.0a1: 112 offline tests; 27 device-smoke steps passed, 0 failed, 2 input checks skipped | Local alpha coverage for the recorded fixture scenarios; input and alpha2 changes need their own results |

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0a3 — unreleased core fixes, 2026-11-10
+
+- Reject frame-dependent `wait`/`expect` selectors before dispatch, including parent references and nested `within`. The request schema now describes stable condition selectors separately.
+- Rebind current-frame target references against a fresh observation and recheck every selector predicate. Preserve valid parent/within reference targets; reject stale or changed conditions.
+- Respect explicit `editable=false` before any input preparation. Retain the existing automatic-scroll actionability fix and its tests.
+- Limit public diffs to displayed nodes and one shared change budget; expose filtering, omissions, completeness and both frame IDs. Ambiguous duplicate identities no longer imply confirmed additions/removals.
+- Allow local `detach` recovery of damaged sessions while retaining artifacts. Distinguish read I/O failures from corrupt data, validate persisted frames, and reject Windows reserved session names.
+- Preserve operation IDs and acknowledged action details if saving invalidated refs, collecting evidence or writing traces also fails.
+- Keep package version separate from alpha2's published source and historical device results. Current offline/package checks and unavailable-device status are in [the alpha3 validation record](docs/validation-alpha3.md).
+
 ## Portable Skill delivery — 2026-11-10
 
 - Added the complete `skills/harmony-agent/` package, including frontmatter, workflow, request/outcome references, Agent metadata and MIT license. Existing guide URLs forward to the maintained Skill resources.

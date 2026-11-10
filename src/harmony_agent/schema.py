@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from . import SCHEMA_VERSION, DEFAULT_INPUT_TIMEOUT_MS
 from .errors import AgentError
+from .observation import selector_uses_refs
 
 
 PROPERTIES = ("text", "visible", "enabled", "checked", "selected", "focused")
@@ -24,7 +25,7 @@ FIELDS = {
     "ability": {"kind": "string", "help": "Ability name to launch."},
     "target": {"kind": "selector", "help": "Exact selector, for example id=login, text=Submit, or @ref."},
     "text": {"kind": "text", "help": "Text to find or input; an empty string clears an input."},
-    "expect": {"kind": "expect", "help": "JSON condition: selector, property, equals, optional timeoutMs."},
+    "expect": {"kind": "expect", "help": "JSON condition: stable selector, property, equals, optional timeoutMs. No frame refs."},
     "timeout_ms": {"kind": "integer", "minimum": 1, "maximum": 60000, "default": 5000,
                    "help": "Condition timeout in milliseconds (1-60000; default: 5000)."},
     "max_nodes": {"kind": "integer", "minimum": 1, "maximum": 5000, "default": 80,
@@ -104,11 +105,19 @@ def validate_expect(value):
         invalid("expect requires selector and equals.")
     result = deepcopy(value)
     result["selector"] = validate_selector(value["selector"], path="expect.selector")
+    _validate_stable_selector(result["selector"])
     result.setdefault("property", "text")
     _validate_condition(result["property"], result["equals"], path="expect")
     if "timeoutMs" in result:
         _validate_field("timeout_ms", result["timeoutMs"])
     return result
+
+
+def _validate_stable_selector(selector):
+    if selector_uses_refs(selector):
+        raise AgentError("INVALID_EXPECTATION",
+                         "Conditions require stable selectors; ref and parent frame references are not allowed, including inside within.",
+                         exit_code=2)
 
 
 def _validate_condition(property_name, expected, *, path):
@@ -166,6 +175,7 @@ def validate_params(command, params, *, from_cli=False):
     if command == "find" and not result["text"].strip():
         invalid("find text must not be empty.")
     if command == "wait":
+        _validate_stable_selector(result["target"])
         if from_cli and result["property"] in BOOLEAN_PROPERTIES:
             expected = result["equals"]
             if isinstance(expected, str) and expected.lower() in ("true", "false"):
@@ -215,7 +225,7 @@ def _field_schema(name, command=None):
     elif kind == "scalar":
         result["type"] = ["string", "boolean"]
     elif kind == "selector":
-        result["$ref"] = "#/$defs/selector"
+        result["$ref"] = "#/$defs/stableSelector" if command == "wait" else "#/$defs/selector"
     elif kind == "expect":
         result["$ref"] = "#/$defs/expect"
     if "default" in spec:
@@ -250,14 +260,24 @@ def request_schema(command=None):
     selector_fields.update({name: {"type": "boolean"} for name in SELECTOR_BOOLEAN_FIELDS})
     selector_fields.update({name: {"type": ["string", "integer"]} for name in SELECTOR_ID_FIELDS})
     selector_fields["within"] = {"$ref": "#/$defs/selector"}
+    selector_fields["ref"]["description"] = "Current-frame target reference; not allowed in wait/expect conditions."
+    selector_fields["parent"]["description"] = "Current-frame direct parent reference; use stable within selectors for conditions."
+    stable_fields = {name: deepcopy(spec) for name, spec in selector_fields.items()
+                     if name not in {"ref", "parent"}}
+    stable_fields["within"] = {"$ref": "#/$defs/stableSelector"}
     return {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "Harmony Agent requests",
             "$defs": {
                 "selector": {"oneOf": [{"type": "string", "minLength": 1, "pattern": "\\S"},
                     {"type": "object", "minProperties": 1, "additionalProperties": False, "properties": selector_fields}]},
+                "stableSelector": {"oneOf": [
+                    {"type": "string", "minLength": 1,
+                     "pattern": "^(?!(?:within=)*(?:@|ref=|parent=))\\S"},
+                    {"type": "object", "minProperties": 1, "additionalProperties": False,
+                     "properties": stable_fields}]},
                 "expect": {"type": "object", "additionalProperties": False,
                     "allOf": [condition_rule],
                     "required": ["selector", "equals"], "properties": {
-                        "selector": {"$ref": "#/$defs/selector"},
+                        "selector": {"$ref": "#/$defs/stableSelector"},
                         "property": {"type": "string", "enum": list(PROPERTIES), "default": "text"},
                         "equals": {"type": ["string", "boolean"]},
                         "timeoutMs": _field_schema("timeout_ms")}}},

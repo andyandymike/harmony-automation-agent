@@ -1,4 +1,6 @@
-# 0.1.0a2 release readiness
+# Release readiness
+
+The current `0.1.0a3` core-fix candidate is local and unreleased; see [its validation record](validation-alpha3.md). The alpha2 publication, hosted CI and device evidence below remain specific to that earlier source. Fresh device and hosted CI results are not inferred for alpha3.
 
 Updated: 2026-11-10. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 

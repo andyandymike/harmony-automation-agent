@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -169,6 +170,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(json.loads(out)["data"]["oneOf"]), 2)
         self.assertEqual(err, "")
         self.assertEqual(FakeAgent.calls, [])
+
+    def test_condition_schema_excludes_frame_dependencies_recursively(self):
+        for command in ("wait", "press"):
+            schema = request_schema(command)
+            stable = schema["$defs"]["stableSelector"]
+            text_pattern = stable["oneOf"][0]["pattern"]
+            for value in ("@e1~frame", "ref=@e1~frame", "parent=@e1~frame",
+                          "within=ref=@e1~frame", "within=within=@e1~frame"):
+                self.assertIsNone(re.search(text_pattern, value), value)
+            for value in ("id=counter", "text=Ready", "within=id=form"):
+                self.assertIsNotNone(re.search(text_pattern, value), value)
+            properties = stable["oneOf"][1]["properties"]
+            self.assertNotIn("ref", properties)
+            self.assertNotIn("parent", properties)
+            self.assertEqual(properties["within"], {"$ref": "#/$defs/stableSelector"})
+            self.assertEqual(schema["$defs"]["expect"]["properties"]["selector"],
+                             {"$ref": "#/$defs/stableSelector"})
+            if command == "wait":
+                for variant in schema["oneOf"]:
+                    props = variant["properties"]
+                    fields = props["input"]["properties"] if "input" in props else props
+                    self.assertEqual(fields["target"]["$ref"], "#/$defs/stableSelector")
 
     def test_cancellation_returns_one_json_error_and_never_retries(self):
         FakeAgent.failure = KeyboardInterrupt()

@@ -6,7 +6,8 @@ import unittest
 
 from harmony_agent.errors import AgentError
 from harmony_agent.observation import (
-    normalize_layout, select_nodes, resolve_target, diff_observations, project_observation,
+    normalize_layout, select_nodes, resolve_target, diff_observations, project_observation, project_diff,
+    parse_selector, selector_uses_refs,
 )
 
 
@@ -62,6 +63,34 @@ class ObservationTests(unittest.TestCase):
     def test_unknown_ref_in_current_frame_is_not_found(self):
         self.assertAgentError("TARGET_NOT_FOUND", lambda: resolve_target(self.observation, "@e999~f1"))
 
+    def test_parent_ref_is_valid_only_in_issuing_frame(self):
+        parent = resolve_target(self.observation, "id=row.first")["ref"]
+        selector = {"text": "Submit", "parent": parent}
+        self.assertEqual("first.submit", resolve_target(self.observation, selector)["id"])
+        current = normalize_layout(self.raw, "f2")
+        error = self.assertAgentError("STALE_REF", lambda: select_nodes(current, selector))
+        self.assertEqual("parent", error.details["field"])
+        self.assertAgentError("STALE_REF", lambda: select_nodes(self.observation, {"parent": "broken"}))
+
+    def test_recursive_ref_detection_covers_within_and_parent(self):
+        for selector in ("@e1~f1", {"ref": "@e1~f1"}, {"parent": "@e1~f1"},
+                         {"id": "x", "within": {"text": "row", "within": "@e1~f1"}},
+                         {"id": "x", "within": {"parent": "@e1~f1"}},
+                         {"kind": "selector", "selector": {"parent": "@e1~f1"}}):
+            with self.subTest(selector=selector):
+                self.assertTrue(selector_uses_refs(selector))
+        for selector in ("id=x", {"text": "Submit", "within": {"id": "row.first"}}, {"parent": None}):
+            with self.subTest(selector=selector):
+                self.assertFalse(selector_uses_refs(selector))
+
+    def test_public_selector_parser_canonicalizes_without_mutating_input(self):
+        selector = {"app": "org.example.form", "window": 21, "enabled": "true", "within": {"id": "row.first"}}
+        before = deepcopy(selector)
+        parsed = parse_selector(selector)
+        self.assertEqual({"bundleName": "org.example.form", "hostWindowId": "21", "enabled": True,
+                          "within": {"id": "row.first"}}, parsed)
+        self.assertEqual(before, selector)
+
     def test_counter_survives_interactive_projection(self):
         view = project_observation(self.observation, interactive=True)
         self.assertEqual("Counter: 0", resolve_target(view, "id=fixture.counter")["text"])
@@ -110,6 +139,91 @@ class ObservationTests(unittest.TestCase):
         result = normalize_layout(raw, "f1")
         self.assertTrue(all(n["identity"] is None for n in result["nodes"]))
         self.assertAgentError("TARGET_AMBIGUOUS", lambda: resolve_target(result, "id=same"))
+
+    def test_diff_duplicate_identity_never_invents_addition_or_removal(self):
+        unique = normalize_layout([{"id": "same", "text": "A"}], "f1")
+        duplicate = normalize_layout([{"id": "same", "text": "A"}, {"id": "same", "text": "B"}], "f2")
+        for old, new, counts in ((unique, duplicate, (1, 2)), (duplicate, unique, (2, 1))):
+            with self.subTest(counts=counts):
+                diff = diff_observations(old, new)
+                self.assertTrue(diff["comparable"])
+                self.assertFalse(diff["complete"])
+                self.assertEqual([], diff["added"])
+                self.assertEqual([], diff["removed"])
+                self.assertEqual([], diff["changed"])
+                self.assertEqual({"previous": counts[0], "current": counts[1]}, diff["unmatched"])
+                self.assertEqual({"identities": 1, "previous": counts[0], "current": counts[1]}, diff["ambiguous"])
+
+    def test_diff_ambiguity_keeps_unrelated_real_deletions(self):
+        old = normalize_layout([{"id": "same", "text": "A"}, {"id": "gone", "text": "Delete me"}], "f1")
+        new = normalize_layout([{"id": "same", "text": "A"}, {"id": "same", "text": "B"}], "f2")
+        diff = diff_observations(old, new)
+        self.assertEqual(["gone"], [node["id"] for node in diff["removed"]])
+        self.assertEqual([], diff["added"])
+        self.assertFalse(diff["complete"])
+
+    def test_project_diff_empty_result_retains_frame_ids(self):
+        old = normalize_layout([], "f1")
+        new = normalize_layout([], "f2")
+        diff = project_diff(diff_observations(old, new), project_observation(old),
+                            project_observation(new), max_changes=1)
+        self.assertEqual("f1", diff["previousFrameId"])
+        self.assertEqual("f2", diff["currentFrameId"])
+        self.assertTrue(diff["complete"])
+        self.assertEqual({"total": 0, "matched": 0, "returned": 0, "omitted": 0,
+                          "filtered": 0, "truncated": False, "complete": True}, diff["quality"])
+
+    def test_project_diff_filters_each_kind_to_its_displayed_frame(self):
+        old = normalize_layout([
+            {"id": "shown-removed", "text": "shown"}, {"id": "hidden-removed", "text": "hidden"},
+            {"id": "shown-changed", "text": "before"}, {"id": "hidden-changed", "text": "before"}], "f1")
+        new = normalize_layout([
+            {"id": "shown-added", "text": "shown"}, {"id": "hidden-added", "text": "hidden"},
+            {"id": "shown-changed", "text": "after"}, {"id": "hidden-changed", "text": "after"}], "f2")
+        full_diff = diff_observations(old, new)
+        old_view = project_observation(old, query="shown")
+        new_view = project_observation(new, query="shown")
+        before = deepcopy((full_diff, old_view, new_view))
+        diff = project_diff(full_diff, old_view, new_view, max_changes=10)
+        for kind in ("added", "removed", "changed"):
+            self.assertEqual(["shown-" + kind], [node["id"] for node in diff[kind]])
+        self.assertEqual({"total": 6, "matched": 3, "returned": 3, "omitted": 0,
+                          "filtered": 3, "truncated": False, "complete": False}, diff["quality"])
+        self.assertFalse(diff["complete"])
+        self.assertEqual(before, (full_diff, old_view, new_view))
+
+    def test_project_diff_uses_one_budget_across_change_kinds(self):
+        old = normalize_layout([{"id": "removed"}, {"id": "changed", "text": "before"}], "f1")
+        new = normalize_layout([{"id": "added"}, {"id": "changed", "text": "after"}], "f2")
+        diff = project_diff(diff_observations(old, new), project_observation(old),
+                            project_observation(new), max_changes=2)
+        self.assertEqual(2, sum(len(diff[kind]) for kind in ("added", "removed", "changed")))
+        self.assertEqual({"total": 3, "matched": 3, "returned": 2, "omitted": 1,
+                          "filtered": 0, "truncated": True, "complete": False}, diff["quality"])
+        self.assertFalse(diff["complete"])
+
+    def test_project_diff_keeps_unknown_status_without_exposing_ambiguous_nodes(self):
+        old = normalize_layout([{"id": "same"}], "f1")
+        new = normalize_layout([{"id": "same"}, {"id": "same"}], "f2")
+        diff = project_diff(diff_observations(old, new), project_observation(old),
+                            project_observation(new), max_changes=1)
+        self.assertFalse(diff["quality"]["complete"])
+        self.assertEqual({"identities": 1, "previous": 1, "current": 2}, diff["ambiguous"])
+        incomplete = deepcopy(new)
+        incomplete["quality"]["complete"] = False
+        diff = project_diff(diff_observations(old, incomplete), project_observation(old),
+                            project_observation(incomplete), max_changes=1)
+        self.assertFalse(diff["comparable"])
+        self.assertFalse(diff["complete"])
+        self.assertEqual("incomplete-observation", diff["reason"])
+
+    def test_project_diff_rejects_invalid_budget(self):
+        empty = normalize_layout([], "f1")
+        for maximum in (0, -1, True, 1.5):
+            with self.subTest(maximum=maximum):
+                self.assertAgentError("INVALID_ARGUMENT", lambda: project_diff(
+                    diff_observations(empty, empty), project_observation(empty),
+                    project_observation(empty), max_changes=maximum))
 
     def test_projection_is_bounded_and_does_not_mutate_full_frame(self):
         before = deepcopy(self.observation)

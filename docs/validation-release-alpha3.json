@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "at": "2026-11-10T05:35:32.106631+00:00",
+  "host": {
+    "os": "Windows",
+    "python": "3.12.10"
+  },
+  "networkMode": "pip_no_index_no_build_isolation",
+  "steps": [
+    {
+      "name": "source_identity",
+      "status": "pass"
+    },
+    {
+      "name": "build",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 3203.0
+    },
+    {
+      "name": "wheel_integrity_metadata_content",
+      "status": "pass"
+    },
+    {
+      "name": "create_fresh_venv",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 141.0
+    },
+    {
+      "name": "install",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 2500.0
+    },
+    {
+      "name": "import_isolation",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 94.0
+    },
+    {
+      "name": "cli_help",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 219.0
+    },
+    {
+      "name": "cli_version",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 156.0
+    },
+    {
+      "name": "cli_schema",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 156.0
+    },
+    {
+      "name": "cli_no_hdc",
+      "status": "pass",
+      "exitCode": 1,
+      "elapsedMs": 203.0
+    },
+    {
+      "name": "cli_doctor_no_hdc",
+      "status": "pass",
+      "exitCode": 0,
+      "elapsedMs": 219.0
+    },
+    {
+      "name": "cli_invalid_attach",
+      "status": "pass",
+      "exitCode": 2,
+      "elapsedMs": 172.0
+    },
+    {
+      "name": "cli_invalid_timeout",
+      "status": "pass",
+      "exitCode": 2,
+      "elapsedMs": 172.0
+    },
+    {
+      "name": "cli_invalid_boolean",
+      "status": "pass",
+      "exitCode": 2,
+      "elapsedMs": 172.0
+    }
+  ],
+  "project": "harmony-automation-agent",
+  "version": "0.1.0a3",
+  "wheel": {
+    "file": "wheel/harmony_automation_agent-0.1.0a3-py3-none-any.whl",
+    "name": "harmony-automation-agent",
+    "version": "0.1.0a3",
+    "runtimeDependencies": [],
+    "runtimeFiles": 9,
+    "archiveFiles": 15,
+    "bytes": 37410,
+    "sha256": "a25d6080df76234f8d4fee45e42fcd04f9cbdd1d78c1549ef6482eeee3cf7b27",
+    "contentScan": "known_patterns_only"
+  },
+  "status": "pass",
+  "elapsedMs": 7469.0,
+  "runDirectory": "run-20261110T053532Z-52f255bc"
+}

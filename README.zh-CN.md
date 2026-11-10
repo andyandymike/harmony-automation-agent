@@ -4,7 +4,9 @@
 
 让 AI 编程助手通过原生 HDC / UiTest **观察、操作和验证鸿蒙应用**。
 
-当前版本为 **0.1.0a2，开发 alpha**。使用 Python 3.10+，运行时仅依赖标准库；基础流程不需要 Appium、视觉模型或模型 API key。尚未发布到 PyPI。请结合 [开源前检查](docs/publication-review-2026-11-10.md)、[本版设备验证报告](docs/validation-alpha2.md)、[CHANGELOG](CHANGELOG.md)、[兼容性矩阵](docs/compatibility.md) 和 [发布准备状态](docs/release-readiness.md) 查看实际结果。
+当前版本为 **0.1.0a3，尚未发布的开发 alpha**。使用 Python 3.10+，运行时仅依赖标准库；基础流程不需要 Appium、视觉模型或模型 API key。尚未发布到 PyPI。请结合 [核心修复验证记录](docs/validation-alpha3.md)、[CHANGELOG](CHANGELOG.md)、[兼容性矩阵](docs/compatibility.md) 和 [发布准备状态](docs/release-readiness.md) 查看当前结果；既有源码发布与设备测试属于先前版本的独立记录。
+
+Alpha3 的 187 项离线回归和 14 项隔离构建安装检查已通过。当前没有连接设备，设备 smoke 标为 NOT_RUN。下文的既有测试数量和设备结果属于此前的 alpha2 源码。
 
 2026-11-03，在专用 API24 测试模拟器完成小艺输入法基础模式及 26 键布局初始化后，普通和 native 两个真实 TextInput 的中文写入、替换、清空共 6 次读回均通过。单次约 4.17–6.66 秒；这些是特定控件的功能样本，不是通用成功率。输入仍标为实验性，完整 Agent 任务与候选版验证分别记录。
 
@@ -47,7 +49,7 @@ python -m venv .venv
 后续示例使用 `harmony-agent` 简写；环境未激活时，在 Windows 使用 `.\.venv\Scripts\harmony-agent.exe`。安装时构建工具可能需要取得 setuptools；运行时没有第三方 Python 依赖。若已有本版 wheel，可在同一环境中离线安装：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\dist\harmony_automation_agent-0.1.0a2-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\dist\harmony_automation_agent-0.1.0a3-py3-none-any.whl
 ```
 
 wheel 需要来自本版构建，不要用旧版本文件名代替验收。如果当前环境不能构建安装，可直接从源码运行：

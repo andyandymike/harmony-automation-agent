@@ -12,7 +12,8 @@ import uuid
 from . import SCHEMA_VERSION, __version__, DEFAULT_INPUT_TIMEOUT_MS
 from .errors import AgentError
 from .observation import (normalize_layout, project_observation, resolve_target,
-                          select_nodes, diff_observations)
+                          select_nodes, diff_observations, project_diff,
+                          parse_selector, selector_uses_refs)
 from .state import StateStore, session_name
 
 
@@ -66,6 +67,11 @@ class Agent:
                 except AgentError as exc:
                     if exc.code == "NO_SESSION":
                         return {"session": name, "detached": False}
+                    if exc.code == "INVALID_SESSION_STATE":
+                        # The session lock protects this local-only recovery.
+                        # A corrupt file cannot supply a trustworthy device ID.
+                        return {"session": name, "detached": self.store.detach(name),
+                                "deviceStopped": False, "recoveredInvalidState": True}
                     raise
                 with self.store.device_lock(session["device"]):
                     return {"session": name, "detached": self.store.detach(name), "deviceStopped": False}
@@ -80,9 +86,13 @@ class Agent:
                     previous = session.get("frame")
                     observation = self._capture(session)
                     self._publish(name, session, observation)
-                    public = self._project(observation, params, query=params.get("text") if command == "find" else None)
+                    query = params.get("text") if command == "find" else None
+                    public = self._project(observation, params, query=query)
                     if previous:
-                        public["diff"] = diff_observations(previous, observation)
+                        public["diff"] = project_diff(
+                            diff_observations(previous, observation),
+                            self._project(previous, params, query=query), public,
+                            max_changes=params.get("max_nodes", 80))
                     return public
                 if command == "wait":
                     condition = {"selector": params.get("target"), "property": params.get("property", "text"),
@@ -104,7 +114,7 @@ class Agent:
             session["frameValid"] = False
             try:
                 self.store.save(name, session)
-            except OSError:
+            except (Exception, KeyboardInterrupt):
                 # Preserve the original failure if the state volume is unavailable.
                 pass
             raise
@@ -197,7 +207,7 @@ class Agent:
         if target is None:
             raise AgentError("TARGET_REQUIRED", "An explicit selector or current ref is required.", exit_code=2)
         old = None
-        is_ref = isinstance(target, str) and target.startswith("@") or isinstance(target, dict) and "ref" in target
+        is_ref = selector_uses_refs(target)
         if is_ref:
             if not session.get("frameValid") or not session.get("frame"):
                 raise AgentError("STALE_REF", "Refs are invalid after an action, timeout or disconnect; observe again.")
@@ -206,15 +216,37 @@ class Agent:
         if old is None:
             node = resolve_target(observation, target)
         else:
-            keys = ("id", "type", "text", "bounds", "bundleName", "hostWindowId", "displayId")
-            candidates = [n for n in observation["nodes"] if all(n.get(k) == old.get(k) for k in keys)]
-            old_context = self._context_signature(session["frame"], old)
-            candidates = [n for n in candidates if self._context_signature(observation, n) == old_context]
-            if len(candidates) != 1:
-                raise AgentError("STALE_REF", "The target changed since the referenced frame; observe and select again.")
-            node = candidates[0]
+            previous = session["frame"]
+            fresh_node = self._relocate_ref(previous, observation, old["ref"])
+            # Rebind every frame dependency, then apply *all* original
+            # predicates again (checked, focused, within, etc.).
+            rebound = self._rebind_selector(previous, observation, target)
+            matches = select_nodes(observation, rebound)
+            if len(matches) != 1 or matches[0]["ref"] != fresh_node["ref"]:
+                raise AgentError("STALE_REF", "The target no longer satisfies the requested conditions; observe again.")
+            node = matches[0]
         self._require_actionable(node)
         return node, observation
+
+    def _relocate_ref(self, previous, current, ref):
+        old = resolve_target(previous, {"ref": ref})
+        keys = ("id", "type", "text", "bounds", "bundleName", "hostWindowId", "displayId")
+        old_context = self._context_signature(previous, old)
+        candidates = [node for node in current["nodes"]
+                      if all(node.get(key) == old.get(key) for key in keys)
+                      and self._context_signature(current, node) == old_context]
+        if len(candidates) != 1:
+            raise AgentError("STALE_REF", "The referenced target or context changed; observe and select again.")
+        return candidates[0]
+
+    def _rebind_selector(self, previous, current, selector):
+        parsed = parse_selector(selector)
+        for key in ("ref", "parent"):
+            if parsed.get(key) is not None:
+                parsed[key] = self._relocate_ref(previous, current, parsed[key])["ref"]
+        if parsed.get("within") is not None:
+            parsed["within"] = self._rebind_selector(previous, current, parsed["within"])
+        return parsed
 
     @staticmethod
     def _require_actionable(node):
@@ -252,8 +284,8 @@ class Agent:
         expected = condition["equals"]
         if prop == "text" and not isinstance(expected, str) or prop != "text" and type(expected) is not bool:
             raise AgentError("INVALID_EXPECTATION", "Text conditions need a string; state conditions need a boolean.", exit_code=2)
-        if isinstance(selector, str) and selector.startswith("@") or isinstance(selector, dict) and "ref" in selector:
-            raise AgentError("INVALID_EXPECTATION", "Postconditions require a stable selector, not a frame ref.", exit_code=2)
+        if selector_uses_refs(selector):
+            raise AgentError("INVALID_EXPECTATION", "Conditions require stable selectors; ref and parent frame references are not allowed, including inside within.", exit_code=2)
         # Validate selector syntax before any mutation, even when no matching node exists.
         select_nodes({"nodes": [], "frameId": "validation"}, selector)
         timeout = positive_integer(condition.get("timeoutMs"), "timeoutMs", 5000)
@@ -365,7 +397,9 @@ class Agent:
         initial_assertion = {"status": "unknown" if expectation is not None or command == "fill" else "not_requested"}
         if expectation:
             initial_assertion.update(property=expectation.get("property", "text"), expected=expectation.get("equals"))
-        result = {"operationId": operation, "action": action, "assertion": initial_assertion}
+        # Keep the warning list shared with error.details when optional trace
+        # writing fails in finally, after the error envelope was assembled.
+        result = {"operationId": operation, "action": action, "assertion": initial_assertion, "warnings": []}
         try:
             device = session["device"]
             node = None
@@ -376,7 +410,7 @@ class Agent:
                     raise AgentError("INVALID_ARGUMENT", "fill requires a string text value without NUL characters.", exit_code=2)
                 if "password" in (node.get("type") or "").lower():
                     raise AgentError("UNSUPPORTED", "Password field verification is not supported in this alpha.")
-                if node.get("editable") is not True and not any(t in (node.get("type") or "").lower() for t in ("textinput", "textarea", "edittext")):
+                if node.get("editable") is not True:
                     raise AgentError("NOT_EDITABLE", "fill requires a real editable text control.")
                 # Native inputText appends. Explicitly clear and verify via a stable ID.
                 if not node.get("id"):
@@ -466,7 +500,11 @@ class Agent:
             exc.dispatched = "no" if action["dispatched"] == "no" else "unknown"
             if action["dispatched"] != "no":
                 session["frameValid"] = False
-                self.store.save(name, session)
+                try:
+                    self.store.save(name, session)
+                except (Exception, KeyboardInterrupt) as state_error:
+                    result.setdefault("warnings", []).append(
+                        "Failed to persist invalidated refs: " + type(state_error).__name__)
             if observation is not None:
                 result["observation"] = self._project(observation)
             if action["dispatched"] != "no":
@@ -479,7 +517,7 @@ class Agent:
                 self.store.trace(name, {"operationId": operation, "command": command, "at": now(),
                                        "action": deepcopy(action), "assertion": result["assertion"],
                                        "timings": result["timings"]})
-            except OSError:
+            except (Exception, KeyboardInterrupt):
                 result.setdefault("warnings", []).append("Trace could not be written; this does not change the action outcome.")
 
     def _evidence(self, name, session, operation, observation):
@@ -494,6 +532,6 @@ class Agent:
             screenshot = folder / "screen.png"
             self.transport.screenshot(session["device"], screenshot)
             result.update(screenshot=str(screenshot), screenshotCapturedAt=now())
-        except (AgentError, OSError) as exc:
+        except (Exception, KeyboardInterrupt) as exc:
             result["warnings"].append("Evidence collection was incomplete: " + (exc.code if isinstance(exc, AgentError) else "IO_ERROR"))
         return result

@@ -35,6 +35,8 @@ Unicode or long-text native injection may use and overwrite the device clipboard
 
 The regular fixture TextInput triggered first-run Xiaoyi keyboard privacy onboarding in the emulator. The tool did not automatically accept the prompt. The additional real TextInput with soft-keyboard display disabled was also blocked: clearing keys triggered onboarding in one attempt, and focus was blocked after a later clean launch. Therefore `enableKeyboardOnFocus(false)` does not reliably isolate input from the IME. Chinese insertion, replacement, and clearing have not passed device acceptance. Input remains experimental until a valid environment and a complete readback test establish the supported behavior.
 
+The paragraph above records the alpha1 integration stage. On 2026-11-03, alpha2 passed six standard/native Chinese fill, replacement and clear readbacks after the dedicated emulator's IME setup; see [the alpha2 validation](validation-alpha2.md). This does not establish general IME support. The alpha3 core fixes have their own [validation record](validation-alpha3.md).
+
 ## Revisit when
 
 Revisit the decision if native input or required observation semantics cannot satisfy the supported fixture, measured overhead blocks actual tasks, or an integration has a concrete requirement for another runtime. Record the evidence and migration impact before adding a second mandatory execution stack.
