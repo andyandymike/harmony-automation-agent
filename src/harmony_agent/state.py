@@ -14,6 +14,72 @@ from .errors import AgentError
 
 
 _STORAGE_FORMAT = "harmony-session/indexed-frame/1"
+_FRAME_STORAGE_FORMAT = "harmony-frame/indexed/1"
+
+
+def _indexed_frame(frame):
+    """Share the lossless node-index encoding between sessions and evidence."""
+    if not isinstance(frame, dict) or not isinstance(frame.get("nodes"), list):
+        return frame
+    nodes = frame["nodes"]
+    if any(not isinstance(node, dict) or not isinstance(node.get("ref"), str) for node in nodes):
+        return frame
+    by_ref = {node["ref"]: node for node in nodes}
+    indexes = {}
+    for key in ("controls", "facts"):
+        index = frame.get(key)
+        if not isinstance(index, list):
+            return frame
+        refs = []
+        for node in index:
+            # Preserve malformed input for load-time validation rather than
+            # making a corrupt legacy index appear valid during serialization.
+            if (not isinstance(node, dict) or not isinstance(node.get("ref"), str)
+                    or node["ref"] not in by_ref or node != by_ref[node["ref"]]):
+                return frame
+            refs.append(node["ref"])
+        indexes[key] = refs
+    return {**frame, **indexes}
+
+
+def _restored_frame(frame):
+    if not isinstance(frame, dict) or not isinstance(frame.get("nodes"), list):
+        raise ValueError("Invalid indexed frame")
+    by_ref = {}
+    for node in frame["nodes"]:
+        if (not isinstance(node, dict) or not isinstance(node.get("ref"), str)
+                or node["ref"] in by_ref):
+            raise ValueError("Invalid indexed node")
+        by_ref[node["ref"]] = node
+    indexes = {}
+    for key in ("controls", "facts"):
+        refs = frame.get(key)
+        if (not isinstance(refs, list)
+                or any(not isinstance(ref, str) or ref not in by_ref for ref in refs)):
+            raise ValueError("Invalid indexed reference")
+        indexes[key] = [by_ref[ref] for ref in refs]
+    return {**frame, **indexes}
+
+
+def stored_frame(frame):
+    """Encode a frozen frame without duplicating nodes in controls/facts."""
+    if not isinstance(frame, dict) or "storageFormat" in frame:
+        return frame
+    indexed = _indexed_frame(frame)
+    if indexed is frame:
+        return frame
+    return {**indexed, "storageFormat": _FRAME_STORAGE_FORMAT}
+
+
+def loaded_frame(value):
+    """Read indexed or legacy frozen frames into the same in-memory format."""
+    if not isinstance(value, dict) or "storageFormat" not in value:
+        return value
+    if value["storageFormat"] != _FRAME_STORAGE_FORMAT:
+        raise ValueError("Unsupported frame storage format")
+    restored = _restored_frame(value)
+    del restored["storageFormat"]
+    return restored
 
 
 def _stored_session(value):
@@ -21,27 +87,10 @@ def _stored_session(value):
     if not isinstance(value, dict) or "storageFormat" in value:
         return value
     frame = value.get("frame")
-    if not isinstance(frame, dict) or not isinstance(frame.get("nodes"), list):
+    indexed = _indexed_frame(frame)
+    if indexed is frame:
         return value
-    nodes = frame["nodes"]
-    if any(not isinstance(node, dict) or not isinstance(node.get("ref"), str) for node in nodes):
-        return value
-    by_ref = {node["ref"]: node for node in nodes}
-    indexes = {}
-    for key in ("controls", "facts"):
-        index = frame.get(key)
-        if not isinstance(index, list):
-            return value
-        refs = []
-        for node in index:
-            # Preserve malformed input for load-time validation rather than
-            # making a corrupt legacy index appear valid during serialization.
-            if (not isinstance(node, dict) or not isinstance(node.get("ref"), str)
-                    or node["ref"] not in by_ref or node != by_ref[node["ref"]]):
-                return value
-            refs.append(node["ref"])
-        indexes[key] = refs
-    return {**value, "storageFormat": _STORAGE_FORMAT, "frame": {**frame, **indexes}}
+    return {**value, "storageFormat": _STORAGE_FORMAT, "frame": indexed}
 
 
 def _loaded_session(value):
@@ -50,23 +99,7 @@ def _loaded_session(value):
         return value
     if value["storageFormat"] != _STORAGE_FORMAT:
         raise ValueError("Unsupported session storage format")
-    frame = value.get("frame")
-    if not isinstance(frame, dict) or not isinstance(frame.get("nodes"), list):
-        raise ValueError("Invalid indexed session frame")
-    by_ref = {}
-    for node in frame["nodes"]:
-        if (not isinstance(node, dict) or not isinstance(node.get("ref"), str)
-                or node["ref"] in by_ref):
-            raise ValueError("Invalid indexed session node")
-        by_ref[node["ref"]] = node
-    indexes = {}
-    for key in ("controls", "facts"):
-        refs = frame.get(key)
-        if (not isinstance(refs, list)
-                or any(not isinstance(ref, str) or ref not in by_ref for ref in refs)):
-            raise ValueError("Invalid indexed session reference")
-        indexes[key] = [by_ref[ref] for ref in refs]
-    restored = {**value, "frame": {**frame, **indexes}}
+    restored = {**value, "frame": _restored_frame(value.get("frame"))}
     del restored["storageFormat"]
     return restored
 
@@ -197,6 +230,55 @@ class StateStore:
         # Shared across project state directories. OS releases this lock on crash.
         return file_lock(Path(tempfile.gettempdir()) / "harmony-agent-device-locks" / (digest + ".lock"), code="DEVICE_BUSY")
 
+    def _owner_path(self, device):
+        digest = hashlib.sha256(device.encode("utf-8")).hexdigest()
+        return Path(tempfile.gettempdir()) / "harmony-agent-device-locks" / (digest + ".owner.json")
+
+    def _owner_identity(self, session):
+        return {"schema": "harmony-device-owner/1", "stateRoot": str(self.root.resolve()),
+                "session": session["name"], "ownerToken": session.get("ownerToken", session["createdAt"]),
+                "device": session["device"]}
+
+    def device_owner(self, device):
+        try:
+            value = json.loads(self._owner_path(device).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as exc:
+            raise AgentError("DEVICE_OWNER_UNKNOWN", "Device ownership is unreadable; do not take over automatically.") from exc
+        if not isinstance(value, dict) or value.get("schema") != "harmony-device-owner/1":
+            raise AgentError("DEVICE_OWNER_UNKNOWN", "Device ownership is invalid; do not take over automatically.")
+        return value
+
+    def require_device_owner(self, session):
+        owner = self.device_owner(session["device"])
+        if owner is not None and owner != self._owner_identity(session):
+            raise AgentError("DEVICE_OWNED", "Another task owns this device. Its owner must release or detach first.",
+                             details={"ownerSession": owner.get("session")})
+        return owner
+
+    def claim_device(self, session):
+        """Caller holds device_lock. The claim also spans gaps between CLI calls."""
+        from .execution import atomic_json
+        owner = self.require_device_owner(session)
+        if owner is None:
+            owner = self._owner_identity(session)
+            try:
+                atomic_json(self._owner_path(session["device"]), owner)
+            except OSError as exc:
+                raise AgentError("DEVICE_OWNER_WRITE_FAILED", "Cannot persist task ownership; no action was dispatched.") from exc
+        return owner
+
+    def release_device(self, session):
+        self.require_device_owner(session)
+        path = self._owner_path(session["device"])
+        existed = path.exists()
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise AgentError("DEVICE_OWNER_WRITE_FAILED", "Cannot release task ownership.") from exc
+        return existed
+
     def load(self, name):
         name = session_name(name)
         try:
@@ -213,15 +295,16 @@ class StateStore:
         return value
 
     def save(self, name, value):
+        from .persistence import atomic_replace
         path = self.path(name)
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-                json.dump(_stored_session(value), stream, ensure_ascii=False, separators=(",", ":"))
+                stream.write(json.dumps(_stored_session(value), ensure_ascii=False, separators=(",", ":")))
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            atomic_replace(temporary, path)
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)

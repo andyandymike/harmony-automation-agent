@@ -2,154 +2,78 @@
 
 [English](README.md)
 
-让 AI 编程助手通过原生 HDC / UiTest **观察、操作和验证鸿蒙应用**。
+通过原生 HDC / UiTest 观察、操作和验证 HarmonyOS 应用的开源工具。可以在终端、自动化脚本或 AI Agent 中使用。
 
-当前版本为 **0.1.0a5，尚未发布的开发 alpha**。使用 Python 3.10+，运行时仅依赖标准库；基础流程不需要 Appium、视觉模型或模型 API key。尚未发布到 PyPI。请结合 [CHANGELOG](CHANGELOG.md)、[兼容性矩阵](docs/compatibility.md) 和 [发布准备状态](docs/release-readiness.md) 查看实现与验证范围；既有源码发布与设备测试属于先前版本的独立记录。
+项目提供 Python CLI、可移植的 Agent Skill 和可选的本地 stdio MCP 适配器。它们共用基于 Python 标准库的执行核心；运行时不调用模型，也不需要 Appium 服务、视觉模型或模型 API Key。
 
-当前源码增加紧凑输出和动作结果投影选项，并优化界面采集、树处理与会话存储。历史 alpha3 的 187 项离线回归和 14 项隔离构建安装检查已通过，设备 smoke 当时标为 NOT_RUN；见 [alpha3 验证记录](docs/validation-alpha3.md)，这些不是当前源码的验收结果。下文的既有测试数量和设备结果属于此前的 alpha2 源码。
+**0.1.0a7 是尚未发布的开发预览版，未发布到 PyPI。** 已验证环境见[兼容性](docs/compatibility.md)，本地结果见 [alpha7 验证记录](docs/validation-alpha7.md)，版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
 
-2026-11-03，在专用 API24 测试模拟器完成小艺输入法基础模式及 26 键布局初始化后，普通和 native 两个真实 TextInput 的中文写入、替换、清空共 6 次读回均通过。单次约 4.17–6.66 秒；这些是特定控件的功能样本，不是通用成功率。输入仍标为实验性，完整 Agent 任务与候选版验证分别记录。
+## 功能
 
-2026-11-10 开源前检查的离线回归 **150 项通过**，包含新增的滚动目标校验回归。2026-11-03 记录的设备 smoke 为 **40 步通过、0 失败、1 项跳过**，耗时 85.641 秒；本次代码修改后未重跑设备流程。普通输入框的单独检查已记录，不能将它替代 smoke 中跳过的独立 IME 套件。历史设备、Agent 任务与构建信息见 [本版验证报告](docs/validation-alpha2.md)，本次离线验证与包信息见 [开源前检查](docs/publication-review-2026-11-10.md)。
+- 读取原生 UI 树、定位控件，返回紧凑或语义化的页面视图。
+- 打开应用、点击、滚动、输入文字，并验证可观察的结果。
+- 执行包含条件、循环和明确完成目标的有界计划。
+- 保存本地执行记录，无需连接设备即可检查已保存的证据。
+- 协调单一设备执行者，允许可选的只读角色检查已有证据。
 
-上一版 0.1.0a1 的 112 项离线测试、27 步设备流程及输入阻塞记录保留在 [历史验证报告](docs/validation-alpha.md)，不作为 alpha2 的新测试结果。
+## 环境要求与安装
 
-## 功能范围
+需要 Python 3.10+、官方 HDC 工具，以及已解锁、已授权调试且可使用 UiTest 的 HarmonyOS 真机或模拟器。目标应用需单独安装。文字输入还需要完成输入法初始化，并使用受支持的可编辑控件。
 
-- 环境检查、设备枚举、明确选择设备并接入会话。
-- 解析 UiTest 布局，保留业务文本、输入值、选中状态及窗口信息。
-- 通过稳定选择条件或当前观察帧的引用定位目标。
-- 打开应用、点击、基础滚动、返回、截图；文本输入当前标为实验性。
-- 等待明确条件，或将动作与预期结果放进同一次请求。
-- 结构化结果、明确错误和本地证据，便于外层 Agent 处理。
+克隆仓库并创建环境：
 
-当前聚焦一条原生执行路径。MCP、视觉断言、流程录制、自动恢复及跨崩溃回执服务仍在后续计划中。
-
-## 前提
-
-| 前置条件 | 每位同事需要准备的内容 |
-| --- | --- |
-| Python 3.10+ | 用于安装和运行 CLI 的本地 Python 环境。 |
-| 官方 HDC 工具 | 通过 DevEco / HarmonyOS Command Line Tools 安装，加入 PATH 或配置可执行文件路径。 |
-| 鸿蒙真机或模拟器 | 已启动、解锁、开启调试并授权电脑；HDC 能列出该设备，设备端 UiTest 命令可用。 |
-| 已安装的目标应用 | 安装应用，确认包名和启动 Ability。应用构建、签名和安装与 CLI 操作分开完成。 |
-| 输入法初始化，仅文本输入需要 | 完成键盘首次引导和设置。带读回验证的 `fill` 需要真实可编辑控件，并有应用窗口内唯一的稳定 ID。 |
-| AI 助手，仅自然语言操作需要 | 助手能够在运行 HDC 的电脑上执行命令；其账号和模型配置另行准备。手动使用 CLI 不需要 AI 助手。 |
-
-CLI 运行时没有第三方 Python 依赖，不需要 Appium、GPU、服务器或模型 API key。可选 Skill 只提供外层 AI 的操作指引，不会安装 CLI、HDC、SDK、模拟器或目标应用。Node、Hvigor 和应用签名工具只在构建、签名应用时需要，操作已安装应用时不需要。
-
-目标界面需要能通过 UiTest 提供足够的控件信息，供工具定位和验证；无法暴露这些信息的自绘控件等场景，目前没有视觉定位兜底。已有设备测试主要来自 HarmonyOS 6.1.1 / API24 模拟器，其他组合请查看 [兼容性记录](docs/compatibility.md)。
-
-主机平台、HDC 版本和 Harmony/API 的组合需要逐项验证。离线 CI 可在 Windows / Linux 运行，不代表所有设备组合均已支持。
-
-## 安装与环境检查
-
-### 交给同事：使用 wheel 安装包
-
-交付同版本的 wheel、本 README（或仓库文档链接），以及目标应用的包名、启动 Ability 和具体任务。需要 AI 操作时，再交付完整的 `skills/harmony-agent/` 目录，包括 `references/`、`agents/` 和 `LICENSE`，按 [Skill 安装说明](docs/skill-setup.md)配置。Python wheel 不包含 Skill 目录或外部设备工具。
-
-若单独发送 README 文件，也要提供其中引用的 `docs/` 指南，或附上对应源码版本的在线文档链接。
-
-同事拿到 wheel 后可以直接安装，无需克隆或构建本仓库。例如在 Windows 上，把安装包放进一个工作目录，再在该目录运行：
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\harmony_automation_agent-0.1.0a5-py3-none-any.whl
-.\.venv\Scripts\harmony-agent.exe --version --json
-.\.venv\Scripts\harmony-agent.exe doctor --json
-```
-
-文件名应与实际收到的 wheel 一致。POSIX 主机改用 `.venv/bin/python` 和 `.venv/bin/harmony-agent`；设备兼容性仍需单独验证。`doctor` 已返回设备列表，仅需枚举时可用 `devices --json`。按下文配置 HDC 后，明确选择一个设备 ID，再运行 `doctor --device <ID> --json` 检查该设备。设备列表为空表示尚不能操作设备。SDK 配置、设备授权和输入法初始化需要分别完成，项目目前没有一体化环境安装器。
-
-### 从源码安装
-
-先获取源码，再在项目根目录创建独立环境：
-
-```powershell
+```sh
 git clone https://github.com/andyandymike/harmony-automation-agent.git
 cd harmony-automation-agent
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .
-.\.venv\Scripts\harmony-agent.exe help
 ```
 
-后续示例使用 `harmony-agent` 简写；环境未激活时，在 Windows 使用 `.\.venv\Scripts\harmony-agent.exe`。安装时构建工具可能需要取得 setuptools；运行时没有第三方 Python 依赖。若已有本版 wheel，可在同一环境中离线安装：
+Windows：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\dist\harmony_automation_agent-0.1.0a5-py3-none-any.whl
+.venv/Scripts/python.exe -m pip install .
+.venv/Scripts/harmony-agent.exe --version --json
 ```
 
-wheel 需要来自本版构建，不要用旧版本文件名代替验收。如果当前环境不能构建安装，可直接从源码运行：
+POSIX 主机：
 
-```powershell
-$env:PYTHONPATH = "src"
-python -m harmony_agent help
+```sh
+.venv/bin/python -m pip install .
+.venv/bin/harmony-agent --version --json
 ```
 
-下文的 `harmony-agent` 均可替换成 `python -m harmony_agent`。
+下文用 `harmony-agent` 代指该环境中的可执行文件。将 HDC 加入 PATH，或用 `HARMONY_HDC` 指定完整路径、`HDC_HOME` 指定所在目录，也可以传入 `--hdc PATH`。主机端安装成功并不代表已验证设备兼容性。
 
-HDC 已在 PATH 时无需额外配置。否则指定实际文件位置：
+离线 wheel、环境配置、升级和卸载见[安装指南](docs/installation.md)，排障见[兼容性说明](docs/compatibility.md)。构建可选的 fixture 应用另需 SDK 和签名工具。
 
-```powershell
-$env:HARMONY_HDC = "C:\HarmonySDK\toolchains\hdc.exe"
+## 首次观察
+
+从 `doctor` 或 `devices` 中明确选择一个设备 ID。`doctor` 执行成功不一定代表设备就绪，需要检查 `data.ready`。
+
+```sh
 harmony-agent doctor --json
-```
-
-也可以设置指向 HDC 所在目录的 `HDC_HOME`，或单次传入 `--hdc <完整路径>`。请以 `doctor` 的实际检查结果定位缺少工具、无设备、未授权或服务异常。设备列表为空不表示可以继续执行设备操作。
-
-`doctor` 成功执行表示诊断命令已完成；还要检查返回的 `data.ready`。常见环境问题、协议约束和输入法前置条件见 [兼容性与排障](docs/compatibility.md)。
-
-### 升级与卸载
-
-升级时在同一环境安装明确选定的新 wheel，然后检查 `--version --json` 和 `schema --json`。移除工具使用：
-
-```powershell
-.\.venv\Scripts\python.exe -m pip uninstall harmony-automation-agent
-```
-
-卸载 Python 包不删除 HDC、SDK、应用或已有 `.harmony-agent` 状态和证据。换版本前保留有用报告，重新建立会话并观察设备，不沿用旧进程或旧观察帧的 ref。
-
-Alpha5 可读取有效的旧会话，并在保存时迁移帧存储格式；alpha4 无法读取新的索引格式。降级前，使用原会话名称和状态目录执行 `detach`；安装旧版后重新 `attach` 和观察。详见 [版本处理](docs/compatibility.md#protocol-and-version-handling)。
-
-## 第一次操作与验证
-
-fixture 仅用于下方示例。操作自己已安装的应用时，不需要安装 fixture。
-
-以下示例使用项目的 [fixture-v2](docs/fixture.md)。先按照该文档构建、安装测试应用。将 `YOUR_DEVICE_ID` 换为设备枚举中明确选定的完整 ID。
-
-```powershell
 harmony-agent attach --device YOUR_DEVICE_ID --session demo --json
-harmony-agent open com.andyandymike.harmonyautomation.fixture --ability EntryAbility --session demo --compact --json
-harmony-agent press id=fixture.reset --session demo --compact --json
+harmony-agent observe --session demo --compact --json
 harmony-agent detach --session demo --json
 ```
 
-`open` 与 `press` 都返回新鲜的 `data.observation`，可直接检查应用上下文和计数器值。仅在返回内容不足或界面发生变化时再调用 `observe`。下方的请求文件示例将动作与精确计数器断言合并执行。输入测试需要先完成设备的输入法初始化；当前验证范围及限制见 [CHANGELOG](CHANGELOG.md) 和 [fixture 说明](docs/fixture.md)。
+`observe` 返回当前应用上下文、UI 节点和观察质量。连接和分离会话不会启动或重置设备。若要使用项目提供的示例控件，可构建并安装可选的 [fixture 应用](docs/fixture.md)。
 
-### 实验性输入与本地副作用
+## 操作与验证
 
-两个 fixture 输入框都是真实 `TextInput`：`fixture.input` 使用普通软键盘行为，`fixture.input.native` 设置了 `enableKeyboardOnFocus(false)`。alpha1 在首次隐私引导前被阻塞；alpha2 测试中完成小艺基础模式及 26 键布局设置后，两者的中文写入、替换和清空均通过读回。关闭软键盘展示本身不能跳过输入法初始化。该验证使用原生文本注入，不代表拼音组合、软键盘候选、所有编辑器动作或其他设备均已验证。
+运行下例前，连接 `demo` 会话、打开 fixture 并重置计数器：
 
-在已完成输入法配置、已接入会话并打开 fixture 的设备上，可执行：
-
-```powershell
-harmony-agent fill id=fixture.input.native "你好 Harmony 123" --session demo --json
+```sh
+harmony-agent attach --device YOUR_DEVICE_ID --session demo --json
+harmony-agent open com.andyandymike.harmonyautomation.fixture --ability EntryAbility --session demo --compact --json
+harmony-agent press id=fixture.reset --session demo --compact --json
 ```
 
-设备上的原生 `uiInput inputText` 会追加文本，空字符串也不能用来清空。CLI 的 `fill` 因此执行：点击目标 → 验证焦点 → 必要时 Ctrl+A → 再确认焦点 → Delete → 验证为空且焦点仍正确 → 原生文本注入 → 读回验证最终值。字段已经为空时跳过清空按键；删除或插入前失去焦点时停止。输入子步骤共享预算，默认 15 秒，可用 `--timeout-ms` 指定；独立 `wait` 默认仍为 5 秒，动作内 `expect.timeoutMs` 是独立的断言预算，默认 5 秒。
-
-这一流程包含多步，输入失败时原内容可能已被清空，不能假设所有改动会回滚。未知下发结果后应重新观察。原生 Unicode 或长文本注入路径可能覆盖**设备剪贴板**，当前不承诺恢复原剪贴板内容；这属于本地操作的副作用。
-
-结果中的 `timings.actionMs` 包含动作阶段的输入准备和内部验证，不应解释为纯输入命令的派发时间。
-
-会话按名称保存；每次命令使用相同的 `--session`。设备接入和释放不等于启动、关闭或重置模拟器。
-
-## 动作与结果一起表达
-
-为避免终端 JSON 引号差异，建议 Agent 使用 UTF-8 请求文件。将下面内容保存为 `increment.json`：
+将以下内容以 UTF-8 保存为 `.harmony-agent/increment.json`：
 
 ```json
 {
+  "schemaVersion": "1",
   "command": "press",
   "input": {
     "session": "demo",
@@ -157,65 +81,69 @@ harmony-agent fill id=fixture.input.native "你好 Harmony 123" --session demo -
     "target": "id=fixture.increment",
     "expect": {
       "selector": {"id": "fixture.counter"},
-      "property": "text",
-      "equals": "Counter: 1",
-      "timeoutMs": 5000
+      "equals": "Counter: 1"
     }
   }
 }
 ```
 
-确保 demo 会话已接入且应用已打开，先重置计数器，然后运行：
-
-```powershell
-harmony-agent press id=fixture.reset --session demo --json
-harmony-agent --request increment.json --json
-```
-
-动作命令也支持 `--expect <JSON>`；精确字段和有效参数以安装版帮助及 schema 为准：
-
-```powershell
+```sh
+harmony-agent --request .harmony-agent/increment.json --json
 harmony-agent help press
 harmony-agent schema --json
+harmony-agent detach --session demo --json
 ```
 
-`expect` 通过即表示已观察到所写条件，可直接使用动作返回的观察继续判断，无需为同一结果再执行 `wait` 或 `observe`。动作下发结果不确定、返回上下文不足或界面变化时，仍需重新读取后再决定下一步。
+确认计数器结果时，需要检查断言是否通过。动作也会返回观察结果，可直接用于下一步判断。已通过的 `expect` 不需要再用 `wait` 重复验证同一条件。动作结果不确定时，应先重新观察，再决定是否重试。
 
-## 控制观察输出大小
+更长的任务可由 `run` 执行有界计划并记录结果。`report` 和 `inspect` 读取已保存的证据，不采集设备页面。在同一次连续运行中，目标定位可以复用采集完成后不超过 1000 毫秒的页面；动作步骤的 `refresh: true` 会要求重新采集。计划、结果含义和性能取舍见[执行指南](docs/execution.md)，单条命令见[请求示例](docs/agent-requests.md)。
 
-从 `0.1.0a5` 起，所有返回观察的命令均支持 `--compact`、`--max-nodes` 与 `--interactive`，包括动作与 `wait` 的返回结果。`find TEXT` 可将输出限定为匹配文字及其上下文。上述选项只控制返回内容，内部仍完整采集和验证 UI 树。
+## 接入 AI Agent
 
-紧凑输出为显式选项，通过 `projection.compact=true` 标识。它省略可选节点字段的 null 和空字符串，同时保留空的 text/value、根节点的 `parent:null`、false、零及非空字符串（包括仅含空白的字符串）。引用、质量信息、断言值及 diff 的 before/after 值保留原有含义。缺省可选字段不能解释为 false；需要区分 null 与空字符串时使用标准输出。详见 [输出解释](skills/harmony-agent/references/outcomes.md#compact-output)。
+| 接口 | 用途 |
+| --- | --- |
+| CLI | 从终端、脚本或具有进程执行能力的 Agent 直接调用命令。 |
+| Agent Skill | 向 Agent 提供命令契约、定位方式、观察结果复用和失败处理说明。 |
+| 本地 stdio MCP | 保持工具进程连接，通过 MCP 使用同一执行核心。 |
 
-## Agent 使用约定
+从 [Agent 接入指南](docs/integrations.md)选择接口。仓库包含[完整 Skill](skills/harmony-agent/SKILL.md)、安装脚本和可选的宿主配置示例。wheel 包含 Python 运行时和 MCP 适配器；使用 Skill 时需单独安装。
 
-项目提供 CLI 和可选的 [Harmony Agent Skill](skills/harmony-agent/SKILL.md)。按照 [Skill 安装说明](docs/skill-setup.md)安装完整的指令与参考文件目录；直接调用 CLI 的简短流程见 [Agent usage](docs/agent-usage.md)。Skill 指导外层 Agent 执行任务，实际设备操作仍由 CLI 完成。
+单个 Agent 即可完成设备操作。[多 Agent 角色](docs/multi-agent.md)是可选模式：只读角色可解释已保存的页面或复核结果，设备动作由一个执行者负责。
 
-- `--json` 模式的 stdout 只输出 JSON；诊断日志写入 stderr。错误使用非零退出码。
-- `success` 表达命令结果；业务结果是否被证明，需要看独立的断言结果。未请求断言时不能声称业务验证通过。
-- `id=...`、`text=...`、`type=...` 为精确选择条件。多个匹配是需要消歧的错误，工具不会随意点击第一个。
-- `@...` 引用仅属于其观察帧。可能改变界面的操作会使旧引用失效；超时后也不要重用。
-- 紧凑观察仍应保留业务状态；注意 `quality` 中的截断和未知字段，不把未输出当作不存在。
-- 动作下发结果为 `unknown` 时先重新观察和检查后置条件。不要盲目重复提交、增加计数等操作。
-- 所有写操作只对明确选择的设备执行。本工具的协调机制不阻止用户或其他自动化工具同时操作设备。
+## 限制与本地数据
 
-状态和证据默认保存在当前目录的 `.harmony-agent`；可通过 `--state-dir <目录>` 指定其他位置。截图、树和输入相关信息可能含业务数据，分享前自行检查。工具不自动上传诊断数据。
+控件必须通过原生 UI 树暴露足够的信息，才能定位和验证。视觉定位、事件监听、自主恢复和模型路由尚未实现。
 
-## 测试与贡献
+文字输入仍属实验能力。多步骤 `fill` 失败时，先前的编辑可能已经生效；原生文本注入也可能覆盖设备剪贴板。使用前请阅读[输入行为](docs/agent-usage.md#input-limitations)。
 
-不需要设备即可运行解析、协议、受控传输及其他离线测试：
+动作确认与断言通过是两件事；`run` 命令成功也不等于计划任务成功或目标已经验证。输出被截断、字段未知时，不能据此认定控件不存在。详见[结果解释](skills/harmony-agent/references/outcomes.md)。
 
-```powershell
-$env:PYTHONPATH = "src"
+状态和证据默认保存在 `.harmony-agent/`，可用 `--state-dir` 更改位置。分享前应检查 UI 树、截图和输入数据。运行时不会自动上传诊断资料，但 Agent 宿主可能将工具结果发送给其模型。
+
+## 文档
+
+| 指南 | 内容 |
+| --- | --- |
+| [安装](docs/installation.md) | 环境要求、源码和 wheel 安装、升级及卸载 |
+| [Agent 接入](docs/integrations.md) | CLI、Skill、MCP 和可选宿主示例 |
+| [执行](docs/execution.md) | 有界计划、保存的证据、结果含义和效率 |
+| [Agent 使用](docs/agent-usage.md) | 定位、输入、错误处理和验证 |
+| [Fixture 应用](docs/fixture.md) | 可复现的测试控件 |
+| [兼容性](docs/compatibility.md) | 已验证环境与排障 |
+| [发布准备](docs/release-readiness.md) | 验证记录和剩余发布工作 |
+
+## 开发与贡献
+
+欢迎提交问题、改进文档、提供合成复现用例或贡献代码。开发配置、检查方式和问题报告要求见 [CONTRIBUTING](CONTRIBUTING.md)。
+
+设置 `PYTHONPATH=src` 后，运行离线测试：
+
+```sh
 python -m unittest discover -s tests -v
 ```
 
-设备 smoke 和中文输入验证需要实际设备，不能由 mock 结果代替。请参阅 [CONTRIBUTING](CONTRIBUTING.md)、[fixture](docs/fixture.md) 和 [首个架构决策](docs/adr-0001-native-python.md)。
+离线测试不需要设备或模型 API Key。设备检查应单独执行并记录。原生 Python 方案见 [ADR 0001](docs/adr-0001-native-python.md)。
 
-## 来源与许可
+## 许可证与来源
 
-新 CLI、协议和原生执行代码为本项目实现，设计参考了 Playwright CLI、agent-device、Midscene 及 OpenHarmony 的公开接口。未将这些项目作为运行时必需依赖。
-
-fixture 工程基于项目所有者的 [harmony-automation](https://github.com/andyandymike/harmony-automation/tree/ddaecb946c59d76648bfbb5ffa6b2273de83272f/fixture-app) 进行扩展，来源与构建边界见 [fixture 文档](docs/fixture.md)。官方 SDK、模拟器镜像与签名材料不随源码发布。
-
-本项目代码、文档及 fixture 脚手架和资源统一采用 [MIT License](LICENSE)。项目所有者已确认复用材料的版权归属及 MIT 开源授权，原始来源记录保留在 [来源与分发边界](docs/source-provenance.md)。
+项目代码、文档、fixture 脚手架及资源均采用 [MIT 许可证](LICENSE)。项目所有者已授权复用材料按 MIT 分发，署名及设计参考见[来源说明](docs/source-provenance.md)。仓库不包含 SDK 二进制、模拟器镜像或签名材料。

@@ -111,6 +111,10 @@ class HdcTransport:
         self.elapsed_ms = 0.0
 
     def _run(self, args, *, timeout_ms=None, mutating=False, operation="HDC command"):
+        guard = getattr(self, "execution_guard", None)
+        if guard is not None:
+            remaining = guard()
+            timeout_ms = min(self.timeout_ms if timeout_ms is None else timeout_ms, remaining)
         timeout_seconds = _timeout(self.timeout_ms if timeout_ms is None else timeout_ms)
         argv = [self.path, *[_argument(arg) for arg in args]]
         started = time.monotonic()

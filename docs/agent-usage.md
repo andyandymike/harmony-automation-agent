@@ -56,9 +56,17 @@ From `0.1.0a5`, commands that return observations accept `--compact`, `--max-nod
 - When dispatch is unknown, reobserve and inspect the expected outcome before deciding whether another action is appropriate. Do not automatically repeat non-idempotent submissions or increments.
 - If an assertion fails after a dispatched action, retain the actual observation and evidence. Do not change the expected business result simply to make the step pass.
 - A stale ref needs a new observation. Multiple selector matches need a more precise selector.
-- Input is experimental. In alpha1, first-run IME onboarding blocked both fields; in alpha2, six Chinese fill/replace/clear readbacks passed after Xiaoyi basic-mode setup on the dedicated emulator. This does not establish Pinyin composition, every editor action or another device. Inspect current context rather than assuming input-method setup is complete.
-- Alpha2 `fill` defaults to a 15-second input-phase budget. Standalone `wait` and a nested expectation each default to their own 5-second budget. A slow device may require an explicit timeout supported by the installed schema; do not respond to an unknown outcome with automatic retries.
-- Filling is multi-step and can clear existing text before a later failure. It may overwrite the device clipboard. Check the input-specific limitations in the README.
+- Text entry has additional setup and partial-edit behavior; see [input limitations](#input-limitations).
+
+## Input limitations
+
+Text input is experimental. In alpha1, first-run IME onboarding blocked both fixture fields; in alpha2, six Chinese fill/replace/clear readbacks passed after Xiaoyi basic-mode setup on the dedicated emulator. These results do not establish Pinyin composition, candidate selection, every editor action or another device. Inspect current context rather than assuming input-method setup is complete. Disabling keyboard display on a control does not bypass initialization.
+
+Native `uiInput inputText` appends text, and an empty string does not clear a field. CLI `fill` taps a supported editable target, verifies focus, selects all when needed, rechecks focus before deletion, verifies an empty value and retained focus, injects text, and verifies readback. An empty field skips the clearing keys. Losing focus before deletion or insertion stops the operation.
+
+Input substeps share a default 15-second budget, overridable with `--timeout-ms`. Standalone `wait` and a nested expectation each default to their own 5-second budget. Consult the installed schema for supported overrides. `timings.actionMs` includes input preparation and internal verification; it is not pure dispatch time.
+
+Filling can clear existing text before a later failure and does not promise rollback. Native Unicode or long-text injection may overwrite the device clipboard; restoring its previous contents is not guaranteed. Reobserve an unknown outcome before deciding what to do next, rather than automatically repeating input.
 
 ## Finish
 

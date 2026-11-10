@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "harmonyDevice": {
+      "command": "${HARMONY_AGENT_PYTHON}",
+      "args": ["-m", "harmony_agent.mcp", "--state-dir", "${HARMONY_AGENT_STATE_DIR}"]
+    },
+    "harmonyEvidence": {
+      "command": "${HARMONY_AGENT_PYTHON}",
+      "args": ["-m", "harmony_agent.mcp", "--state-dir", "${HARMONY_AGENT_STATE_DIR}", "--read-only"]
+    }
+  }
+}

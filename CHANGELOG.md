@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.0a7 — performance correction candidate, 2026-11-10
+
+- Reuse a successfully published observation for up to 1,000 ms within the same uninterrupted plan. Do not reuse frames across CLI/model turns or after invalidation. Add per-mutation `refresh: true` for tasks requiring a new observation.
+- Check device readiness once per plan by default. Preserve exact device targeting on every native call and recheck readiness for explicitly refreshed steps.
+- Make mutation expectations optional, matching the atomic CLI. Preserve all explicitly requested assertions, final goals, and verified text-input readback. Do not prescribe redundant before/after checks for every navigation step.
+- Default run output to the compact tree. Render only the final decision view; retain semantic views as an opt-in context aid rather than assuming they are smaller.
+- Publish session files at run boundaries while retaining durable invalid refs during execution. Preserve per-action journal intents/results, frozen evidence and no action replay; omit duplicate legacy action traces inside plans.
+- Serialize JSON in one write and store frozen node indexes without duplicate node objects. Read existing session and frozen-frame formats.
+- Default reports to a compact view with frozen-frame references and deduplicated step copies; add `report --full` for the original full record. Complete evidence checks precede projection.
+- Prune unused MCP schema definitions without changing tools or input validation. Add precise core counters and profiling for captures, frame reuse and page projection.
+
+## 0.1.0a6 — local execution candidate, 2026-11-10
+
+- Add deterministic semantic pages and explicit frozen-frame inspection. Keep original values, source references, state and coverage limits; no additional model is required.
+- Add bounded conditional JSON plans with per-action expectations, fresh preconditions, final goals, cancellation, shared capture/time budgets and no automatic action replay.
+- Reserve device mutations to a task session across plan boundaries; retain the global OS lock throughout each plan. Release ownership explicitly or on detach.
+- Persist local run intents, execution receipts and frozen evidence. Query reports and recheck assertions without accessing a device. Failed persistence never authorizes repeating a mutation.
+- Add core-stage profiling; unavailable host/model timings and token usage stay unknown.
+- Add a standard-library stdio MCP adapter, a separate read-only evidence mode, a portable Skill installer, and Copilot coordinator/reviewer templates.
+- Host integration, device compatibility and end-to-end model latency improvements remain separately measured outcomes.
+
 ## 0.1.0a5 — unreleased performance improvements, 2026-11-10
 
 - Add opt-in compact observation output, retaining meaningful empty input values, explicit state, refs and completeness metadata. Apply output projection options to actions and waits as well as reads.

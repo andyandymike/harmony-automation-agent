@@ -4,7 +4,7 @@ Updated: 2026-11-10. Package version, request `schemaVersion`, fixture contract,
 
 ## Tested combinations
 
-Current source is the unreleased `0.1.0a5` candidate. Its offline suite passed 224 tests with zero skips, and all 14 local isolated build/install checks passed. These checks do not establish clean-host or device compatibility. The [alpha3 validation record](validation-alpha3.md) and alpha2 device/hosted-CI results below describe their recorded source versions.
+Current source is the unreleased `0.1.0a7` candidate. See [alpha7 validation](validation-alpha7.md) for recorded local results and host/device validation boundaries. The [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 isolated package checks, the [alpha3 validation record](validation-alpha3.md), and alpha2 device/hosted-CI results describe their recorded source versions. Start with [installation](installation.md) and choose an [agent integration](integrations.md) when needed.
 
 | Combination | Recorded evidence | Current boundary |
 | --- | --- | --- |
@@ -29,7 +29,10 @@ Historical alpha2 device, agent and package results are in [validation-alpha2.md
 | Press, basic container scroll, deterministic wait, screenshot | Emulator-validated scenarios | Not a guarantee for virtual lists, nested scrolling or arbitrary apps |
 | `fill` / Unicode replacement / clearing | Experimental; recorded API24 cases passed | Alpha1 was blocked before IME setup; alpha2 passed six standard/native-field readbacks after setup |
 | Window metadata / boot identity | Experimental / device-dependent | Metadata can be unknown; the tested device did not expose a readable boot identity |
-| Visual grounding, model planning, event watch, automatic recovery, MCP | Not implemented | Keep optional roadmap work separate from the native CLI contract |
+| Semantic pages, frozen inspection, bounded plans, local receipts and task ownership | Implemented in alpha6 | Deterministic native-tree processing; declared conditions and finite budgets, with no automatic action replay |
+| Local stdio MCP and read-only evidence server | Implemented in alpha6 | Local protocol checks; tool availability, permissions and runtime behavior require validation in the selected host |
+| Portable Skill installer and optional specialist templates | Implemented in alpha6 | Source/installation and synthetic explicit-use checks; role prose is not a security boundary |
+| Visual grounding, model planning, event watch and automatic recovery | Not implemented | Keep optional roadmap work separate from the native CLI contract |
 
 `doctor` and `capabilities` inspect tools and device help. A command listed in help is not proof that every control supports its semantics. The currently configured device and its actual UI remain the source for operation-time checks.
 
@@ -39,6 +42,10 @@ Historical alpha2 device, agent and package results are in [validation-alpha2.md
 - Request validation rejects unknown request fields. When reading results, preserve useful unknown fields and reject a schema version the client cannot interpret.
 - The CLI exits `0` for a successful command, uses nonzero statuses for errors, and reports structured error codes in JSON mode. Check `data.ready` for `doctor`; a successful diagnostic command does not imply a ready device.
 - Acknowledged actions and passed business assertions are separate. `assertion.status = not_requested` does not prove task success.
+- A handled `run` can have a failed or unknown execution status despite envelope `success=true` and CLI exit code 0. Inspect `data.status` and `goalVerification`; see [execution outcomes](execution.md#interpret-outcomes-separately).
+- Alpha7 defaults to compact run/report output and can reuse a published frame for at most 1,000 ms inside one uninterrupted run. Per-step `refresh: true` requests fresh capture; it is not supported by alpha6. Explicit expectations still stop on failure; omitted expectations remain `not_requested`.
+- Alpha7 reads older frozen evidence, but alpha6 cannot interpret alpha7's indexed frozen-frame files. Use alpha7 or later to inspect new run records. The session storage format remains compatible with alpha5/6.
+- Alpha6 adds persistent task ownership. Release or detach owned sessions before downgrading; older packages do not enforce the new ownership protocol. Do not mix versions when coordinating one device.
 - Ref identity is bound to an observation frame. After a successful action, use its fresh returned observation. After an uncertain mutation, timeout, cancellation or disconnect, reobserve before deciding on further action.
 - The input preparation/insertion/readback budget defaults to 15 seconds. Standalone waits and a nested expectation each retain their separate 5-second default. These are phase budgets, not a promise that the whole command including prechecks and evidence finishes within 15 seconds.
 - Alpha5 reads valid older session files and writes indexed frames on the next save. This storage migration is one-way: alpha4 cannot read an indexed frame. Before downgrading, detach the affected session; after installing the older version, attach and observe again. Use the same session name and state directory when detaching, and retain any needed artifacts separately. The public request/output schema remains `"1"`; it is not the on-disk storage format.

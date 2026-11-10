@@ -1,6 +1,6 @@
 # Release readiness
 
-The current `0.1.0a5` performance candidate is unreleased. Its offline suite passed 224 tests with zero skips, and all 14 local isolated build/install checks passed. It adds compact output and action projections, reduces capture round trips and tree copying, and stores indexed session frames. The [alpha3 core-fix record](validation-alpha3.md) and the alpha2 publication, hosted CI and device evidence below remain specific to their recorded source. No fresh hosted CI or broader device coverage is inferred for alpha5.
+The current `0.1.0a7` performance-correction candidate is unreleased. It removes repeated reads, serialization and output work from alpha6's execution layer. See [alpha7 validation](validation-alpha7.md) for recorded checks and remaining host/device validation. The [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 local package checks, the [alpha3 core-fix record](validation-alpha3.md), and alpha2 publication/CI/device evidence remain historical and version-specific.
 
 Updated: 2026-11-10. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 
@@ -20,6 +20,8 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 | Evidence | Scope |
 | --- | --- |
 | [Alpha2 validation](validation-alpha2.md) | Historical 2026-11-03 regression, device, agent and installation results; includes actual failed attempts and remaining limits |
+| [Alpha6 validation](validation-alpha6.md) | Historical local execution, Skill, protocol and package acceptance before performance correction |
+| [Alpha7 validation](validation-alpha7.md) | Performance correction, regression coverage and package checks; local raw device evidence is excluded |
 | [Alpha2 device summary](validation-device-smoke-alpha2.json) | 40 passed steps, 0 failures, 1 skipped independent ordinary-IME suite |
 | [Alpha2 input record](validation-input-alpha2.json) | Six separate standard/native input checks passed |
 | [Alpha2 agent record](validation-agent-alpha2.json) | Ten tasks, command/byte/timing metrics, reply-loss recovery and first-run issues |
@@ -27,6 +29,8 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 | [Alpha1 validation](validation-alpha.md) | Historical offline, package and emulator outcomes; includes input failures and limitations |
 | [Alpha1 device summary](validation-device-smoke.json) | Historical per-step pass/fail/skip and elapsed times |
 | [Compatibility](compatibility.md) | Tested versus untested host/device/API combinations and protocol boundaries |
+| [Installation](installation.md) | CLI installation, environment setup and verification on a new host |
+| [Agent integrations](integrations.md) | CLI, Skill and MCP integration options and host-specific verification |
 | [Source provenance](source-provenance.md) | Original/reused code, exact upstream revision, repository and registry checks |
 | [Agent usage](agent-usage.md) | Observation, action, assertion and recovery rules |
 | [Agent operating guide](agent-operating-guide.md) | Stable link to the canonical, portable Skill workflow |
@@ -35,11 +39,11 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 
 The original alpha2 offline regression count was 147 passed tests. The [2026-11-10 publication review](publication-review-2026-11-10.md) records 150 after the scroll validation fix. The original device results and frozen wheel remain historical evidence and were not rerun or relabeled for the new source. Agent subtask trials can measure agent usability, but they do not replace independent human installation trials.
 
-The earlier claim that only personal Skill installation remained was too broad: the repository had calling guides, while the local Skill was still an unfinished scaffold. That delivery gap is addressed by the complete Skill source and installation evidence above. The six packages have different acceptance scopes; completed fixture samples or package checks do not make external trials, a clean SDK setup or broad device support complete.
+The repository includes a complete portable Skill package and recorded installation checks. Skill source, installed-file parity, host discovery and device execution remain separate validation steps. The six packages have different acceptance scopes; completed fixture samples or package checks do not make external trials, a clean SDK setup or broad device support complete.
 
 ## Local release checks
 
-The candidate should be built with a pinned source revision and tested in a new virtual environment. Separate no-device contract checks from device execution. A successful wheel build does not prove SDK discovery, emulator startup, signing or device authorization on a new host.
+The candidate should be built with a pinned source revision and tested in a new virtual environment. Separate no-device contract checks from device execution. A successful wheel build does not prove SDK discovery, emulator startup, signing or device authorization on a new host. Recorded wheel hashes identify the exact checked artifacts; later builds of the same version, including builds after README or metadata edits, need their own artifact checks and hashes.
 
 Alpha5 accepts valid older session files and migrates stored frames on save. The indexed format is not readable by alpha4; detach the session before downgrading, then attach and observe with the selected older version. See [protocol and version handling](compatibility.md#protocol-and-version-handling).
 

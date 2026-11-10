@@ -112,7 +112,7 @@ and manual interventions alongside the agent's commands and actual results.
 | Capture a screenshot and open the returned local file | A readable image shows the fixture; record only a reviewed evidence reference |
 | Detach the session | Detach succeeds; do not stop or reset someone else's device |
 
-The [README first-operation sequence](../README.md#first-operation) provides the
+The [README action example](../README.md#act-and-verify) provides the
 exact commands and bundle name. If visibility or another state prevents a step,
 record the actual observation and the participant's recovery attempts. Do not
 claim a pass solely because a command exited successfully.

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import time
 import uuid
+import threading
 
 from . import SCHEMA_VERSION, __version__, DEFAULT_INPUT_TIMEOUT_MS
 from .errors import AgentError
@@ -33,6 +34,33 @@ class Agent:
         self.store = StateStore(state_dir)
         self.hdc_path = hdc_path
         self._transport = transport
+        self.cancel_event = threading.Event()
+        self._budget = None
+        self._run_store = None
+        self._last_capture = None
+        self._last_capture_time = None
+        self._metrics = {}
+        self._counts = {}
+
+    def request_cancel(self):
+        self.cancel_event.set()
+
+    def clear_cancel(self):
+        self.cancel_event.clear()
+
+    def _interrupt(self):
+        if self.cancel_event.is_set():
+            raise AgentError("CANCELLED", "Execution cancelled. Observe before deciding whether to retry.")
+        if self._budget is not None:
+            self._budget.check()
+
+    @contextmanager
+    def _measure(self, stage):
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._metrics[stage] = self._metrics.get(stage, 0.0) + (time.perf_counter() - started) * 1000
 
     @property
     def transport(self):
@@ -42,7 +70,41 @@ class Agent:
         return self._transport
 
     def execute(self, command, params=None):
+        started = time.perf_counter()
+        self._metrics = {}
+        self._counts = {}
+        try:
+            result = self._execute(command, params)
+        except AgentError as exc:
+            if (params or {}).get("profile"):
+                exc.details["profile"] = self._profile(started)
+            raise
+        if isinstance(result, dict) and ((params or {}).get("profile") or command == "run"):
+            result["profile"] = self._profile(started)
+        return result
+
+    def _profile(self, started):
+        return {"schema": "harmony-profile/1", "coreWallMs": round((time.perf_counter() - started) * 1000, 3),
+                "stagesMs": {key: round(value, 3) for key, value in self._metrics.items()},
+                "counts": dict(self._counts),
+                "modelMs": None, "hostSchedulingMs": None, "inputTokens": None, "outputTokens": None,
+                "note": "Stages can nest. Core wall excludes CLI startup, output serialization and host/model time."}
+
+    def _execute(self, command, params=None):
         params = dict(params or {})
+        if command == "report":
+            from .execution import RunStore
+            if not params.get("run_id"):
+                raise AgentError("INVALID_ARGUMENT", "report requires run_id.", exit_code=2)
+            return RunStore(self.store.root, params["run_id"]).read(full=params.get("full", False))
+        if command == "inspect" and params.get("run_id"):
+            from .execution import RunStore
+            if not params.get("frame_id"):
+                raise AgentError("INVALID_ARGUMENT", "inspect requires frame_id.", exit_code=2)
+            return self._inspect(RunStore(self.store.root, params["run_id"]).frame(params["frame_id"]), params)
+        self._interrupt()
+        if params.get("view", "tree") not in {"tree", "semantic"}:
+            raise AgentError("INVALID_ARGUMENT", "view must be tree or semantic.", exit_code=2)
         if "max_nodes" in params:
             positive_integer(params["max_nodes"], "max_nodes", 80, 5000)
         if "compact" in params and type(params["compact"]) is not bool:
@@ -56,10 +118,13 @@ class Agent:
             devices = self.transport.devices()
             return {"devices": [{"id": item} for item in devices], "count": len(devices),
                     "hint": None if devices else "Connect and authorize a device, then run devices again."}
-        supported = {"attach", "detach", "open", "observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot", "capabilities"}
+        supported = {"attach", "detach", "open", "observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot", "capabilities", "run", "inspect", "claim", "release"}
         if command not in supported:
             raise AgentError("UNKNOWN_COMMAND", f"Unknown command: {command}", exit_code=2)
         name = session_name(params.get("session"))
+        if command == "run":
+            from .plans import validate_plan
+            params["plan"] = validate_plan(params.get("plan"))
         with self.store.lock(name):
             if command == "attach":
                 return self._attach(name, params)
@@ -76,36 +141,201 @@ class Agent:
                                 "deviceStopped": False, "recoveredInvalidState": True}
                     raise
                 with self.store.device_lock(session["device"]):
+                    owner = self.store.device_owner(session["device"])
+                    if owner == self.store._owner_identity(session):
+                        self.store.release_device(session)
                     return {"session": name, "detached": self.store.detach(name), "deviceStopped": False}
             session = self.store.load(name)
             if params.get("device") and params["device"] != session["device"]:
                 raise AgentError("DEVICE_MISMATCH", "This session is attached to a different device.")
+            if command == "inspect":
+                if not session.get("frame") or params.get("frame_id") != session["frame"]["frameId"]:
+                    raise AgentError("FRAME_NOT_FOUND", "The requested frame is not the cached session frame.")
+                result = self._inspect(session["frame"], params)
+                result["frameValidForActions"] = session["frameValid"]
+                return result
             with self.store.device_lock(session["device"]), self._frame_guard(name, session):
+                if command == "claim":
+                    self.store.claim_device(session)
+                    return {"session": name, "device": session["device"], "owned": True}
+                if command == "release":
+                    released = self.store.release_device(session)
+                    session["frameValid"] = False
+                    self.store.save(name, session)
+                    return {"session": name, "released": released, "deviceStopped": False}
+                if command in {"run", "open", "press", "fill", "scroll", "back"}:
+                    self.store.require_device_owner(session)
+                if command == "run":
+                    return self._run_plan(name, session, params)
+                with self._measure("preflight"):
+                    self._check_device(name, session)
+                return self._execute_locked(name, session, command, params)
+
+    def _execute_locked(self, name, session, command, params):
+        """Execute under the caller's session and device locks, never reacquiring them."""
+        self._interrupt()
+        if command == "capabilities":
+            return self._capabilities(session)
+        if command in {"observe", "find"}:
+            previous = session.get("frame")
+            observation = self._capture(session)
+            self._publish(name, session, observation)
+            query = params.get("text") if command == "find" else None
+            public = self._project(observation, params, query=query)
+            if previous and params.get("view") != "semantic" and not params.get("_plan_internal"):
+                public["diff"] = project_diff(diff_observations(previous, observation),
+                    self._project(previous, params, query=query), public, max_changes=params.get("max_nodes", 80))
+            return public
+        if command == "wait":
+            condition = {"selector": params.get("target"), "property": params.get("property", "text"),
+                         "equals": params.get("equals"), "timeoutMs": params.get("timeout_ms", 5000)}
+            return self._wait_command(name, session, condition, params)
+        if command == "screenshot":
+            destination = self.store.artifacts(name, uuid.uuid4().hex) / "screen.png"
+            self.transport.screenshot(session["device"], destination)
+            return {"path": str(destination), "capturedAt": now(), "device": session["device"]}
+        return self._action(name, session, command, params)
+
+    def _inspect(self, observation, params):
+        if params.get("frame_id") != observation.get("frameId"):
+            raise AgentError("FRAME_NOT_FOUND", "The frozen frame does not match frame_id.")
+        matches = select_nodes(observation, params["target"]) if params.get("target") else observation["nodes"]
+        maximum = positive_integer(params.get("max_nodes"), "max_nodes", 80, 5000)
+        refs = {node["ref"] for node in matches[:maximum]}
+        by_ref = {node["ref"]: node for node in observation["nodes"]}
+        ancestors = set()
+        for node in matches[:maximum]:
+            parent = node.get("parent")
+            while parent in by_ref and parent not in ancestors:
+                ancestors.add(parent)
+                parent = by_ref[parent].get("parent")
+        selected_nodes = [deepcopy(node) for node in observation["nodes"] if node["ref"] in refs | ancestors]
+        filtered = len(matches) != len(observation["nodes"])
+        omitted = max(0, len(matches) - len(refs))
+        quality = {**deepcopy(observation["quality"]), "sourceComplete": observation["quality"].get("complete"),
+                   "complete": observation["quality"].get("complete") is True and not filtered and not omitted,
+                   "truncated": bool(omitted), "filtered": filtered, "returnedNodes": len(selected_nodes),
+                   "absenceEvidence": False}
+        return {"frameId": observation["frameId"], "capturedAt": observation.get("capturedAt"),
+                "sessionEpoch": observation.get("sessionEpoch"), "device": observation.get("device"),
+                "fresh": False, "readOnly": True, "matches": len(matches),
+                "nodes": selected_nodes,
+                "quality": quality,
+                "projection": {"view": "frozen-detail", "returnedMatches": len(refs),
+                               "omittedMatches": max(0, len(matches) - len(refs)), "ancestorCount": len(ancestors - refs)}}
+
+    def _run_plan(self, name, session, params):
+        from .execution import RunStore
+        from .plans import PlanBudget, run_plan
+        run_id = params.get("run_id") or uuid.uuid4().hex
+        # Resolve a lazy transport before changing run/ownership state.
+        transport = self.transport
+        journal = RunStore(self.store.root, run_id)
+        journal.begin(params["plan"], session)
+        self.store.claim_device(session)
+        budget = PlanBudget(params["plan"]["limits"])
+        self._budget, self._run_store = budget, journal
+        self._last_capture = None
+        self._last_capture_time = None
+        old_guard = getattr(transport, "execution_guard", None)
+        transport.execution_guard = lambda: (self._interrupt(), budget.remaining_ms())[1]
+        frame_before = None
+        final_projection = {"view": "tree", "compact": True, **params}
+        final_query = None
+
+        def checkpoint(event):
+            nonlocal frame_before
+            event = deepcopy(event)
+            if event.get("event", event.get("type")) == "step_started":
+                frame_before = (session.get("frame") or {}).get("frameId")
+            summary = event.get("result", {})
+            event["basisFrameId"] = frame_before
+            event["beforeFrameId"] = summary.get("beforeFrameId")
+            event["afterFrameId"] = summary.get("afterFrameId", summary.get("frameId"))
+            event["runId"] = run_id
+            journal.checkpoint(event)
+
+        def executor(command, inputs):
+            nonlocal final_projection, final_query
+            self._interrupt()
+            # The selected HDC target is explicit on every native call. A run
+            # checks connectivity/boot once; don't enumerate devices before
+            # each immediate local step. Explicit refresh requests recheck.
+            if inputs.get("_plan_refresh"):
+                with self._measure("preflight"):
+                    self._check_device(name, session)
+            inputs = {"view": params.get("view", "tree"), "compact": params.get("compact", True),
+                      "max_nodes": params.get("max_nodes", 80), **inputs, "_plan_internal": True}
+            final_projection = {key: value for key, value in inputs.items() if not key.startswith("_")}
+            final_query = inputs.get("text") if command == "find" else None
+            result = self._execute_locked(name, session, command, inputs)
+            return result
+
+        def evaluate(condition):
+            self._interrupt()
+            observation, source = self._run_frame(session)
+            if source == "captured":
+                self._publish(name, session, observation)
+            return self._evaluate_frame(session["frame"], condition)
+
+        try:
+            # A run always begins with fresh evidence; old cached state is not a precondition proof.
+            session["frameValid"] = False
+            with self._measure("statePersistence"):
+                self.store.save(name, session)
+            with self._measure("preflight"):
                 self._check_device(name, session)
-                if command == "capabilities":
-                    return self._capabilities(session)
-                if command in {"observe", "find"}:
-                    previous = session.get("frame")
-                    observation = self._capture(session)
-                    self._publish(name, session, observation)
-                    query = params.get("text") if command == "find" else None
-                    public = self._project(observation, params, query=query)
-                    if previous:
-                        public["diff"] = project_diff(
-                            diff_observations(previous, observation),
-                            self._project(previous, params, query=query), public,
-                            max_changes=params.get("max_nodes", 80))
-                    return public
-                if command == "wait":
-                    condition = {"selector": params.get("target"), "property": params.get("property", "text"),
-                                 "equals": params.get("equals"), "timeoutMs": params.get("timeout_ms", 5000)}
-                    return self._wait_command(name, session, condition, params)
-                if command == "screenshot":
-                    op_id = uuid.uuid4().hex
-                    destination = self.store.artifacts(name, op_id) / "screen.png"
-                    self.transport.screenshot(session["device"], destination)
-                    return {"path": str(destination), "capturedAt": now(), "device": session["device"]}
-                return self._action(name, session, command, params)
+            result = run_plan(params["plan"], executor, evaluate, checkpoint=checkpoint, budget=budget)
+            result.update(runId=run_id, replayAllowed=False, deviceOwnership="session_until_release_or_detach")
+            if result["status"] not in {"completed", "yielded"}:
+                session["frameValid"] = False
+            try:
+                # The on-disk session stayed invalid throughout this run.
+                # Publish only its final state, not every intermediate frame.
+                with self._measure("statePersistence"):
+                    self.store.save(name, session)
+            except (Exception, KeyboardInterrupt) as exc:
+                session["frameValid"] = False
+                result.setdefault("warnings", []).append("Failed to persist invalidated refs: " + type(exc).__name__)
+            if self._last_capture:
+                result["observation"] = self._project(self._last_capture, final_projection, query=final_query)
+                result["observationRole"] = "last_captured_not_necessarily_post_action"
+            result["frameValidForActions"] = session["frameValid"]
+            # Keep one decision view, not a duplicate full page inside lastResult.
+            if isinstance(result.get("lastResult"), dict):
+                result["lastResult"] = {key: value for key, value in result["lastResult"].items()
+                                        if key != "observation" and key not in {"nodes", "items", "regions", "facts", "controls", "actions", "fields"}}
+            result["profile"] = {"stagesMs": {k: round(v, 3) for k, v in self._metrics.items()}, "modelMs": None}
+            try:
+                journal.finish(result)
+            except AgentError as exc:
+                result["persistenceError"] = exc.to_dict()
+                result["status"] = "unknown"
+                result["yieldReason"] = "receipt_persistence_failed"
+            return result
+        except BaseException as cause:
+            error = cause.to_dict() if isinstance(cause, AgentError) else {"code": "CANCELLED" if isinstance(cause, KeyboardInterrupt) else "INTERNAL_ERROR"}
+            try:
+                journal.finish({"status": "unknown", "error": error, "runId": run_id})
+            except (Exception, KeyboardInterrupt):
+                pass
+            raise
+        finally:
+            self._budget, self._run_store = None, None
+            transport.execution_guard = old_guard
+
+    def _evaluate_frame(self, frame, condition):
+        selector, prop, expected, _ = self._condition(condition)
+        nodes = select_nodes(frame, selector)
+        complete = frame["quality"].get("complete") is True
+        actual = nodes[0].get(prop) if len(nodes) == 1 else (False if not nodes and complete and prop == "visible" else None)
+        status = "unknown" if actual is None or len(nodes) > 1 else "passed" if type(actual) is type(expected) and actual == expected else "failed"
+        result = {"status": status, "frameId": frame["frameId"], "selector": deepcopy(selector),
+                  "property": prop, "expected": expected, "actual": actual, "matches": len(nodes),
+                  "observationComplete": complete}
+        if self._run_store is not None:
+            result["evidenceRef"] = {"runId": self._run_store.run_id, "frameId": frame["frameId"]}
+        return result
 
     @contextmanager
     def _frame_guard(self, name, session):
@@ -154,10 +384,13 @@ class Agent:
                 old = self.store.load(name)
                 if old["device"] != device:
                     raise AgentError("SESSION_EXISTS", "Detach the existing session before choosing another device.")
+                if self.store.device_owner(device) == self.store._owner_identity(old):
+                    raise AgentError("DEVICE_OWNED", "This session owns the device; release or detach before reattaching.")
             boot = self.transport.boot_id(device)
             session = {"schemaVersion": SCHEMA_VERSION, "name": name, "device": device,
                        "epoch": uuid.uuid4().hex, "bootId": boot, "app": None,
                        "createdAt": now(), "frame": None, "frameValid": False}
+            session["ownerToken"] = uuid.uuid4().hex
             self.store.save(name, session)
             return {"session": name, "device": device, "epoch": session["epoch"],
                     "warnings": [] if boot else ["Device boot identity is unavailable; refs are rechecked against a fresh observation before actions."]}
@@ -180,7 +413,8 @@ class Agent:
     def _capabilities(self, session):
         return {"backend": "hdc-uitest", "device": session["device"],
                 "runtime": self._runtime_capabilities(session["device"]),
-                "implemented": ["observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot"],
+                "implemented": ["observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot",
+                                "run", "inspect", "report", "claim", "release", "semantic_view"],
                 "experimental": ["native_text_input", "window_metadata"],
                 "unsupported": ["model_planning", "visual_assertions", "event_watch", "automatic_recovery"],
                 "bootIdentity": "available" if session.get("bootId") else "unknown",
@@ -190,19 +424,46 @@ class Agent:
         return {key: value for key, value in self.transport.capabilities(device).items() if key != "help"}
 
     def _capture(self, session, *, timeout_ms=None):
-        raw = self.transport.capture_layout(session["device"], **({"timeout_ms": timeout_ms} if timeout_ms is not None else {}))
-        observation = normalize_layout(raw, uuid.uuid4().hex)
+        self._interrupt()
+        if self._budget is not None:
+            self._budget.consume_capture()
+            timeout_ms = min(timeout_ms or 60000, self._budget.remaining_ms())
+        with self._measure("capture"):
+            raw = self.transport.capture_layout(session["device"], **({"timeout_ms": timeout_ms} if timeout_ms is not None else {}))
+        self._last_capture_time = time.perf_counter()
+        self._counts["captures"] = self._counts.get("captures", 0) + 1
+        with self._measure("normalize"):
+            observation = normalize_layout(raw, uuid.uuid4().hex)
         observation.update(capturedAt=now(), sessionEpoch=session["epoch"], device=session["device"])
+        self._last_capture = observation
+        if self._run_store is not None:
+            with self._measure("evidencePersistence"):
+                self._run_store.save_frame(observation)
         return observation
 
     def _publish(self, name, session, observation):
         session["frame"] = observation
         session["frameValid"] = True
-        self.store.save(name, session)
+        if self._run_store is None:
+            with self._measure("statePersistence"):
+                self.store.save(name, session)
 
     def _project(self, observation, params=None, *, query=None):
+        if (params or {}).get("_plan_internal"):
+            # The runner consumes frame IDs and exact assertions. Only its
+            # final result needs a rendered decision page.
+            return {key: observation[key] for key in ("frameId", "capturedAt", "sessionEpoch")
+                    if key in observation}
+        self._counts["projections"] = self._counts.get("projections", 0) + 1
+        with self._measure("projection"):
+            return self._project_view(observation, params, query=query)
+
+    def _project_view(self, observation, params=None, *, query=None):
         params = params or {}
         maximum = positive_integer(params.get("max_nodes"), "max_nodes", 80, 5000)
+        if params.get("view") == "semantic":
+            from .semantic import semantic_page
+            return semantic_page(observation, max_items=maximum, query=query)
         public = project_observation(observation, max_nodes=maximum, interactive=params.get("interactive", False), query=query)
         if params.get("compact", False):
             public["projection"]["compact"] = True
@@ -214,7 +475,22 @@ class Agent:
                                for node in public["nodes"]]
         return public
 
-    def _fresh_target(self, session, target):
+    def _run_frame(self, session, *, refresh=False):
+        """Reuse only a just-published frame inside this uninterrupted run.
+
+        This is a bounded-age observation, not a guarantee of a static UI.
+        Cross-call caches, failed actions and expired observations never qualify.
+        """
+        frame = session.get("frame")
+        if (not refresh and self._run_store is not None and session.get("frameValid")
+                and frame is not None and frame is self._last_capture
+                and self._last_capture_time is not None
+                and 0 <= time.perf_counter() - self._last_capture_time <= 1.0):
+            self._counts["reusedFrames"] = self._counts.get("reusedFrames", 0) + 1
+            return frame, "reused"
+        return self._capture(session), "captured"
+
+    def _fresh_target(self, session, target, *, refresh=False):
         if target is None:
             raise AgentError("TARGET_REQUIRED", "An explicit selector or current ref is required.", exit_code=2)
         old = None
@@ -223,7 +499,7 @@ class Agent:
             if not session.get("frameValid") or not session.get("frame"):
                 raise AgentError("STALE_REF", "Refs are invalid after an action, timeout or disconnect; observe again.")
             old = resolve_target(session["frame"], target)
-        observation = self._capture(session)
+        observation, _ = self._run_frame(session, refresh=refresh)
         if old is None:
             node = resolve_target(observation, target)
         else:
@@ -338,6 +614,14 @@ class Agent:
         return selector, prop, expected, timeout
 
     def _wait(self, session, condition, *, initial_observation=None):
+        observation, assertion = self._wait_impl(session, condition, initial_observation=initial_observation)
+        assertion["selector"] = deepcopy(condition["selector"])
+        assertion["frameId"] = observation.get("frameId") if observation else None
+        if self._run_store is not None and observation is not None:
+            assertion["evidenceRef"] = {"runId": self._run_store.run_id, "frameId": observation["frameId"]}
+        return observation, assertion
+
+    def _wait_impl(self, session, condition, *, initial_observation=None):
         selector, prop, expected, timeout = self._condition(condition)
         deadline = time.monotonic() + timeout / 1000
         attempts = 0
@@ -452,8 +736,9 @@ class Agent:
         try:
             device = session["device"]
             node = None
+            previous_capture = self._last_capture
             if command in {"press", "fill"}:
-                node, observation = self._fresh_target(session, params.get("target"))
+                node, observation = self._fresh_target(session, params.get("target"), refresh=params.get("_plan_refresh", False))
             if command == "fill":
                 if not isinstance(params.get("text"), str) or "\x00" in params["text"]:
                     raise AgentError("INVALID_ARGUMENT", "fill requires a string text value without NUL characters.", exit_code=2)
@@ -474,19 +759,36 @@ class Agent:
                 if direction not in {"up", "down", "left", "right"}:
                     raise AgentError("INVALID_ARGUMENT", "Unsupported scroll direction.", exit_code=2)
                 if params.get("target"):
-                    node, observation = self._fresh_target(session, params["target"])
+                    node, observation = self._fresh_target(session, params["target"], refresh=params.get("_plan_refresh", False))
                     if node.get("scrollable") is not True:
                         raise AgentError("TARGET_NOT_SCROLLABLE", "Select a scrollable container.")
                 else:
-                    observation = self._capture(session)
+                    observation, _ = self._run_frame(session, refresh=params.get("_plan_refresh", False))
                     candidates = [n for n in observation["nodes"] if n.get("scrollable") is True and n.get("bounds") and n.get("visible") is not False]
                     if len(candidates) != 1:
                         raise AgentError("SCROLL_CONTAINER_REQUIRED", "Specify a scrollable container when zero or multiple containers are visible.", details={"count": len(candidates)})
                     node = candidates[0]
                     self._require_actionable(node, observation)
+            if observation is None and params.get("_plan_refresh"):
+                observation = self._capture(session)
+            if params.get("_plan_before"):
+                if observation is None:
+                    observation, _ = self._run_frame(session, refresh=params.get("_plan_refresh", False))
+                result["beforeFrameId"] = observation["frameId"]
+                result["guardAssertions"] = [self._evaluate_frame(observation, condition)
+                                             for condition in params["_plan_before"]]
+                if any(item["status"] != "passed" for item in result["guardAssertions"]):
+                    raise AgentError("PRECONDITION_NOT_MET", "A step's declared precondition did not pass; action was not dispatched.")
             # The state write must succeed before dispatch. Never restore these refs on failure.
+            if observation is not None:
+                result["beforeFrameId"] = observation["frameId"]
+                if self._run_store is not None:
+                    result["observationSource"] = "reused" if observation is previous_capture else "captured"
+                    result["targetFrameAgeMs"] = round((time.perf_counter() - self._last_capture_time) * 1000, 3)
+            self._interrupt()
             session["frameValid"] = False
-            self.store.save(name, session)
+            if self._run_store is None:
+                self.store.save(name, session)
             dispatch_started = time.monotonic()
             action.update(status="unknown", dispatched="unknown")
             if command == "press":
@@ -532,6 +834,7 @@ class Agent:
             else:
                 result["assertion"] = result["inputVerification"]
             self._publish(name, session, observation)
+            result["afterFrameId"] = observation["frameId"]
             result.pop("_lastInputObservation", None)
             result["observation"] = self._project(observation, params)
             return result
@@ -565,12 +868,13 @@ class Agent:
             raise exc from (None if exc is cause else cause)
         finally:
             result.setdefault("timings", {})["totalMs"] = round((time.monotonic() - started) * 1000, 2)
-            try:
-                self.store.trace(name, {"operationId": operation, "command": command, "at": now(),
-                                       "action": deepcopy(action), "assertion": result["assertion"],
-                                       "timings": result["timings"]})
-            except (Exception, KeyboardInterrupt):
-                result.setdefault("warnings", []).append("Trace could not be written; this does not change the action outcome.")
+            if self._run_store is None:
+                try:
+                    self.store.trace(name, {"operationId": operation, "command": command, "at": now(),
+                                           "action": deepcopy(action), "assertion": result["assertion"],
+                                           "timings": result["timings"]})
+                except (Exception, KeyboardInterrupt):
+                    result.setdefault("warnings", []).append("Trace could not be written; this does not change the action outcome.")
 
     def _evidence(self, name, session, operation, observation):
         result = {"warnings": []}

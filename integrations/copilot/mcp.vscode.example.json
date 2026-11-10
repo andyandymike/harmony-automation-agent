@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "harmonyDevice": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-m", "harmony_agent.mcp", "--state-dir", "${workspaceFolder}/.harmony-agent"],
+      "cwd": "${workspaceFolder}"
+    },
+    "harmonyEvidence": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-m", "harmony_agent.mcp", "--state-dir", "${workspaceFolder}/.harmony-agent", "--read-only"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

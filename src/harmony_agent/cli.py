@@ -59,7 +59,7 @@ def build_parser():
                 flags = ["--" + field.replace("_", "-")]
             if definition["kind"] == "integer":
                 kwargs["type"] = int
-            elif definition["kind"] == "expect":
+            elif definition["kind"] in {"expect", "plan"}:
                 kwargs["type"] = _json_object
             elif definition["kind"] == "boolean":
                 kwargs["action"] = "store_true"

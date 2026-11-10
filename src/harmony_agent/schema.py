@@ -19,6 +19,11 @@ SELECTOR_ID_FIELDS = {"hostWindowId", "displayId", "window", "windowId", "displa
 
 # A single definition drives argparse, request validation and the schema command.
 FIELDS = {
+    "view": {"kind": "enum", "choices": ["tree", "semantic"], "help": "Return a tree or a semantic decision view."},
+    "profile": {"kind": "boolean", "help": "Include measured core stages; unavailable model/host timings remain null."},
+    "plan": {"kind": "plan", "help": "Versioned bounded JSON plan. Prefer --request FILE for nested plans."},
+    "run_id": {"kind": "string", "help": "Unique local execution ID; reused IDs are never replayed."},
+    "frame_id": {"kind": "string", "help": "Exact immutable observation frame ID to inspect."},
     "session": {"kind": "string", "default": "default", "help": "Named local session (default: default)."},
     "device": {"kind": "string", "help": "Exact HDC device ID; required when attaching."},
     "app": {"kind": "string", "help": "Application bundle name."},
@@ -34,6 +39,8 @@ FIELDS = {
                     "help": "Show interactive controls while retaining business facts."},
     "compact": {"kind": "boolean", "default": False,
                 "help": "Omit unknown and empty optional node fields; preserve text values and explicit states."},
+    "full": {"kind": "boolean", "default": False,
+             "help": "Return the full saved report, including duplicate step copies and the saved page."},
     "direction": {"kind": "enum", "choices": ["up", "down", "left", "right"],
                   "help": "Scroll direction: up, down, left or right."},
     "property": {"kind": "enum", "choices": list(PROPERTIES), "default": "text",
@@ -43,6 +50,12 @@ FIELDS = {
 }
 
 COMMANDS = {
+    "claim": {"help": "Reserve device mutations for this session until release or detach.", "positional": [], "options": [], "required": []},
+    "release": {"help": "Release this session's device claim and invalidate cached refs.", "positional": [], "options": [], "required": []},
+    "run": {"help": "Execute a bounded conditional plan under exclusive device ownership.", "positional": [], "options": ["plan", "run_id", "view", "max_nodes", "compact"], "required": ["plan"],
+            "field_overrides": {"compact": {"default": True}}},
+    "report": {"help": "Read a persisted run without contacting the device or replaying actions.", "positional": ["run_id"], "options": ["full"], "required": ["run_id"]},
+    "inspect": {"help": "Expand a frozen frame without contacting the device.", "positional": [], "options": ["frame_id", "run_id", "target", "max_nodes"], "required": ["frame_id"]},
     "doctor": {"help": "Diagnose HDC and device readiness.", "positional": [], "options": [], "required": []},
     "devices": {"help": "List connected HDC devices.", "positional": [], "options": [], "required": []},
     "attach": {"help": "Attach a named session to an explicitly selected device.", "positional": [], "options": [], "required": ["device"]},
@@ -62,6 +75,11 @@ COMMANDS = {
     "help": {"help": "Show command help.", "positional": ["command_name"], "options": [], "required": []},
     "schema": {"help": "Show the JSON request schema.", "positional": ["command_name"], "options": [], "required": []},
 }
+
+for _spec in COMMANDS.values():
+    _spec["options"].append("profile")
+for _name in ("observe", "find", "open", "press", "fill", "scroll", "back", "wait"):
+    COMMANDS[_name]["options"].append("view")
 
 
 # Every command returning an observation supports the same output controls.
@@ -158,6 +176,9 @@ def _validate_field(name, value):
         return validate_selector(value)
     elif kind == "expect":
         return validate_expect(value)
+    elif kind == "plan":
+        from .plans import validate_plan
+        return validate_plan(value)
     elif kind == "scalar" and type(value) not in (str, bool):
         invalid(f"{name} must be a string or boolean.")
     return value
@@ -238,6 +259,8 @@ def _field_schema(name, command=None):
         result["$ref"] = "#/$defs/stableSelector" if command == "wait" else "#/$defs/selector"
     elif kind == "expect":
         result["$ref"] = "#/$defs/expect"
+    elif kind == "plan":
+        result["$ref"] = "#/$defs/plan"
     if "default" in spec:
         result["default"] = spec["default"]
     return result
@@ -275,7 +298,7 @@ def request_schema(command=None):
     stable_fields = {name: deepcopy(spec) for name, spec in selector_fields.items()
                      if name not in {"ref", "parent"}}
     stable_fields["within"] = {"$ref": "#/$defs/stableSelector"}
-    return {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "Harmony Agent requests",
+    result = {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "Harmony Agent requests",
             "$defs": {
                 "selector": {"oneOf": [{"type": "string", "minLength": 1, "pattern": "\\S"},
                     {"type": "object", "minProperties": 1, "additionalProperties": False, "properties": selector_fields}]},
@@ -292,3 +315,17 @@ def request_schema(command=None):
                         "equals": {"type": ["string", "boolean"]},
                         "timeoutMs": _field_schema("timeout_ms")}}},
             "oneOf": variants}
+    if "run" in names:
+        from .plans import plan_schema
+        plan = plan_schema()
+        def relocate(value):
+            if isinstance(value, dict):
+                return {key: ("#/$defs/plan_" + item[len("#/$defs/"):] if key == "$ref" and isinstance(item, str)
+                              and item.startswith("#/$defs/") else relocate(item)) for key, item in value.items()}
+            if isinstance(value, list):
+                return [relocate(item) for item in value]
+            return value
+        result["$defs"].update({"plan_" + key: relocate(value) for key, value in plan.pop("$defs").items()})
+        plan.pop("$schema", None)
+        result["$defs"]["plan"] = relocate(plan)
+    return result
