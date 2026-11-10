@@ -27,4 +27,4 @@ Fresh-turn automatic Skill selection in the desktop UI has not been observed. Ex
 
 No device tasks were run in this check. Prior device/Agent results retain their original revision and scope. External human trials and clean-host SDK setup remain incomplete. An [external trial plan](external-trial.md) now exists, with no enrolled participants or fabricated results.
 
-Installation from the public GitHub Skill path is checked after the source push and recorded separately in the machine-readable evidence.
+The built-in `skill-installer` successfully downloaded `skills/harmony-agent` from public source revision [`d021831`](https://github.com/andyandymike/harmony-automation-agent/commit/d0218318f46a296e77f34602cd60a85cbbfee082) into an empty isolated destination. All five downloaded files matched the repository source and the downloaded Skill passed validation. This verifies the public installation path independently of the maintainer's existing local copy.

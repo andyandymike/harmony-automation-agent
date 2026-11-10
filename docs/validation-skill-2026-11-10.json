@@ -119,5 +119,14 @@
     "External human trials",
     "Clean-host SDK setup"
   ],
-  "githubSkillInstall": "pending until source push"
+  "githubSkillInstall": {
+    "status": "pass",
+    "repository": "andyandymike/harmony-automation-agent",
+    "sourceRevision": "d0218318f46a296e77f34602cd60a85cbbfee082",
+    "path": "skills/harmony-agent",
+    "method": "built-in skill-installer download into an empty isolated destination",
+    "filesMatched": 5,
+    "validator": "pass",
+    "referencesSelfContained": true
+  }
 }
