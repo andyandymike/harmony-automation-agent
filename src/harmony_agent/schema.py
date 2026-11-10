@@ -32,6 +32,8 @@ FIELDS = {
                   "help": "Maximum displayed nodes (1-5000; default: 80)."},
     "interactive": {"kind": "boolean", "default": False,
                     "help": "Show interactive controls while retaining business facts."},
+    "compact": {"kind": "boolean", "default": False,
+                "help": "Omit unknown and empty optional node fields; preserve text values and explicit states."},
     "direction": {"kind": "enum", "choices": ["up", "down", "left", "right"],
                   "help": "Scroll direction: up, down, left or right."},
     "property": {"kind": "enum", "choices": list(PROPERTIES), "default": "text",
@@ -60,6 +62,14 @@ COMMANDS = {
     "help": {"help": "Show command help.", "positional": ["command_name"], "options": [], "required": []},
     "schema": {"help": "Show the JSON request schema.", "positional": ["command_name"], "options": [], "required": []},
 }
+
+
+# Every command returning an observation supports the same output controls.
+# These affect only the public view, never capture, targeting or assertions.
+for _name in ("open", "observe", "find", "press", "fill", "scroll", "back", "wait"):
+    for _field in ("max_nodes", "interactive", "compact"):
+        if _field not in COMMANDS[_name]["options"]:
+            COMMANDS[_name]["options"].append(_field)
 
 
 def field_definition(name, command=None):

@@ -12,6 +12,7 @@ Save UTF-8 JSON. Run `harmony-agent --request request.json --session task --stat
   "command": "press",
   "input": {
     "session": "task",
+    "compact": true,
     "target": {"text": "Choose", "within": {"id": "order-a"}},
     "expect": {
       "selector": {"id": "selected-order"},
@@ -22,6 +23,8 @@ Save UTF-8 JSON. Run `harmony-agent --request request.json --session task --stat
   }
 }
 ```
+
+On `0.1.0a5` or newer, `compact`, `max_nodes` and `interactive` control the returned observation, including action and `wait` results. Inspect the assertion and reuse that observation for the next decision; a passed condition does not need a separate `wait`. These output options do not weaken internal target checks or assertions.
 
 ## Replace text and verify a related value
 

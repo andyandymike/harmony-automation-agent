@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -9,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from harmony_agent.errors import AgentError
-from harmony_agent.transport import HdcTransport
+from harmony_agent.transport import HdcTransport, _layout_script
 
 
 class TransportTests(unittest.TestCase):
@@ -24,6 +25,13 @@ class TransportTests(unittest.TestCase):
     def receipt(argv, **kwargs):
         marker = re.search(r"__HARMONY_EXIT_[a-f0-9]+__", argv[-1]).group()
         return subprocess.CompletedProcess(argv, 0, ("OK\n" + marker + "0\n").encode(), b"")
+
+    @staticmethod
+    def layout_body(payload):
+        def response(device, args, **kwargs):
+            marker = re.search(r"__HARMONY_LAYOUT_[a-f0-9]+__", args[-1]).group()
+            return "Exporter succeeded\n" + marker + "\n" + payload
+        return response
 
     def test_shell_quotes_unicode_metacharacters_without_host_shell(self):
         value = "中文 '$HOME' $(touch /tmp/pwn); `id`\nsecond line"
@@ -126,29 +134,145 @@ class TransportTests(unittest.TestCase):
             self.transport.key("dev", "Back")
             self.assertEqual(run.call_args.kwargs["timeout"], 10)
 
-    def test_capture_shares_deadline_between_dump_and_transfer(self):
-        budgets = []
-        def receive(device, remote, local, **kwargs):
-            budgets.append(kwargs["timeout_ms"])
-            local.write_text('{"attributes": {}, "children": []}', encoding="utf-8")
-        with patch.object(self.transport, "shell", return_value="") as shell, \
-             patch.object(self.transport, "_receive", side_effect=receive), \
-             patch("harmony_agent.transport.time.monotonic", side_effect=[0, 5, 6, 7]):
+    def test_capture_passes_one_shared_budget_for_dump_transfer_cleanup(self):
+        with patch.object(self.transport, "shell", side_effect=self.layout_body('{"attributes": {}}')) as shell, \
+             patch("harmony_agent.transport.time.monotonic", side_effect=[0, 5]):
             self.transport.capture_layout("dev", timeout_ms=10000)
-        self.assertEqual(shell.call_args_list[0].kwargs["timeout_ms"], 5000)
-        self.assertEqual(budgets, [4000])
+        self.assertEqual(shell.call_args.kwargs["timeout_ms"], 5000)
+        self.assertEqual(shell.call_count, 1)
 
-    def test_layout_cleanup_after_invalid_json(self):
-        def receive(device, remote, local, **kwargs):
-            local.write_text("invalid JSON", encoding="utf-8")
-        with patch.object(self.transport, "shell", return_value="") as shell, patch.object(self.transport, "_receive", side_effect=receive):
+    def test_capture_returns_unicode_json_in_one_hdc_call(self):
+        expected = {"attributes": {"text": "中文\n[Fail] is UI data"}, "children": []}
+        def response(argv, **kwargs):
+            marker = re.search(r"__HARMONY_EXIT_[a-f0-9]+__", argv[-1]).group()
+            boundary = re.search(r"__HARMONY_LAYOUT_[a-f0-9]+__", argv[-1]).group()
+            body = "Exporter succeeded\r\n" + boundary + "\r\n\ufeff" + json.dumps(expected, ensure_ascii=False) + "\r\n"
+            return subprocess.CompletedProcess(argv, 0, (body + "\n" + marker + "0\n").encode(), b"")
+        with patch("harmony_agent.transport.subprocess.run", side_effect=response) as run:
+            self.assertEqual(self.transport.capture_layout("dev"), expected)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(self.transport.calls, 1)
+        argv = run.call_args.args[0]
+        args = shlex.split(argv[-1].split("; __ha_rc=$?;")[0])
+        self.assertEqual(args[:2], ["sh", "-c"])
+        self.assertIn("uitest dumpLayout", args[2])
+        self.assertIn("trap ", args[2])
+        self.assertRegex(args[2], r"/data/local/tmp/ha_[a-f0-9]{32}\.json")
+        self.assertIs(run.call_args.kwargs["shell"], False)
+
+    def test_invalid_layout_does_not_recapture_or_repeat_completed_cleanup(self):
+        with patch.object(self.transport, "shell", side_effect=self.layout_body("invalid JSON")) as shell, \
+             patch.object(self.transport, "_cleanup") as cleanup:
             with self.assertRaises(AgentError) as caught:
                 self.transport.capture_layout("dev")
         self.assertEqual(caught.exception.code, "LAYOUT_INVALID")
-        dump_args = shell.call_args_list[0].args[1]
-        cleanup_args = shell.call_args_list[-1].args[1]
-        self.assertEqual(cleanup_args, ["rm", "-f", "--", dump_args[-1]])
-        self.assertRegex(dump_args[-1], r"^/data/local/tmp/ha_[a-f0-9]{32}\.json$")
+        self.assertEqual(shell.call_count, 1)
+        cleanup.assert_not_called()
+
+    def test_capture_validates_root_and_utf8_byte_limit(self):
+        with patch.object(self.transport, "shell", side_effect=self.layout_body('"not a layout"')):
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev")
+        self.assertEqual(caught.exception.code, "LAYOUT_INVALID")
+        payload = '{"text":"中文"}'
+        with patch.object(self.transport, "shell", side_effect=self.layout_body(payload)), \
+             patch("harmony_agent.transport._LAYOUT_LIMIT", len(payload.encode("utf-8")) - 1):
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev")
+        self.assertEqual(caught.exception.code, "LAYOUT_TOO_LARGE")
+
+    def test_capture_missing_layout_boundary_fails_without_recapture(self):
+        with patch.object(self.transport, "shell", return_value='{"children":[]}') as shell, \
+             patch.object(self.transport, "_cleanup") as cleanup:
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev")
+        self.assertEqual(caught.exception.code, "LAYOUT_INVALID")
+        self.assertEqual(shell.call_count, 1)
+        cleanup.assert_not_called()
+
+    def test_capture_rejects_exporter_zero_exit_failure_diagnostics(self):
+        for source in ("stdout", "stderr"):
+            with self.subTest(source=source):
+                def response(argv, **kwargs):
+                    receipt = re.search(r"__HARMONY_EXIT_[a-f0-9]+__", argv[-1]).group()
+                    boundary = re.search(r"__HARMONY_LAYOUT_[a-f0-9]+__", argv[-1])
+                    body = "\n" + receipt + "0\n"
+                    error = b""
+                    if boundary:
+                        body = "\n" + boundary.group() + '\n{"children":[]}' + body
+                        diagnostic = "[Error] private exporter diagnostic\n"
+                        if source == "stdout":
+                            body = diagnostic + body
+                        else:
+                            error = diagnostic.encode()
+                    return subprocess.CompletedProcess(argv, 0, body.encode(), error)
+                with patch("harmony_agent.transport.subprocess.run", side_effect=response) as run:
+                    with self.assertRaises(AgentError) as caught:
+                        self.transport.capture_layout("dev")
+                self.assertEqual(caught.exception.code, "HDC_COMMAND_FAILED")
+                self.assertNotIn("private", str(caught.exception.to_dict()))
+                self.assertEqual(sum("__HARMONY_LAYOUT_" in call.args[0][-1] for call in run.call_args_list), 1)
+
+    def test_capture_remote_failure_propagates_without_retry(self):
+        failure = AgentError("DEVICE_COMMAND_FAILED", "Device command failed.", details={"remoteExitCode": 17})
+        with patch.object(self.transport, "shell", side_effect=failure) as shell, \
+             patch.object(self.transport, "_cleanup") as cleanup:
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev")
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(shell.call_count, 1)
+        cleanup.assert_not_called()
+
+    def test_capture_timeout_cleanup_is_bounded_and_preserves_failure(self):
+        failure = AgentError("HDC_TIMEOUT", "Timed out.")
+        with patch.object(self.transport, "shell", side_effect=failure) as shell, \
+             patch.object(self.transport, "_cleanup") as cleanup, \
+             patch("harmony_agent.transport.time.monotonic", side_effect=[0, 9.9, 10.1]):
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev", timeout_ms=10000)
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(shell.call_count, 1)
+        self.assertAlmostEqual(shell.call_args.kwargs["timeout_ms"], 100)
+        self.assertEqual(cleanup.call_args.kwargs["timeout_ms"], 1)
+
+    def test_capture_missing_receipt_cleans_up_without_recapture(self):
+        failure = AgentError("REMOTE_RESULT_UNKNOWN", "Missing receipt.")
+        with patch.object(self.transport, "shell", side_effect=failure) as shell, \
+             patch.object(self.transport, "_cleanup") as cleanup, \
+             patch("harmony_agent.transport.time.monotonic", side_effect=[0, 1, 2]):
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev", timeout_ms=10000)
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(shell.call_count, 1)
+        cleanup.assert_called_once()
+        self.assertEqual(cleanup.call_args.kwargs["timeout_ms"], 250)
+
+    def test_capture_bad_utf8_keeps_layout_error_and_hides_payload(self):
+        with patch("harmony_agent.transport.subprocess.run", return_value=subprocess.CompletedProcess([], 0, b"private\xff", b"")) as run:
+            with self.assertRaises(AgentError) as caught:
+                self.transport.capture_layout("dev")
+        self.assertEqual(caught.exception.code, "LAYOUT_INVALID")
+        self.assertNotIn("private", str(caught.exception.to_dict()))
+        self.assertEqual(run.call_count, 2)  # Read plus best-effort cleanup, no recapture.
+
+    @unittest.skipUnless(shutil.which("sh"), "POSIX shell unavailable")
+    def test_capture_script_cleanup_and_original_status(self):
+        target = Path(self.tmp.name) / "layout with 'quote.json"
+        marker = "__HARMONY_LAYOUT_test__"
+        for body, expected_code, expected_output, expected_error in (
+                ('printf \'{"children":[]}\\n\' > "$3"; printf "diagnostic\\n"; printf "noise\\n" >&2',
+                 0, 'diagnostic\n\n' + marker + '\n{"children":[]}\n', 'noise\n'),
+                ('printf \'{"children":[]}\' > "$3"; printf "[Error] partial snapshot\\n"',
+                 0, '[Error] partial snapshot\n\n' + marker + '\n{"children":[]}', ''),
+                ('printf \'partial\' > "$3"; return 17', 17, '', ''),
+                ('return 0', 1, '\n' + marker + '\n', '')):
+            with self.subTest(expected_code=expected_code):
+                script = "uitest() { " + body + "; }; " + _layout_script(target.as_posix(), marker)
+                result = subprocess.run([shutil.which("sh"), "-c", script], capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, expected_code)
+                self.assertEqual(result.stdout.decode(), expected_output)
+                self.assertEqual(result.stderr.decode(), expected_error)
+                self.assertFalse(target.exists())
 
     def test_screenshot_does_not_overwrite(self):
         destination = Path(self.tmp.name) / "existing.png"

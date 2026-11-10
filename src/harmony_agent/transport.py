@@ -24,6 +24,7 @@ _DEVICE_FAILURE = re.compile(r"(?im)^\s*(?:missing parameter\.|invalid (?:parame
                              r"capability not support, clipboard service is not supported)")
 _PNG = b"\x89PNG\r\n\x1a\n"
 _JPEG = b"\xff\xd8\xff"
+_LAYOUT_LIMIT = 32 * 1024 * 1024
 
 
 def _find_hdc(explicit=None):
@@ -86,6 +87,18 @@ def _coordinate(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
         raise AgentError("INVALID_ARGUMENT", "Coordinates must be finite nonnegative numbers.", exit_code=2)
     return str(round(value))
+
+
+def _layout_script(remote, marker):
+    # Run in the device shell, never the host shell. A fresh path prevents a
+    # failed dump from returning an earlier frame. EXIT preserves the dump/cat
+    # status even when cleanup fails; signal traps also run that cleanup.
+    return (f"__ha_layout={shlex.quote(remote)}; "
+            "trap 'rm -f -- \"$__ha_layout\" >/dev/null 2>&1' 0; "
+            "trap 'exit 1' 1 2 15; "
+            'uitest dumpLayout -p "$__ha_layout" && '
+            "{ printf '\\n%s\\n' " + shlex.quote(marker) + "; "
+            'cat "$__ha_layout" 2>/dev/null; }')
 
 
 class HdcTransport:
@@ -197,25 +210,38 @@ class HdcTransport:
             return milliseconds
 
         remote = "/data/local/tmp/ha_" + uuid.uuid4().hex + ".json"
-        with tempfile.TemporaryDirectory(prefix="harmony-layout-") as directory:
-            local = Path(directory) / "layout.json"
-            try:
-                self.shell(device, ["uitest", "dumpLayout", "-p", remote], timeout_ms=remaining())
-                self._receive(device, remote, local, timeout_ms=remaining())
-                if local.stat().st_size > 32 * 1024 * 1024:
-                    raise AgentError("LAYOUT_TOO_LARGE", "The UI layout exceeds the 32 MiB limit.")
-                try:
-                    raw = json.loads(local.read_text(encoding="utf-8-sig"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise AgentError("LAYOUT_INVALID", "The device UI layout is not valid UTF-8 JSON.") from exc
-                if not isinstance(raw, (dict, list)):
-                    raise AgentError("LAYOUT_INVALID", "The device UI layout has an unsupported root value.")
-                return raw
-            finally:
-                # Cleanup gets at most 250 ms within the remaining read budget,
-                # or a 1 ms best-effort allowance when that budget is exhausted.
+        marker = "__HARMONY_LAYOUT_" + uuid.uuid4().hex + "__"
+        try:
+            # Export, return and remove the layout in one HDC round trip. The
+            # ordinary shell receipt validates both export and transfer. No
+            # fallback recapture: a failed read must remain a failed read.
+            output = self.shell(device, ["sh", "-c", _layout_script(remote, marker)], timeout_ms=remaining())
+        except BaseException as exc:
+            # A receipt with a nonzero command status still ran the EXIT trap.
+            # Without a receipt, remote termination/cleanup is uncertain. Bound
+            # the best-effort cleanup by the remaining capture budget.
+            if not isinstance(exc, AgentError) or exc.code not in {
+                    "DEVICE_COMMAND_FAILED", "HDC_NOT_FOUND", "HDC_START_FAILED"}:
                 cleanup_ms = max(1, min(250, (deadline - time.monotonic()) * 1000))
                 self._cleanup(device, remote, timeout_ms=cleanup_ms)
+            if isinstance(exc, AgentError) and exc.code == "HDC_ENCODING_ERROR":
+                raise AgentError("LAYOUT_INVALID", "The device UI layout is not valid UTF-8 JSON.") from exc
+            raise
+        # Preserve exporter diagnostics for _run's zero-exit failure checks,
+        # then separate them from the JSON with a per-capture random boundary.
+        boundary = re.search(r"\r?\n" + re.escape(marker) + r"\r?\n", output)
+        if boundary is None:
+            raise AgentError("LAYOUT_INVALID", "The UI capture did not return its layout boundary.")
+        output = output[boundary.end():]
+        if len(output.encode("utf-8")) > _LAYOUT_LIMIT:
+            raise AgentError("LAYOUT_TOO_LARGE", "The UI layout exceeds the 32 MiB limit.")
+        try:
+            raw = json.loads(output.removeprefix("\ufeff"))
+        except json.JSONDecodeError as exc:
+            raise AgentError("LAYOUT_INVALID", "The device UI layout is not valid UTF-8 JSON.") from exc
+        if not isinstance(raw, (dict, list)):
+            raise AgentError("LAYOUT_INVALID", "The device UI layout has an unsupported root value.")
+        return raw
 
     def screenshot(self, device, destination):
         destination = Path(destination).expanduser().resolve()

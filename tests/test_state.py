@@ -121,6 +121,60 @@ class StateTests(unittest.TestCase):
                 self.first.save("session", value)
                 self.assertEqual(self.first.load("session"), value)
 
+    def test_frame_indexes_are_stored_once_and_restored_as_node_objects(self):
+        value = self.observed_session()
+        before = deepcopy(value)
+        self.first.save("session", value)
+        text = self.first.path("session").read_text(encoding="utf-8")
+        stored = json.loads(text)
+        self.assertEqual(stored["storageFormat"], "harmony-session/indexed-frame/1")
+        self.assertEqual(stored["schemaVersion"], value["schemaVersion"])
+        self.assertEqual(stored["frame"]["facts"], [node["ref"] for node in value["frame"]["facts"]])
+        self.assertLess(len(text), len(json.dumps(value, ensure_ascii=False, separators=(",", ":"))))
+        restored = self.first.load("session")
+        self.assertEqual(restored, value)
+        self.assertNotIn("storageFormat", restored)
+        by_ref = {node["ref"]: node for node in restored["frame"]["nodes"]}
+        for key in ("controls", "facts"):
+            for node in restored["frame"][key]:
+                self.assertIs(node, by_ref[node["ref"]])
+        self.assertEqual(value, before)
+
+    def test_legacy_node_indexes_load_and_migrate_on_next_save(self):
+        value = self.observed_session()
+        path = self.first.path("session")
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(value), encoding="utf-8")
+        restored = self.first.load("session")
+        self.assertEqual(restored, value)
+        self.first.save("session", restored)
+        self.assertIn("storageFormat", json.loads(path.read_text(encoding="utf-8")))
+        self.assertEqual(self.first.load("session"), value)
+
+    def test_load_rejects_corrupt_indexed_storage(self):
+        self.first.save("session", self.observed_session())
+        path = self.first.path("session")
+        original = json.loads(path.read_text(encoding="utf-8"))
+        changes = {
+            "unknown-format": lambda v: v.update(storageFormat="harmony-session/indexed-frame/99"),
+            "invalid-frame": lambda v: v.update(frame=None),
+            "missing-nodes": lambda v: v["frame"].pop("nodes"),
+            "invalid-node-ref": lambda v: v["frame"]["nodes"][0].update(ref=[]),
+            "duplicate-node-ref": lambda v: v["frame"]["nodes"].append(deepcopy(v["frame"]["nodes"][0])),
+            "missing-index": lambda v: v["frame"].pop("facts"),
+            "invalid-index": lambda v: v["frame"].update(facts={}),
+            "node-object-in-index": lambda v: v["frame"].update(facts=[v["frame"]["nodes"][1]]),
+            "unhashable-ref": lambda v: v["frame"].update(facts=[[]]),
+            "unknown-ref": lambda v: v["frame"].update(facts=["@e99~frame-1"]),
+            "missing-format": lambda v: v.pop("storageFormat"),
+        }
+        for label, change in changes.items():
+            with self.subTest(case=label):
+                value = deepcopy(original)
+                change(value)
+                path.write_text(json.dumps(value), encoding="utf-8")
+                self.assert_error("INVALID_SESSION_STATE", lambda: self.first.load("session"))
+
     def test_load_rejects_corrupt_frame_context_and_node_structure(self):
         original = self.observed_session()
         changes = {

@@ -13,6 +13,64 @@ from . import SCHEMA_VERSION
 from .errors import AgentError
 
 
+_STORAGE_FORMAT = "harmony-session/indexed-frame/1"
+
+
+def _stored_session(value):
+    """Deduplicate valid node-object indexes without changing caller data."""
+    if not isinstance(value, dict) or "storageFormat" in value:
+        return value
+    frame = value.get("frame")
+    if not isinstance(frame, dict) or not isinstance(frame.get("nodes"), list):
+        return value
+    nodes = frame["nodes"]
+    if any(not isinstance(node, dict) or not isinstance(node.get("ref"), str) for node in nodes):
+        return value
+    by_ref = {node["ref"]: node for node in nodes}
+    indexes = {}
+    for key in ("controls", "facts"):
+        index = frame.get(key)
+        if not isinstance(index, list):
+            return value
+        refs = []
+        for node in index:
+            # Preserve malformed input for load-time validation rather than
+            # making a corrupt legacy index appear valid during serialization.
+            if (not isinstance(node, dict) or not isinstance(node.get("ref"), str)
+                    or node["ref"] not in by_ref or node != by_ref[node["ref"]]):
+                return value
+            refs.append(node["ref"])
+        indexes[key] = refs
+    return {**value, "storageFormat": _STORAGE_FORMAT, "frame": {**frame, **indexes}}
+
+
+def _loaded_session(value):
+    """Restore indexed files to the existing in-memory frame interface."""
+    if not isinstance(value, dict) or "storageFormat" not in value:
+        return value
+    if value["storageFormat"] != _STORAGE_FORMAT:
+        raise ValueError("Unsupported session storage format")
+    frame = value.get("frame")
+    if not isinstance(frame, dict) or not isinstance(frame.get("nodes"), list):
+        raise ValueError("Invalid indexed session frame")
+    by_ref = {}
+    for node in frame["nodes"]:
+        if (not isinstance(node, dict) or not isinstance(node.get("ref"), str)
+                or node["ref"] in by_ref):
+            raise ValueError("Invalid indexed session node")
+        by_ref[node["ref"]] = node
+    indexes = {}
+    for key in ("controls", "facts"):
+        refs = frame.get(key)
+        if (not isinstance(refs, list)
+                or any(not isinstance(ref, str) or ref not in by_ref for ref in refs)):
+            raise ValueError("Invalid indexed session reference")
+        indexes[key] = [by_ref[ref] for ref in refs]
+    restored = {**value, "frame": {**frame, **indexes}}
+    del restored["storageFormat"]
+    return restored
+
+
 def session_name(value):
     value = "default" if value is None else value
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value):
@@ -142,7 +200,7 @@ class StateStore:
     def load(self, name):
         name = session_name(name)
         try:
-            value = json.loads(self.path(name).read_text(encoding="utf-8"))
+            value = _loaded_session(json.loads(self.path(name).read_text(encoding="utf-8")))
         except FileNotFoundError as exc:
             raise AgentError("NO_SESSION", "Attach a named session to an explicit device first.") from exc
         except (ValueError, RecursionError) as exc:
@@ -160,7 +218,7 @@ class StateStore:
         fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-                json.dump(value, stream, ensure_ascii=False, separators=(",", ":"))
+                json.dump(_stored_session(value), stream, ensure_ascii=False, separators=(",", ":"))
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, path)

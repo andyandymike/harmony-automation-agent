@@ -1,6 +1,6 @@
 # Release readiness
 
-The current `0.1.0a4` display-text candidate is local and unreleased, with 201 offline tests and 14 isolated package checks passed. The [alpha3 core-fix record](validation-alpha3.md) and the alpha2 publication, hosted CI and device evidence below remain specific to their recorded source. No fresh hosted CI or broader device coverage is inferred for alpha4.
+The current `0.1.0a5` performance candidate is unreleased. Its offline suite passed 224 tests with zero skips, and all 14 local isolated build/install checks passed. It adds compact output and action projections, reduces capture round trips and tree copying, and stores indexed session frames. The [alpha3 core-fix record](validation-alpha3.md) and the alpha2 publication, hosted CI and device evidence below remain specific to their recorded source. No fresh hosted CI or broader device coverage is inferred for alpha5.
 
 Updated: 2026-11-10. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 
@@ -40,6 +40,8 @@ The earlier claim that only personal Skill installation remained was too broad: 
 ## Local release checks
 
 The candidate should be built with a pinned source revision and tested in a new virtual environment. Separate no-device contract checks from device execution. A successful wheel build does not prove SDK discovery, emulator startup, signing or device authorization on a new host.
+
+Alpha5 accepts valid older session files and migrates stored frames on save. The indexed format is not readable by alpha4; detach the session before downgrading, then attach and observe with the selected older version. See [protocol and version handling](compatibility.md#protocol-and-version-handling).
 
 For a machine-readable check, use `python scripts/release-check.py --help` and the options supported by that revision. The release checker must use the selected local toolchain, avoid implicit registry dependency downloads in offline mode, and report skipped or unavailable checks explicitly.
 

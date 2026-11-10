@@ -70,6 +70,25 @@ class CliTests(unittest.TestCase):
         self.run_cli("--session", "before", "observe", "--session", "after", "--json")
         self.assertEqual(FakeAgent.calls[0][1]["session"], "after")
 
+    def test_observation_controls_are_available_on_actions_and_requests(self):
+        code, out, err = self.run_cli("press", "id=x", "--compact", "--max-nodes", "3", "--interactive", "--json")
+        self.assertEqual((code, err), (0, ""))
+        params = FakeAgent.calls[-1][1]
+        self.assertIs(params["compact"], True)
+        self.assertIs(params["interactive"], True)
+        self.assertEqual(params["max_nodes"], 3)
+        request = {"command": "wait", "input": {"target": "id=x", "equals": "", "compact": True, "max_nodes": 2}}
+        code, _, err = self.run_cli("--request", self.request_file(request), "--json")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIs(FakeAgent.calls[-1][1]["compact"], True)
+        for command in ("open", "observe", "find", "press", "fill", "scroll", "back", "wait"):
+            properties = request_schema(command)["oneOf"][0]["properties"]["input"]["properties"]
+            self.assertEqual(properties["compact"]["type"], "boolean")
+            self.assertFalse(properties["compact"]["default"])
+
+    def test_request_compact_rejects_non_boolean(self):
+        self.assert_error(["--request", self.request_file({"command": "observe", "compact": "true"})])
+
     def test_help_and_version_do_not_create_agent(self):
         for args in [("press", "--help", "--json"), ("help", "fill", "--json"), ("--version", "--json")]:
             with self.subTest(args=args):

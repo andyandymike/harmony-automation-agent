@@ -5,23 +5,21 @@ This is a quick usage reference. The outer agent owns intent and planning; the C
 ## Start with the installed contract
 
 ```sh
-harmony-agent help
-harmony-agent schema --json
+harmony-agent --version --json
 harmony-agent doctor --json
-harmony-agent devices --json
 ```
 
-Select one exact device. Attach a named session and keep using that session for subsequent commands. Consult `help <command>` or `schema <command> --json` instead of guessing flags. The current alpha does not require a model key for its core commands.
+Select one exact device from `doctor`'s device list. Use `devices --json` when only enumeration is needed. Attach a named session and keep using that session for subsequent commands. Consult `help <command>` or `schema <command> --json` instead of guessing flags, then reuse the installed contract during the task. Run diagnostics again when setup changes or a failure calls for them. The current alpha does not require a model key for its core commands.
 
 Record the installed package version and `schemaVersion` with a task report. Reject an output schema version the agent cannot interpret. Request fields are strict; do not pass guessed flags or unrecognized request keys. A successful diagnostic command still requires inspection of `data.ready` and its individual checks.
 
 ## Read, act with an expectation, then use fresh refs
 
-1. Run `observe --session <name> --json` and inspect the current app/window context, business facts, and observation quality.
+1. Use the latest successful command's returned observation, or run `observe --session <name> --compact --json` when none is available. Inspect the current app/window context, business facts, and observation quality.
 2. Use an exact stable selector or a ref actually returned by this observation. Resolve ambiguity before acting; do not pick an arbitrary match.
 3. Express the expected effect with the action whenever possible. Text equality and supported boolean properties are preferable to a fixed sleep.
 4. Check action and assertion results separately. A successful device command alone does not prove the task succeeded.
-5. After an action, obtain or use a fresh returned observation. Do not reuse refs from before the action, including after failure or timeout.
+5. Reuse the action's fresh returned observation, including after `open` or `scroll`. When `expect` passes, another `wait` for the same condition adds no new verification. Read again if context is insufficient, the UI changes, or the outcome is uncertain. Do not reuse refs from before the action, including after failure or timeout.
 
 Example UTF-8 request file, assuming the fixture is open in session `demo` and the counter has been reset to zero:
 
@@ -31,6 +29,7 @@ Example UTF-8 request file, assuming the fixture is open in session `demo` and t
   "command": "press",
   "input": {
     "session": "demo",
+    "compact": true,
     "target": "id=fixture.increment",
     "expect": {
       "selector": {"id": "fixture.counter"},
@@ -47,6 +46,8 @@ harmony-agent --request increment.json --json
 ```
 
 Request files avoid shell quoting differences and allow structured selectors. Their keys and types are validated against the same command definition used by the CLI.
+
+From `0.1.0a5`, commands that return observations accept `--compact`, `--max-nodes` and `--interactive`, including actions and `wait`. Compact output omits optional null/empty node fields while preserving input text/value empty strings, root parents, booleans, zero and quality metadata. It is marked by `projection.compact=true`; a missing optional attribute must not be interpreted as false. See [compact output semantics](../skills/harmony-agent/references/outcomes.md#compact-output). `find` and projection options reduce returned content while still capturing the full UI tree.
 
 ## Handle incomplete or failed outcomes
 

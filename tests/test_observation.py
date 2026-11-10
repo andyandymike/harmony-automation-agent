@@ -339,6 +339,28 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(before, self.observation)
         self.assertFalse(diff_observations(view, view)["comparable"])
 
+    def test_projection_result_remains_independent_of_full_frame(self):
+        self.observation["extra"] = {"values": ["original"]}
+        before = deepcopy(self.observation)
+        view = project_observation(self.observation, max_nodes=500)
+        resolve_target(view, "id=first.submit")["bounds"]["left"] = -100
+        view["extra"]["values"].append("changed")
+        view["projection"]["scope"]["kind"] = "changed"
+        view["quality"]["warnings"].append({"code": "CHANGED"})
+        view["facts"].clear()
+        self.assertEqual(before, self.observation)
+
+    def test_project_diff_result_does_not_share_nested_values(self):
+        old = normalize_layout([], "f1")
+        new = normalize_layout([{"id": "added", "text": "value"}], "f2")
+        full_diff = diff_observations(old, new)
+        full_diff["extra"] = {"values": ["original"]}
+        before = deepcopy(full_diff)
+        view = project_diff(full_diff, project_observation(old), project_observation(new), max_changes=1)
+        view["added"][0]["text"] = "changed"
+        view["extra"]["values"].append("changed")
+        self.assertEqual(before, full_diff)
+
     def test_budget_prefers_state_over_empty_containers(self):
         raw = {"type": "Column", "children": [{"type": "Column"} for _ in range(100)] + [
             {"type": "Text", "key": "counter", "text": "Counter: 3"}]}

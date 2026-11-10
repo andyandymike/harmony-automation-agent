@@ -45,6 +45,8 @@ class Agent:
         params = dict(params or {})
         if "max_nodes" in params:
             positive_integer(params["max_nodes"], "max_nodes", 80, 5000)
+        if "compact" in params and type(params["compact"]) is not bool:
+            raise AgentError("INVALID_ARGUMENT", "compact must be a boolean.", exit_code=2)
         if "timeout_ms" in params:
             params["timeout_ms"] = positive_integer(params["timeout_ms"], "timeout_ms",
                                                      DEFAULT_INPUT_TIMEOUT_MS if command == "fill" else 5000)
@@ -97,7 +99,7 @@ class Agent:
                 if command == "wait":
                     condition = {"selector": params.get("target"), "property": params.get("property", "text"),
                                  "equals": params.get("equals"), "timeoutMs": params.get("timeout_ms", 5000)}
-                    return self._wait_command(name, session, condition)
+                    return self._wait_command(name, session, condition, params)
                 if command == "screenshot":
                     op_id = uuid.uuid4().hex
                     destination = self.store.artifacts(name, op_id) / "screen.png"
@@ -201,7 +203,16 @@ class Agent:
     def _project(self, observation, params=None, *, query=None):
         params = params or {}
         maximum = positive_integer(params.get("max_nodes"), "max_nodes", 80, 5000)
-        return project_observation(observation, max_nodes=maximum, interactive=params.get("interactive", False), query=query)
+        public = project_observation(observation, max_nodes=maximum, interactive=params.get("interactive", False), query=query)
+        if params.get("compact", False):
+            public["projection"]["compact"] = True
+            # Empty business values and root parent links remain explicit.
+            # In optional fields, missing means unknown/empty, never false.
+            public["nodes"] = [{key: value for key, value in node.items()
+                                if key == "parent" or value is not None
+                                and (value != "" or key in {"text", "value"})}
+                               for node in public["nodes"]]
+        return public
 
     def _fresh_target(self, session, target):
         if target is None:
@@ -217,10 +228,12 @@ class Agent:
             node = resolve_target(observation, target)
         else:
             previous = session["frame"]
-            fresh_node = self._relocate_ref(previous, observation, old["ref"])
+            context = {"previous": self._frame_index(previous), "current": self._frame_index(observation),
+                       "relocated": {}}
+            fresh_node = self._relocate_ref(previous, observation, old["ref"], context)
             # Rebind every frame dependency, then apply *all* original
             # predicates again (checked, focused, within, etc.).
-            rebound = self._rebind_selector(previous, observation, target)
+            rebound = self._rebind_selector(previous, observation, target, context)
             matches = select_nodes(observation, rebound)
             if len(matches) != 1 or matches[0]["ref"] != fresh_node["ref"]:
                 raise AgentError("STALE_REF", "The target no longer satisfies the requested conditions; observe again.")
@@ -228,24 +241,33 @@ class Agent:
         self._require_actionable(node, observation)
         return node, observation
 
-    def _relocate_ref(self, previous, current, ref):
+    def _relocate_ref(self, previous, current, ref, context=None):
+        if context is None:
+            context = {"previous": self._frame_index(previous), "current": self._frame_index(current),
+                       "relocated": {}}
+        if ref in context["relocated"]:
+            return context["relocated"][ref]
         old = resolve_target(previous, {"ref": ref})
         keys = ("id", "type", "text", "bounds", "bundleName", "hostWindowId", "displayId")
-        old_context = self._context_signature(previous, old)
+        old_context = self._context_signature(previous, old, context["previous"])
         candidates = [node for node in current["nodes"]
                       if all(node.get(key) == old.get(key) for key in keys)
-                      and self._context_signature(current, node) == old_context]
+                      and self._context_signature(current, node, context["current"]) == old_context]
         if len(candidates) != 1:
             raise AgentError("STALE_REF", "The referenced target or context changed; observe and select again.")
+        context["relocated"][ref] = candidates[0]
         return candidates[0]
 
-    def _rebind_selector(self, previous, current, selector):
+    def _rebind_selector(self, previous, current, selector, context=None):
+        if context is None:
+            context = {"previous": self._frame_index(previous), "current": self._frame_index(current),
+                       "relocated": {}}
         parsed = parse_selector(selector)
         for key in ("ref", "parent"):
             if parsed.get(key) is not None:
-                parsed[key] = self._relocate_ref(previous, current, parsed[key])["ref"]
+                parsed[key] = self._relocate_ref(previous, current, parsed[key], context)["ref"]
         if parsed.get("within") is not None:
-            parsed["within"] = self._rebind_selector(previous, current, parsed["within"])
+            parsed["within"] = self._rebind_selector(previous, current, parsed["within"], context)
         return parsed
 
     @staticmethod
@@ -271,19 +293,31 @@ class Agent:
             raise AgentError("TARGET_NOT_ACTIONABLE", "The target has empty bounds.")
 
     @staticmethod
-    def _context_signature(observation, node):
-        by_ref = {item["ref"]: item for item in observation["nodes"]}
+    def _frame_index(observation):
+        by_ref, children = {}, {}
+        for node in observation["nodes"]:
+            by_ref[node["ref"]] = node
+            children.setdefault(node.get("parent"), []).append(node)
+        return {"by_ref": by_ref, "children": children, "signatures": {}}
+
+    @staticmethod
+    def _context_signature(observation, node, index=None):
+        index = Agent._frame_index(observation) if index is None else index
+        if node["ref"] in index["signatures"]:
+            return index["signatures"][node["ref"]]
+        by_ref = index["by_ref"]
         signature = []
         child = node
         seen = set()
         while child.get("parent") in by_ref and child["parent"] not in seen:
             parent = by_ref[child["parent"]]
             seen.add(parent["ref"])
-            siblings = [(n.get("id"), n.get("type"), n.get("text")) for n in observation["nodes"]
-                        if n.get("parent") == parent["ref"] and n["ref"] != child["ref"]]
+            siblings = [(n.get("id"), n.get("type"), n.get("text"))
+                        for n in index["children"].get(parent["ref"], []) if n["ref"] != child["ref"]]
             signature.append(((parent.get("id"), parent.get("type"), parent.get("text"),
                                parent.get("bundleName"), parent.get("hostWindowId")), siblings))
             child = parent
+        index["signatures"][node["ref"]] = signature
         return signature
 
     def _condition(self, condition):
@@ -303,7 +337,7 @@ class Agent:
         timeout = positive_integer(condition.get("timeoutMs"), "timeoutMs", 5000)
         return selector, prop, expected, timeout
 
-    def _wait(self, session, condition):
+    def _wait(self, session, condition, *, initial_observation=None):
         selector, prop, expected, timeout = self._condition(condition)
         deadline = time.monotonic() + timeout / 1000
         attempts = 0
@@ -313,7 +347,10 @@ class Agent:
         while True:
             remaining = max(1, round((deadline - time.monotonic()) * 1000))
             try:
-                observation = self._capture(session, timeout_ms=remaining)
+                if initial_observation is not None:
+                    observation, initial_observation = initial_observation, None
+                else:
+                    observation = self._capture(session, timeout_ms=remaining)
             except AgentError as exc:
                 if observation is not None and "TIMEOUT" in exc.code and time.monotonic() >= deadline:
                     return observation, {"status": "unknown" if actual is None else "failed", "property": prop,
@@ -337,13 +374,13 @@ class Agent:
                 return observation, {"status": "unknown" if actual is None else "failed", "property": prop, "actual": actual, "expected": expected, "attempts": attempts, "observationComplete": complete}
             time.sleep(min(0.15, max(0, deadline - time.monotonic())))
 
-    def _wait_command(self, name, session, condition):
+    def _wait_command(self, name, session, condition, params=None):
         self._condition(condition)
         operation = uuid.uuid4().hex
         started = time.monotonic()
         observation, assertion = self._wait(session, condition)
         self._publish(name, session, observation)
-        result = {"operationId": operation, "assertion": assertion, "observation": self._project(observation),
+        result = {"operationId": operation, "assertion": assertion, "observation": self._project(observation, params),
                   "timings": {"totalMs": round((time.monotonic() - started) * 1000, 2)}}
         if assertion["status"] != "passed":
             result["evidence"] = self._evidence(name, session, operation, observation)
@@ -483,7 +520,10 @@ class Agent:
                     result["assertion"] = input_assertion
                     raise AgentError("INPUT_VERIFICATION_FAILED", "The text control did not contain the requested value.", dispatched="unknown")
             if expectation:
-                observation, assertion = self._wait(session, expectation)
+                # Fill just verified its value from this fresh post-input
+                # frame. Check the business condition on it before polling.
+                observation, assertion = self._wait(session, expectation, **(
+                    {"initial_observation": observation} if command == "fill" else {}))
                 result["assertion"] = assertion
                 if assertion["status"] != "passed":
                     raise AgentError("ASSERTION_TIMEOUT", "The action was acknowledged, but the expected result was not observed.", dispatched="unknown")
@@ -518,7 +558,7 @@ class Agent:
                     result.setdefault("warnings", []).append(
                         "Failed to persist invalidated refs: " + type(state_error).__name__)
             if observation is not None:
-                result["observation"] = self._project(observation)
+                result["observation"] = self._project(observation, params)
             if action["dispatched"] != "no":
                 result["evidence"] = self._evidence(name, session, operation, observation)
             exc.details = {**exc.details, **result}

@@ -4,9 +4,9 @@
 
 Observe, operate, and verify HarmonyOS applications from AI coding agents using native HDC / UiTest.
 
-**0.1.0a3 is an unreleased development alpha.** Python 3.10+ is required. The runtime uses the standard library and does not require Appium, a visual model, or a model API key. This package has not been published to PyPI. See [the core-fix validation](docs/validation-alpha3.md), [CHANGELOG](CHANGELOG.md), [compatibility](docs/compatibility.md), and [release readiness](docs/release-readiness.md) for current evidence. Earlier source publication and device results are recorded separately.
+**0.1.0a5 is an unreleased development alpha.** Python 3.10+ is required. The runtime uses the standard library and does not require Appium, a visual model, or a model API key. This package has not been published to PyPI. See [CHANGELOG](CHANGELOG.md), [compatibility](docs/compatibility.md), and [release readiness](docs/release-readiness.md) for the implementation and evidence boundaries. Earlier source publication and device results are recorded separately.
 
-Alpha3 passed 187 offline tests and 14 isolated build/install checks. Its device smoke is NOT_RUN because no device was connected. The counts and device results below describe the earlier alpha2 source.
+The current source adds compact output, observation projection options for actions, and optimizations to capture, tree processing and session storage. Historical alpha3 passed 187 offline tests and 14 isolated build/install checks; its device smoke was NOT_RUN. Those results are recorded in [the alpha3 validation](docs/validation-alpha3.md) and are not acceptance results for the current source. The counts and device results below describe the earlier alpha2 source.
 
 On 2026-11-03, after configuring Xiaoyi basic mode and its 26-key layout on the dedicated API24 test emulator, Chinese fill, replacement and clearing passed readback on both real TextInputs: six operations in total, about 4.17–6.66 seconds each. These are functional samples for particular controls, not a general success-rate estimate. Input remains experimental; complete agent-task and candidate checks are reported separately.
 
@@ -39,13 +39,12 @@ A colleague receiving the wheel can install it without cloning or building this 
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\harmony_automation_agent-0.1.0a3-py3-none-any.whl
+.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\harmony_automation_agent-0.1.0a5-py3-none-any.whl
 .\.venv\Scripts\harmony-agent.exe --version --json
 .\.venv\Scripts\harmony-agent.exe doctor --json
-.\.venv\Scripts\harmony-agent.exe devices --json
 ```
 
-The filename must match the wheel actually supplied. On POSIX hosts, use `.venv/bin/python` and `.venv/bin/harmony-agent`; device compatibility still needs separate validation. Configure HDC as described below, then select an exact device ID and use `doctor --device <ID> --json` to inspect that device. An empty device list means device operation is not ready. SDK/device authorization and input-method initialization remain separate setup steps; there is no all-in-one environment installer.
+The filename must match the wheel actually supplied. On POSIX hosts, use `.venv/bin/python` and `.venv/bin/harmony-agent`; device compatibility still needs separate validation. `doctor` includes the connected device list; `devices --json` is available when only enumeration is needed. Configure HDC as described below, then select an exact device ID and use `doctor --device <ID> --json` to inspect that device. An empty device list means device operation is not ready. SDK/device authorization and input-method initialization remain separate setup steps; there is no all-in-one environment installer.
 
 ### Install from source
 
@@ -62,7 +61,7 @@ python -m venv .venv
 On Windows use `.venv\Scripts\python.exe` and `.venv\Scripts\harmony-agent.exe`. Subsequent examples use `harmony-agent` as shorthand for the executable in that environment. The build may need setuptools; the installed runtime has no third-party Python dependencies. If the current candidate wheel already exists, install it offline with:
 
 ```sh
-.venv/bin/python -m pip install --no-index --no-deps dist/harmony_automation_agent-0.1.0a3-py3-none-any.whl
+.venv/bin/python -m pip install --no-index --no-deps dist/harmony_automation_agent-0.1.0a5-py3-none-any.whl
 ```
 
 Use the wheel built from the candidate source; do not substitute a previous version when checking acceptance. For source-only use, set `PYTHONPATH=src` and run `python -m harmony_agent` instead of `harmony-agent`.
@@ -71,7 +70,6 @@ Configure `HARMONY_HDC` with the full HDC executable path, `HDC_HOME` with its c
 
 ```sh
 harmony-agent doctor --json
-harmony-agent devices --json
 ```
 
 Windows and Linux offline CI does not establish support for every host/device/API combination. Only explicitly recorded device validation should be treated as compatibility evidence.
@@ -88,25 +86,22 @@ Install an explicitly selected replacement wheel into the same environment, then
 
 Uninstalling this Python package does not remove HDC, the SDK, apps, or existing `.harmony-agent` state/evidence. Retain useful reports before changing versions, establish a new session and observation, and do not reuse old frame refs.
 
+Alpha5 can read valid older sessions and migrates stored frames when saving. Alpha4 cannot read the new indexed format. Before downgrading, detach the affected session using its original state directory; after installation, attach and observe again. See [version handling](docs/compatibility.md#protocol-and-version-handling).
+
 ## First operation
 
 The fixture is needed only for the sample below. Operating your own installed app does not require installing the fixture.
 
-Build and install the [fixture application](docs/fixture.md) first. Replace `YOUR_DEVICE_ID` with an explicitly selected ID returned by the devices command.
+Build and install the [fixture application](docs/fixture.md) first. Replace `YOUR_DEVICE_ID` with an explicitly selected ID returned by `doctor` or `devices`.
 
 ```sh
 harmony-agent attach --device YOUR_DEVICE_ID --session demo --json
-harmony-agent open com.andyandymike.harmonyautomation.fixture --ability EntryAbility --session demo --json
-harmony-agent observe --session demo --json
-harmony-agent press id=fixture.reset --session demo --json
-harmony-agent wait id=fixture.counter --property text --equals "Counter: 0" --timeout-ms 5000 --session demo --json
-harmony-agent press id=fixture.increment --session demo --json
-harmony-agent wait id=fixture.counter --property text --equals "Counter: 1" --timeout-ms 5000 --session demo --json
-harmony-agent screenshot --session demo --json
+harmony-agent open com.andyandymike.harmonyautomation.fixture --ability EntryAbility --session demo --compact --json
+harmony-agent press id=fixture.reset --session demo --compact --json
 harmony-agent detach --session demo --json
 ```
 
-The quick start uses the counter to demonstrate actions and verification. Input checks require the device's input-method setup to be completed first. See [CHANGELOG](CHANGELOG.md) and the [fixture documentation](docs/fixture.md) for the exact input coverage and limits.
+`open` and `press` each return a fresh `data.observation`. Inspect the app context and counter value there; a separate `observe` is only needed when that view lacks the required context or the UI has changed. The structured request below combines an action with an exact counter assertion. Input checks require the device's input-method setup to be completed first. See [CHANGELOG](CHANGELOG.md) and the [fixture documentation](docs/fixture.md) for the exact input coverage and limits.
 
 ### Experimental input and local side effects
 
@@ -135,6 +130,7 @@ Save this as UTF-8 `increment.json` after preparing the active demo session and 
   "command": "press",
   "input": {
     "session": "demo",
+    "compact": true,
     "target": "id=fixture.increment",
     "expect": {
       "selector": {"id": "fixture.counter"},
@@ -154,6 +150,14 @@ harmony-agent schema --json
 ```
 
 Action commands also accept `--expect <JSON>`. Request files avoid shell quoting differences. Consult the installed version's help and schema for exact fields.
+
+A passed `expect` already verifies that condition. Reuse the returned observation for the next decision instead of issuing another `wait` or `observe` for the same result. An uncertain dispatch or insufficient context still requires a fresh read before deciding what to do.
+
+## Observation size
+
+From `0.1.0a5`, all commands returning an observation accept `--compact`, `--max-nodes` and `--interactive`. These options also apply to the observation returned by an action or `wait`. `find TEXT` narrows output to matching text and its context. The CLI continues to capture and validate the full tree internally.
+
+Compact output is opt-in and marked by `projection.compact=true`. It omits optional null/empty node fields, preserving empty text/value strings, root parents, false, zero and nonempty whitespace. Refs, quality, assertions and diff before/after values retain their meaning. A missing optional field must not be interpreted as false; use standard output if distinguishing null from an empty string matters. See [output interpretation](skills/harmony-agent/references/outcomes.md#compact-output).
 
 ## Execution contract
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0a5 — unreleased performance improvements, 2026-11-10
+
+- Add opt-in compact observation output, retaining meaningful empty input values, explicit state, refs and completeness metadata. Apply output projection options to actions and waits as well as reads.
+- Reduce full-tree copying and redundant persisted node data while preserving complete internal observations and validation of stored sessions.
+- Reduce layout-capture transport round trips while retaining bounded reads, explicit device selection and action verification.
+- Check a fill expectation against the fresh successful input-readback frame before polling again. Preserve focus, clearing and final-value verification.
+- Update the portable Skill and CLI examples to reuse returned observations and action expectations, avoiding duplicate diagnostics and reads when their results already suffice.
+
 ## 0.1.0a4 — local development candidate, 2026-11-10
 
 - Recover native display strings stored in `originalText` when a non-editable node has empty/missing `text`. Preserve the original field and expose fallback provenance through `textSource`; recovered strings participate in facts, find, selectors, text conditions and diffs.

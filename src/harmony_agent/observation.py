@@ -207,9 +207,9 @@ def normalize_layout(raw, frame_id, *, scope=None):
         nodes = [n for n in nodes if n["ref"] in selected]
     # Resource ids are context scoped. Duplicate ids never become fake stable
     # identities by appending an arbitrary occurrence index.
-    counts = Counter(_node_identity(n) for n in nodes if _node_identity(n) is not None)
-    for node in nodes:
-        candidate = _node_identity(node)
+    identities = [_node_identity(node) for node in nodes]
+    counts = Counter(identity for identity in identities if identity is not None)
+    for node, candidate in zip(nodes, identities):
         node["identity"] = candidate if candidate and counts[candidate] == 1 else None
     return {"frameId": frame_id, "nodes": nodes,
             "controls": [n for n in nodes if _actionable(n)],
@@ -355,7 +355,8 @@ def project_diff(diff, previous_public, current_public, *, max_changes):
         raise AgentError("INVALID_ARGUMENT", "max_changes must be a positive integer.")
     previous_refs = {n["ref"] for n in previous_public.get("nodes", [])}
     current_refs = {n["ref"] for n in current_public.get("nodes", [])}
-    out = deepcopy(diff)
+    out = {key: deepcopy(value) for key, value in diff.items()
+           if key not in {"added", "removed", "changed"}}
     total = matched = returned = 0
     for kind in ("added", "removed", "changed"):
         changes = diff.get(kind, [])
@@ -398,22 +399,26 @@ def project_observation(observation, *, max_nodes=80, interactive=False, query=N
                    for k in ("id", "text", "originalText", "type", "hint", "description", "value"))]
     else:
         primary = [n for n in nodes if _actionable(n) or _fact(n)]
-    selected = {n["ref"] for n in primary}
-    for node in primary:
-        parent = node.get("parent")
-        while parent in by_ref:
-            selected.add(parent)
-            parent = by_ref[parent].get("parent")
     if not interactive and query is None:
-        selected = set(by_ref)
-    eligible = [n for n in nodes if n["ref"] in selected]
+        eligible = nodes
+    else:
+        selected = {n["ref"] for n in primary}
+        for node in primary:
+            parent = node.get("parent")
+            while parent in by_ref:
+                selected.add(parent)
+                parent = by_ref[parent].get("parent")
+        eligible = [n for n in nodes if n["ref"] in selected]
     # Facts/actions get budget priority. Remaining ancestors/background nodes
     # are included in document order, with incompleteness explicitly marked.
     priority_refs = [n["ref"] for n in primary]
     primary_set = set(priority_refs)
     priority_refs += [n["ref"] for n in eligible if n["ref"] not in primary_set]
     kept = set(priority_refs[:max_nodes])
-    out = deepcopy(observation)
+    # Copy only data that survives the projection. Full nodes and the internal
+    # node-object indexes can be much larger than the requested output budget.
+    out = {key: deepcopy(value) for key, value in observation.items()
+           if key not in {"nodes", "controls", "facts", "projection"}}
     out["nodes"] = [deepcopy(n) for n in nodes if n["ref"] in kept]
     for node in out["nodes"]:
         for field in ("identity", "path", "sources"):
