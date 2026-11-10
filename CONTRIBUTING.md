@@ -21,7 +21,9 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 
 You can contribute layout normalization, selectors, ref/diff handling, output contracts, mocked transport failures, and documentation without a HarmonyOS device or model API key.
 
-Use synthetic or carefully redacted layout data in `tests/data`. Include the relevant source shape and the expected normalized result. Do not commit screenshots, real input values, identifiers, signing materials, or unrelated SDK files from your device.
+Use synthetic layout data in `tests/data`. Include the relevant source shape and the expected normalized result. Do not commit screenshots, real input values, identifiers, signing materials, or unrelated SDK files from your device.
+
+Keep per-app/device debug captures, temporary scripts, traces and session reports under the ignored `.harmony-agent/` directory. Redacting a debug report does not make it a repository artifact. Share reusable synthetic reproductions and general validation results instead. Before pushing, check every outgoing commit, not only the final file tree.
 
 Tests should verify meaningful behavior: ambiguity, unknown attributes, stale refs, inconsistent projections, shell quoting, failed dispatch, and timeout outcomes. Do not make default offline tests start an emulator, contact a device, or require credentials.
 

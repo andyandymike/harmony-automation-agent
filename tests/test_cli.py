@@ -171,6 +171,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(err, "")
         self.assertEqual(FakeAgent.calls, [])
 
+    def test_original_text_selectors_are_supported_in_cli_requests_and_schema(self):
+        code, out, err = self.run_cli("press", "originalText=確認", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertEqual("originalText=確認", json.loads(out)["data"]["input"]["target"])
+        request = {"command": "wait", "input": {
+            "target": {"originalText": "Visible label", "within": {"id": "panel"}},
+            "equals": "Accessible label"}}
+        code, out, err = self.run_cli("--request", self.request_file(request), "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertEqual(request["input"]["target"], json.loads(out)["data"]["input"]["target"])
+        schema = request_schema("wait")
+        for name in ("selector", "stableSelector"):
+            self.assertEqual({"type": "string"}, schema["$defs"][name]["oneOf"][1]["properties"]["originalText"])
+
     def test_condition_schema_excludes_frame_dependencies_recursively(self):
         for command in ("wait", "press"):
             schema = request_schema(command)

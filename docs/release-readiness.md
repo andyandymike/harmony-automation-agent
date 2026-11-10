@@ -1,6 +1,6 @@
 # Release readiness
 
-The current `0.1.0a3` core-fix candidate is local and unreleased; see [its validation record](validation-alpha3.md). The alpha2 publication, hosted CI and device evidence below remain specific to that earlier source. Fresh device and hosted CI results are not inferred for alpha3.
+The current `0.1.0a4` display-text candidate is local and unreleased, with 201 offline tests and 14 isolated package checks passed. The [alpha3 core-fix record](validation-alpha3.md) and the alpha2 publication, hosted CI and device evidence below remain specific to their recorded source. No fresh hosted CI or broader device coverage is inferred for alpha4.
 
 Updated: 2026-11-10. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 

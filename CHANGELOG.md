@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0a4 — local development candidate, 2026-11-10
+
+- Recover native display strings stored in `originalText` when a non-editable node has empty/missing `text`. Preserve the original field and expose fallback provenance through `textSource`; recovered strings participate in facts, find, selectors, text conditions and diffs.
+- Preserve native input text/readback behavior for editable controls and known input types. Retain existing nonempty `text` without trimming or replacing it.
+- Reject actions through a selected child when an observed ancestor is explicitly hidden or disabled. Keep node structure and exact-target behavior; no label aggregation or automatic ancestor switching is introduced.
+- Clarify in the portable Skill that a complete returned tree does not guarantee every visible string was exposed. Diagnose missing content by comparing native raw data before attributing it to the application.
+- Validate with 201 offline tests and 14 isolated package checks.
+
 ## 0.1.0a3 — unreleased core fixes, 2026-11-10
 
 - Reject frame-dependent `wait`/`expect` selectors before dispatch, including parent references and nested `within`. The request schema now describes stable condition selectors separately.

@@ -13,7 +13,7 @@ PROPERTIES = ("text", "visible", "enabled", "checked", "selected", "focused")
 BOOLEAN_PROPERTIES = set(PROPERTIES) - {"text"}
 SELECTOR_BOOLEAN_FIELDS = {"enabled", "checked", "selected", "focused", "scrollable",
                            "clickable", "visible", "longClickable", "editable", "checkable"}
-SELECTOR_STRING_FIELDS = {"id", "key", "text", "value", "type", "ref", "description",
+SELECTOR_STRING_FIELDS = {"id", "key", "text", "originalText", "value", "type", "ref", "description",
                           "hint", "bundleName", "app", "parent"}
 SELECTOR_ID_FIELDS = {"hostWindowId", "displayId", "window", "windowId", "display"}
 

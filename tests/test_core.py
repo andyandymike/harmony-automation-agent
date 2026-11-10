@@ -222,6 +222,99 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(error.dispatched, "no")
         self.assertEqual(self.transport.mutations, [])
 
+    def test_original_text_child_label_press_verifies_result(self):
+        def capture(*args, **kwargs):
+            button = self.transport.node("button", "Column", "", "[20,100][220,180]", clickable="true")
+            button["children"] = [self.transport.node("label", "Text", "", "[50,110][190,160]",
+                                                       originalText="Increment", clickable="false")]
+            return {"type": "Column", "children": [button, self.transport.node(
+                "result", "Text", "", "[20,200][400,250]", originalText=f"Counter: {self.transport.counter}")]}
+
+        with patch.object(self.transport, "capture_layout", side_effect=capture):
+            found = self.execute("find", text="Increment")
+            label = resolve_target(found, "text=Increment")
+            self.assertEqual("originalText", label["textSource"])
+            self.assertIs(label["clickable"], False)
+            self.assertEqual("button", resolve_target(found, label["parent"])["id"])
+            result = self.execute("press", target="text=Increment", expect={
+                "selector": "id=result", "equals": "Counter: 1"})
+        self.assertEqual("passed", result["assertion"]["status"])
+        self.assertEqual([("tap", self.transport.serial, 120, 135)], self.transport.mutations)
+
+    def test_original_text_ambiguity_requires_context_before_press(self):
+        original_capture = self.transport.capture_layout
+        self.transport.duplicate_buttons = True
+
+        def capture(*args, **kwargs):
+            raw = original_capture(*args, **kwargs)
+            for index in (0, 4):
+                child = raw["children"][index]
+                child["attributes"].update(text="", originalText="Increment")
+                raw["children"][index] = {"id": f"group.{index}", "type": "Column", "children": [child]}
+            return raw
+
+        with patch.object(self.transport, "capture_layout", side_effect=capture):
+            error = self.assert_error("TARGET_AMBIGUOUS", lambda: self.execute("press", target="text=Increment"))
+            self.assertEqual("no", error.dispatched)
+            self.assertEqual([], self.transport.mutations)
+            result = self.execute("press", target={"text": "Increment", "within": "id=group.4"})
+        self.assertEqual("completed", result["action"]["status"])
+        self.assertEqual([("tap", self.transport.serial, 500, 140)], self.transport.mutations)
+
+    def test_original_text_business_context_change_invalidates_ref(self):
+        original_capture = self.transport.capture_layout
+        self.transport.row_label = "Order A"
+
+        def capture(*args, **kwargs):
+            raw = original_capture(*args, **kwargs)
+            label = raw["children"][0]["children"][0]["attributes"]
+            label["originalText"], label["text"] = label["text"], ""
+            return raw
+
+        with patch.object(self.transport, "capture_layout", side_effect=capture):
+            old_ref = self.current_ref()
+            self.transport.row_label = "Order B"
+            self.assert_error("STALE_REF", lambda: self.execute("press", target=old_ref))
+        self.assertEqual([], self.transport.mutations)
+
+    def test_empty_input_original_text_does_not_trigger_clear(self):
+        original_capture = self.transport.capture_layout
+        self.transport.input_text = ""
+
+        def capture(*args, **kwargs):
+            raw = original_capture(*args, **kwargs)
+            raw["children"][2]["attributes"]["originalText"] = "Display label, not entered text"
+            return raw
+
+        with patch.object(self.transport, "capture_layout", side_effect=capture):
+            result = self.execute("fill", target="id=fixture.input", text="new value")
+        self.assertEqual("passed", result["assertion"]["status"])
+        self.assertTrue(result["input"]["alreadyEmpty"])
+        self.assertEqual("new value", self.transport.input_text)
+        self.assertFalse(any(mutation[0] == "key" for mutation in self.transport.mutations))
+
+    def test_hidden_or_disabled_ancestor_blocks_child_label_press(self):
+        for field in ("visible", "enabled"):
+            with self.subTest(field=field):
+                raw = {"type": "Column", field: False, "children": [{"type": "Row", "children": [
+                    self.transport.node("label", "Text", "", "[20,100][220,180]", originalText="Increment")]}]}
+                with patch.object(self.transport, "capture_layout", return_value=raw):
+                    error = self.assert_error("TARGET_NOT_ACTIONABLE", lambda: self.execute("press", target="text=Increment"))
+                self.assertEqual("no", error.dispatched)
+                self.assertEqual([], self.transport.mutations)
+
+    def test_hidden_or_disabled_ancestor_blocks_scroll(self):
+        for field in ("visible", "enabled"):
+            for target in (None, "id=list"):
+                with self.subTest(field=field, target=target):
+                    raw = {"type": "Column", field: False, "children": [self.transport.node(
+                        "list", "List", "", "[0,0][400,800]", scrollable="true")]}
+                    with patch.object(self.transport, "capture_layout", return_value=raw):
+                        params = {} if target is None else {"target": target}
+                        error = self.assert_error("TARGET_NOT_ACTIONABLE", lambda: self.execute("scroll", direction="down", **params))
+                    self.assertEqual("no", error.dispatched)
+                    self.assertEqual([], self.transport.mutations)
+
     def test_scroll_rejects_disabled_container_before_dispatch(self):
         tree = self.transport.node("fixture.list", "List", "", "[0,0][400,800]",
                                    scrollable="true", enabled="false")

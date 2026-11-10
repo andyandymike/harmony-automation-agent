@@ -11,7 +11,7 @@ Use the installed `harmony-agent` CLI for device operations. Let the outer agent
 ## Establish the working context
 
 1. Locate `harmony-agent` on PATH or use the executable supplied by the task. In a known source checkout, check `.venv/Scripts/harmony-agent.exe` on Windows or `.venv/bin/harmony-agent` on POSIX. Use that executable consistently. If no installed entry point exists, a known checkout can run `python -m harmony_agent` with `PYTHONPATH` set to its `src` directory. If neither is known, ask for the CLI or checkout location; do not install an unrelated package with a similar name.
-2. Run `harmony-agent --version --json`, `harmony-agent help --json`, and `harmony-agent schema --json` as needed. Use installed definitions instead of guessing commands or flags. This guide targets schema version `"1"` and the `0.1.0a1`/`0.1.0a2` alpha contract; inspect help/schema if the installed version differs.
+2. Run `harmony-agent --version --json`, `harmony-agent help --json`, and `harmony-agent schema --json` as needed. Use installed definitions instead of guessing commands or flags. This guide targets schema version `"1"` through `0.1.0a4`; recovered display text and ancestor actionability checks require `0.1.0a4`. Inspect help/schema when the installed version differs.
 3. Run `doctor --json` and `devices --json`. Inspect `data.ready` and individual checks; a successful JSON envelope alone does not mean the environment is ready.
 4. Select the exact device supplied by the task or clearly identified as its test device. Resolve ambiguity before attaching. Never silently switch to another connected device.
 5. Attach a named session with `attach --device <exact-id> --session <name> --json`. Keep that session, working directory, and `--state-dir` consistent. Use a separate session per independent task.
@@ -42,7 +42,7 @@ $OutputEncoding = [Console]::OutputEncoding
 
 If output decoding fails after a mutation, do not treat the parsing failure as proof that the action failed. Preserve the raw UTF-8 output when possible, then observe before deciding what to do. JSON request files avoid input quoting problems; they do not by themselves configure PowerShell's output decoding.
 
-`find` returns a filtered view. If a target is missing, inspect quality/context and increase `--max-nodes` or observe the needed area. Filtered or truncated output does not prove absence. Unknown booleans are not false. Public `controls`/`facts` contain refs into `nodes`.
+`find` returns a filtered view. Use recovered `text` with `find` and contextual selectors when it identifies the needed content. `textSource="originalText"` identifies native display-text fallback; see [text and observation limits](references/outcomes.md#text-and-observation-limits) when interpreting it. If a target is missing, inspect quality/context and increase `--max-nodes` or observe the needed area. Filtered or truncated output does not prove absence, and `complete=true` does not guarantee every visible string was exposed. Unknown booleans are not false. Public `controls`/`facts` contain refs into `nodes`.
 
 ## Recover from uncertain outcomes
 

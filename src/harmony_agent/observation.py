@@ -16,12 +16,12 @@ from .errors import AgentError
 BOOL_FIELDS = ("enabled", "visible", "clickable", "longClickable", "checkable",
                "checked", "selected", "focused", "scrollable", "editable")
 CONTEXT_FIELDS = ("bundleName", "abilityName", "pagePath", "hostWindowId", "displayId")
-TEXT_FIELDS = ("id", "key", "text", "type", "hint", "description", "value",
+TEXT_FIELDS = ("id", "key", "text", "originalText", "type", "hint", "description", "value",
                "accessibilityId", "uniqueId")
 ALIASES = {"app": "bundleName", "window": "hostWindowId", "windowId": "hostWindowId",
            "display": "displayId"}
 SELECTOR_FIELDS = set(BOOL_FIELDS + CONTEXT_FIELDS + TEXT_FIELDS + ("ref", "parent"))
-CHANGE_FIELDS = ("text", "value", "hint", "description", "bounds", "type") + BOOL_FIELDS
+CHANGE_FIELDS = ("text", "originalText", "textSource", "value", "hint", "description", "bounds", "type") + BOOL_FIELDS
 UI_ATTRIBUTE_FIELDS = set(BOOL_FIELDS + CONTEXT_FIELDS + TEXT_FIELDS + ("bounds", "origBounds", "hierarchy"))
 _REF = re.compile(r"^@e[1-9][0-9]*~(.+)$")
 
@@ -108,7 +108,7 @@ def _scope(scope):
 
 
 def normalize_layout(raw, frame_id, *, scope=None):
-    """Normalize dict/list Harmony dump roots, preserving unknown attributes.
+    """Normalize supported attributes from dict/list Harmony dump roots.
 
     bounds is a left/top/right/bottom dict; center is an x/y dict. facts and
     controls contain node objects. Anonymous nodes deliberately have no stable
@@ -173,6 +173,13 @@ def normalize_layout(raw, frame_id, *, scope=None):
         known_input = (node["type"] or "").lower() in ("textinput", "textarea", "textfield", "edittext")
         if node["editable"] is None and known_input:
             node["editable"] = True
+        # UiTest may leave text empty while exposing display content through
+        # originalText. Do not reinterpret editable text: fill/clear/wait rely
+        # on its native current value, including an explicitly empty string.
+        if (not known_input and node["editable"] is not True
+                and node["text"] in (None, "") and node["originalText"] not in (None, "")):
+            node["text"] = node["originalText"]
+            node["textSource"] = "originalText"
         if node["value"] is None and known_input:
             node["value"] = node["text"]
         node["sources"] = {"editable": "type" if _boolean(attributes.get("editable")) is None and known_input else "attribute",
@@ -388,7 +395,7 @@ def project_observation(observation, *, max_nodes=80, interactive=False, query=N
             raise AgentError("INVALID_ARGUMENT", "find query must be text.")
         needle = query.casefold()
         primary = [n for n in nodes if any(needle in str(n.get(k) or "").casefold()
-                   for k in ("id", "text", "type", "hint", "description", "value"))]
+                   for k in ("id", "text", "originalText", "type", "hint", "description", "value"))]
     else:
         primary = [n for n in nodes if _actionable(n) or _fact(n)]
     selected = {n["ref"] for n in primary}
@@ -413,7 +420,7 @@ def project_observation(observation, *, max_nodes=80, interactive=False, query=N
             node.pop(field, None)
         if node.get("key") == node.get("id"):
             node.pop("key", None)
-        for field in ("uniqueId", "accessibilityId"):
+        for field in ("uniqueId", "accessibilityId", "originalText"):
             if node.get(field) in (None, ""):
                 node.pop(field, None)
     out["controls"] = [n["ref"] for n in out["nodes"] if _actionable(n)]

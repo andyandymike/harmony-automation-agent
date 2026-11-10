@@ -225,7 +225,7 @@ class Agent:
             if len(matches) != 1 or matches[0]["ref"] != fresh_node["ref"]:
                 raise AgentError("STALE_REF", "The target no longer satisfies the requested conditions; observe again.")
             node = matches[0]
-        self._require_actionable(node)
+        self._require_actionable(node, observation)
         return node, observation
 
     def _relocate_ref(self, previous, current, ref):
@@ -249,9 +249,21 @@ class Agent:
         return parsed
 
     @staticmethod
-    def _require_actionable(node):
+    def _require_actionable(node, observation):
         if node.get("visible") is False or node.get("enabled") is False:
             raise AgentError("TARGET_NOT_ACTIONABLE", "The target is hidden or disabled.")
+        # Text labels can be pressed at their own bounds. A child reporting
+        # enabled/visible must not bypass an explicitly disabled/hidden parent.
+        by_ref = {item["ref"]: item for item in observation["nodes"]}
+        parent_ref = node.get("parent")
+        seen = set()
+        while parent_ref in by_ref and parent_ref not in seen:
+            seen.add(parent_ref)
+            parent = by_ref[parent_ref]
+            if parent.get("visible") is False or parent.get("enabled") is False:
+                raise AgentError("TARGET_NOT_ACTIONABLE", "An ancestor of the target is hidden or disabled.",
+                                 details={"ancestorRef": parent_ref})
+            parent_ref = parent.get("parent")
         if not node.get("center") or not node.get("bounds"):
             raise AgentError("TARGET_NOT_ACTIONABLE", "The target has no usable bounds.")
         b = node["bounds"]
@@ -434,7 +446,7 @@ class Agent:
                     if len(candidates) != 1:
                         raise AgentError("SCROLL_CONTAINER_REQUIRED", "Specify a scrollable container when zero or multiple containers are visible.", details={"count": len(candidates)})
                     node = candidates[0]
-                    self._require_actionable(node)
+                    self._require_actionable(node, observation)
             # The state write must succeed before dispatch. Never restore these refs on failure.
             session["frameValid"] = False
             self.store.save(name, session)

@@ -105,6 +105,105 @@ class ObservationTests(unittest.TestCase):
         self.assertIs(node["editable"], True)
         self.assertIn(node, self.observation["controls"])
 
+    def test_original_text_recovers_display_content_with_public_provenance(self):
+        for native_text in ({}, {"text": None}, {"text": ""}):
+            with self.subTest(native_text=native_text):
+                raw = {"attributes": {"id": "label", "type": "Text", **native_text,
+                                      "originalText": "確認 🙂", "description": "Help", "hint": "Hint"}}
+                before = deepcopy(raw)
+                observation = normalize_layout(raw, "f1")
+                view = project_observation(observation)
+                node = resolve_target(view, "text=確認 🙂")
+                self.assertEqual("確認 🙂", node["originalText"])
+                self.assertEqual("originalText", node["textSource"])
+                self.assertEqual("Help", node["description"])
+                self.assertEqual("Hint", node["hint"])
+                self.assertIn(node["ref"], view["facts"])
+                self.assertEqual(before, raw)
+
+    def test_nonempty_native_text_takes_precedence_without_trimming(self):
+        for native_text in ("Accessible label", " ", "\t"):
+            with self.subTest(native_text=native_text):
+                observation = normalize_layout({"id": "label", "type": "Text", "text": native_text,
+                                                "originalText": "Visible label"}, "f1")
+                view = project_observation(observation)
+                node = resolve_target(view, {"text": native_text})
+                self.assertEqual("Visible label", node["originalText"])
+                self.assertNotIn("textSource", node)
+                self.assertEqual([node], select_nodes(view, "originalText=Visible label"))
+                found = project_observation(observation, query="visible LABEL")
+                self.assertEqual(["label"], [n["id"] for n in found["nodes"]])
+
+    def test_empty_original_text_does_not_add_public_metadata(self):
+        for original in ({}, {"originalText": None}, {"originalText": ""}):
+            with self.subTest(original=original):
+                view = project_observation(normalize_layout({"id": "label", "text": "", **original}, "f1"))
+                node = view["nodes"][0]
+                self.assertEqual("", node["text"])
+                self.assertNotIn("originalText", node)
+                self.assertNotIn("textSource", node)
+
+    def test_original_text_does_not_reinterpret_empty_editable_text(self):
+        controls = [{"type": kind} for kind in ("TextInput", "TextArea", "TextField", "EditText")]
+        controls += [{"type": "CustomInput", "editable": "true"},
+                     {"type": "TextInput", "editable": "false"}]
+        for control in controls:
+            with self.subTest(control=control):
+                observation = normalize_layout({"id": "input", **control, "text": "",
+                                                "originalText": "Visible placeholder"}, "f1")
+                node = resolve_target(project_observation(observation), "id=input")
+                self.assertEqual("", node["text"])
+                self.assertNotIn("textSource", node)
+                self.assertEqual("Visible placeholder", node["originalText"])
+                if control["type"] != "CustomInput":
+                    self.assertEqual("", node["value"])
+                else:
+                    self.assertIsNone(node["value"])
+                self.assertAgentError("TARGET_NOT_FOUND", lambda: resolve_target(observation, "text=Visible placeholder"))
+                found = project_observation(observation, query="Visible placeholder")
+                self.assertEqual(["input"], [n["id"] for n in found["nodes"]])
+
+    def test_original_text_keeps_explicit_input_values_and_missing_text(self):
+        explicit = normalize_layout({"id": "input", "type": "TextInput", "text": "",
+                                     "value": "authoritative", "originalText": "Display"}, "f1")["nodes"][0]
+        self.assertEqual("authoritative", explicit["value"])
+        self.assertEqual("", explicit["text"])
+        missing = normalize_layout({"id": "input", "type": "TextInput", "originalText": "Display"}, "f2")["nodes"][0]
+        self.assertIsNone(missing["text"])
+        self.assertIsNone(missing["value"])
+
+    def test_recovered_child_label_retains_context_and_compact_fact_priority(self):
+        raw = {"id": "root", "type": "Column", "children": [{"type": "Column"} for _ in range(100)] + [
+            {"id": "confirm", "type": "Column", "clickable": "true", "children": [
+                {"type": "Text", "text": "", "originalText": "Confirm"}]}]}
+        observation = normalize_layout(raw, "f1")
+        full = project_observation(observation, max_nodes=500)
+        label = resolve_target(full, {"text": "Confirm", "within": "id=confirm"})
+        button = resolve_target(full, "id=confirm")
+        self.assertEqual(button["ref"], label["parent"])
+        self.assertIsNone(button["text"])
+        found = project_observation(observation, query="Confirm")
+        self.assertEqual(["root", "confirm", None], [n["id"] for n in found["nodes"]])
+        compact = project_observation(observation, max_nodes=2, interactive=True)
+        self.assertEqual("Confirm", resolve_target(compact, "text=Confirm")["text"])
+        self.assertIn(label["ref"], compact["facts"])
+        self.assertIn(button["ref"], compact["controls"])
+        self.assertEqual(0, compact["quality"]["omittedFacts"])
+        self.assertTrue(compact["quality"]["truncated"])
+
+    def test_original_text_changes_and_source_switch_are_visible_in_diff(self):
+        old = normalize_layout({"id": "status", "text": "", "originalText": "Ready"}, "f1")
+        new = normalize_layout({"id": "status", "text": "", "originalText": "Done"}, "f2")
+        diff = diff_observations(old, new)
+        self.assertEqual({"text": "Ready", "originalText": "Ready"}, diff["changed"][0]["before"])
+        self.assertEqual({"text": "Done", "originalText": "Done"}, diff["changed"][0]["after"])
+        native = normalize_layout({"id": "status", "text": "Done", "originalText": "Done"}, "f3")
+        switched = diff_observations(new, native)["changed"][0]
+        self.assertEqual({"textSource": "originalText"}, switched["before"])
+        self.assertEqual({"textSource": None}, switched["after"])
+        alternate = normalize_layout({"id": "status", "text": "Done", "originalText": "Completed"}, "f4")
+        self.assertEqual({"originalText": "Completed"}, diff_observations(native, alternate)["changed"][0]["after"])
+
     def test_diff_detects_counter_change_without_ref_churn(self):
         updated = deepcopy(self.raw)
         updated["children"][2]["attributes"]["text"] = "Counter: 1"
