@@ -16,9 +16,38 @@ Historical alpha1 results, including 112 offline tests, 27 device steps and the 
 
 ## Requirements and installation
 
-- Install HDC through the official DevEco / HarmonyOS Command Line Tools.
-- Start and authorize a HarmonyOS device or emulator before using the CLI.
-- Install the application you intend to operate. Application building, signing, and device authorization remain separate steps.
+| Requirement | What each colleague needs to prepare |
+| --- | --- |
+| Python 3.10+ | A local Python environment for installing and running the CLI. |
+| Official HDC tools | Install through DevEco / HarmonyOS Command Line Tools; put HDC on PATH or configure its executable path. |
+| HarmonyOS device or emulator | Start and unlock it, enable debugging and authorize the computer. HDC must list the selected device, and device-side UiTest commands must be available. |
+| Installed target app | Install the app and identify its bundle and launch Ability. Building, signing and installation are separate from CLI operation. |
+| Input-method setup, when entering text | Complete first-run keyboard setup. Verified `fill` needs a real editable control with a stable ID unique within its app window. |
+| AI assistant, for natural-language tasks | Use an assistant that can execute commands on the computer running HDC. Its account/model setup is separate; manual CLI use does not require an AI assistant. |
+
+The CLI runtime has no third-party Python dependencies and needs no Appium, GPU, server or model API key. Installing the optional Skill supplies instructions for an outer AI assistant; it does not install the CLI, HDC, SDK, emulator or target app. Node, Hvigor and app-signing tools are needed only when your workflow builds/signs an app, not for operating an already installed app with this CLI.
+
+The target UI must expose enough information through UiTest for selection and verification. There is no visual-localization fallback for inaccessible or custom-drawn controls. The recorded device tests use a HarmonyOS 6.1.1 / API24 emulator; see [compatibility](docs/compatibility.md) before relying on another device/version combination.
+
+### Handing the project to a colleague
+
+Provide the version-matched wheel, this README (or a repository documentation link), and the target application's bundle, Ability and intended task. For AI-assisted use, also provide the complete `skills/harmony-agent/` folder, including `references/`, `agents/` and `LICENSE`, and follow [Skill setup](docs/skill-setup.md). The Python wheel does not include that Skill folder or the external device tools.
+
+If you send this README as a standalone file, include its referenced `docs/` guides or provide links to the documentation for the matching source version.
+
+A colleague receiving the wheel can install it without cloning or building this repository. For example, on Windows, put the wheel in a working folder and run there:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\harmony_automation_agent-0.1.0a3-py3-none-any.whl
+.\.venv\Scripts\harmony-agent.exe --version --json
+.\.venv\Scripts\harmony-agent.exe doctor --json
+.\.venv\Scripts\harmony-agent.exe devices --json
+```
+
+The filename must match the wheel actually supplied. On POSIX hosts, use `.venv/bin/python` and `.venv/bin/harmony-agent`; device compatibility still needs separate validation. Configure HDC as described below, then select an exact device ID and use `doctor --device <ID> --json` to inspect that device. An empty device list means device operation is not ready. SDK/device authorization and input-method initialization remain separate setup steps; there is no all-in-one environment installer.
+
+### Install from source
 
 Clone the source, then create a separate environment from the repository root:
 
@@ -60,6 +89,8 @@ Install an explicitly selected replacement wheel into the same environment, then
 Uninstalling this Python package does not remove HDC, the SDK, apps, or existing `.harmony-agent` state/evidence. Retain useful reports before changing versions, establish a new session and observation, and do not reuse old frame refs.
 
 ## First operation
+
+The fixture is needed only for the sample below. Operating your own installed app does not require installing the fixture.
 
 Build and install the [fixture application](docs/fixture.md) first. Replace `YOUR_DEVICE_ID` with an explicitly selected ID returned by the devices command.
 

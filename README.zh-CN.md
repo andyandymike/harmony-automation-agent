@@ -27,14 +27,42 @@ Alpha3 的 187 项离线回归和 14 项隔离构建安装检查已通过。当�
 
 ## 前提
 
-1. Python 3.10 或更高版本。
-2. 通过官方 DevEco / HarmonyOS Command Line Tools 安装 HDC。
-3. 已启动的鸿蒙设备或模拟器，设备已解锁并完成调试授权。
-4. 要操作的应用已安装。工具不会替代工程构建、签名和设备授权。
+| 前置条件 | 每位同事需要准备的内容 |
+| --- | --- |
+| Python 3.10+ | 用于安装和运行 CLI 的本地 Python 环境。 |
+| 官方 HDC 工具 | 通过 DevEco / HarmonyOS Command Line Tools 安装，加入 PATH 或配置可执行文件路径。 |
+| 鸿蒙真机或模拟器 | 已启动、解锁、开启调试并授权电脑；HDC 能列出该设备，设备端 UiTest 命令可用。 |
+| 已安装的目标应用 | 安装应用，确认包名和启动 Ability。应用构建、签名和安装与 CLI 操作分开完成。 |
+| 输入法初始化，仅文本输入需要 | 完成键盘首次引导和设置。带读回验证的 `fill` 需要真实可编辑控件，并有应用窗口内唯一的稳定 ID。 |
+| AI 助手，仅自然语言操作需要 | 助手能够在运行 HDC 的电脑上执行命令；其账号和模型配置另行准备。手动使用 CLI 不需要 AI 助手。 |
+
+CLI 运行时没有第三方 Python 依赖，不需要 Appium、GPU、服务器或模型 API key。可选 Skill 只提供外层 AI 的操作指引，不会安装 CLI、HDC、SDK、模拟器或目标应用。Node、Hvigor 和应用签名工具只在构建、签名应用时需要，操作已安装应用时不需要。
+
+目标界面需要能通过 UiTest 提供足够的控件信息，供工具定位和验证；无法暴露这些信息的自绘控件等场景，目前没有视觉定位兜底。已有设备测试主要来自 HarmonyOS 6.1.1 / API24 模拟器，其他组合请查看 [兼容性记录](docs/compatibility.md)。
 
 主机平台、HDC 版本和 Harmony/API 的组合需要逐项验证。离线 CI 可在 Windows / Linux 运行，不代表所有设备组合均已支持。
 
 ## 安装与环境检查
+
+### 交给同事：使用 wheel 安装包
+
+交付同版本的 wheel、本 README（或仓库文档链接），以及目标应用的包名、启动 Ability 和具体任务。需要 AI 操作时，再交付完整的 `skills/harmony-agent/` 目录，包括 `references/`、`agents/` 和 `LICENSE`，按 [Skill 安装说明](docs/skill-setup.md)配置。Python wheel 不包含 Skill 目录或外部设备工具。
+
+若单独发送 README 文件，也要提供其中引用的 `docs/` 指南，或附上对应源码版本的在线文档链接。
+
+同事拿到 wheel 后可以直接安装，无需克隆或构建本仓库。例如在 Windows 上，把安装包放进一个工作目录，再在该目录运行：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --no-index --no-deps .\harmony_automation_agent-0.1.0a3-py3-none-any.whl
+.\.venv\Scripts\harmony-agent.exe --version --json
+.\.venv\Scripts\harmony-agent.exe doctor --json
+.\.venv\Scripts\harmony-agent.exe devices --json
+```
+
+文件名应与实际收到的 wheel 一致。POSIX 主机改用 `.venv/bin/python` 和 `.venv/bin/harmony-agent`；设备兼容性仍需单独验证。按下文配置 HDC 后，明确选择一个设备 ID，再运行 `doctor --device <ID> --json` 检查该设备。设备列表为空表示尚不能操作设备。SDK 配置、设备授权和输入法初始化需要分别完成，项目目前没有一体化环境安装器。
+
+### 从源码安装
 
 先获取源码，再在项目根目录创建独立环境：
 
@@ -84,6 +112,8 @@ harmony-agent devices --json
 卸载 Python 包不删除 HDC、SDK、应用或已有 `.harmony-agent` 状态和证据。换版本前保留有用报告，重新建立会话并观察设备，不沿用旧进程或旧观察帧的 ref。
 
 ## 第一次操作与验证
+
+fixture 仅用于下方示例。操作自己已安装的应用时，不需要安装 fixture。
 
 以下示例使用项目的 [fixture-v2](docs/fixture.md)。先按照该文档构建、安装测试应用。将 `YOUR_DEVICE_ID` 换为设备枚举中明确选定的完整 ID。
 
