@@ -154,7 +154,7 @@ harmony-agent schema --json
 
 ## Agent 使用约定
 
-面向外层 Agent 的简短调用流程见 [Agent usage](docs/agent-usage.md)，操作入口见 [Agent operating guide](docs/agent-operating-guide.md)。项目提供 CLI 调用指南，暂未附带可安装的 Agent Skill。
+项目提供 CLI 和可选的 [Harmony Agent Skill](skills/harmony-agent/SKILL.md)。按照 [Skill 安装说明](docs/skill-setup.md)安装完整的指令与参考文件目录；直接调用 CLI 的简短流程见 [Agent usage](docs/agent-usage.md)。Skill 指导外层 Agent 执行任务，实际设备操作仍由 CLI 完成。
 
 - `--json` 模式的 stdout 只输出 JSON；诊断日志写入 stderr。错误使用非零退出码。
 - `success` 表达命令结果；业务结果是否被证明，需要看独立的断言结果。未请求断言时不能声称业务验证通过。

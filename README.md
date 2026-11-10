@@ -124,7 +124,7 @@ Action commands also accept `--expect <JSON>`. Request files avoid shell quoting
 
 ## Execution contract
 
-See [Agent usage](docs/agent-usage.md) for a compact calling workflow and the [Agent operating guide](docs/agent-operating-guide.md) for the task entry point. The project provides CLI calling guides; an installable Agent Skill is not included yet.
+The project provides the CLI and an optional [Harmony Agent Skill](skills/harmony-agent/SKILL.md). See [Skill setup](docs/skill-setup.md) to install the complete instruction/reference folder, or [Agent usage](docs/agent-usage.md) for direct CLI use. The Skill guides the outer agent; device operations still run through the CLI.
 
 - JSON mode writes only JSON to stdout; diagnostic logs use stderr. Errors exit nonzero.
 - Inspect the separate assertion result before declaring a business outcome verified. An action acknowledgment is not a passed assertion.

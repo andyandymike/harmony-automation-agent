@@ -7,17 +7,17 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 | Work package | Status | Completed evidence | Remaining acceptance |
 | --- | --- | --- | --- |
 | Input loop | done for recorded emulator cases | Six Chinese fill/replacement/clear readbacks passed on standard/native TextInputs after IME setup; complete smoke includes native input and submit/readback, with 40 passed steps, 0 failures and 1 skip | Ordinary-IME independent suite, keyboard composition, physical devices and other combinations remain outside this accepted scope |
-| Lightweight Skill | partial; installation blocked | CLI schema, [agent usage](agent-usage.md) and [operating guide](agent-operating-guide.md) are available as ordinary project documents | Personal Skill installation did not complete in this environment; do not claim an installed Skill or equate agent-guide tests with installation |
-| Agent acceptance and benchmark | done for the two recorded internal batches | Two fresh agents completed ten specified tasks; final state and recorded fresh observations were checked independently; a simulated lost receipt led to observation rather than a repeated press | Single fixture/emulator evidence; output token use was not available. First-run wrapper and PowerShell decoding issues are retained in the report |
-| Installation and compatibility | done for recorded local check | The 0.1.0a2 offline release checker completed 14 checks using a new venv; [compatibility matrix](compatibility.md) exists | The frozen artifact's final report is authoritative; clean host/SDK and physical-device validation remain separate checks |
-| External human trial | pending | Trial design is documented in the project plan | At least three independent users, with at least two completing the core flow without maintainer repair; no invitations have been sent |
+| Lightweight Skill | done for source, local installation and offline explicit use | Complete portable [Skill](../skills/harmony-agent/SKILL.md), [setup guide](skill-setup.md), local installation and independent offline Agent check; [delivery evidence](skill-delivery-2026-11-10.md) | Fresh-turn automatic selection and new device tasks through this installed Skill are not established by offline checks |
+| Agent acceptance and benchmark | partial; two internal task batches completed | Two fresh agents completed ten specified tasks; final state and recorded fresh observations were checked independently; a simulated lost receipt led to observation rather than a repeated press | Single fixture/emulator on the earlier source; not a broad success-rate benchmark. Output token use was unavailable and one command timing was missing; the installed Skill has only separate offline checks |
+| Installation and compatibility | partial; offline package checks completed | Local fresh-venv build/install checks and hosted Windows/Ubuntu package jobs passed; [compatibility matrix](compatibility.md) exists | A fresh venv is not a clean host/SDK. SDK setup, signing and physical-device validation remain separate checks |
+| External human trial | pending; plan now written | [Executable plan and result template](external-trial.md) added on 2026-11-10; no participants or results | At least three independent human users, with at least two completing the core flow without maintainer repair; CLI and Skill + Agent modes are recorded separately; no invitations have been sent |
 | Open-source release preparation | done for GitHub alpha source | Root and fixture licenses unified under MIT with owner authorization; source pushed to public `main`; all six hosted CI jobs passed; revision and build hash in the [publication review](publication-review-2026-11-10.md) | Stable-release trials remain separate; no GitHub Release or package-registry release has been made |
 
 ## Evidence map
 
 | Evidence | Scope |
 | --- | --- |
-| [Alpha2 validation](validation-alpha2.md) | Current regression, device, agent and installation results; includes actual failed attempts and remaining limits |
+| [Alpha2 validation](validation-alpha2.md) | Historical 2026-11-03 regression, device, agent and installation results; includes actual failed attempts and remaining limits |
 | [Alpha2 device summary](validation-device-smoke-alpha2.json) | 40 passed steps, 0 failures, 1 skipped independent ordinary-IME suite |
 | [Alpha2 input record](validation-input-alpha2.json) | Six separate standard/native input checks passed |
 | [Alpha2 agent record](validation-agent-alpha2.json) | Ten tasks, command/byte/timing metrics, reply-loss recovery and first-run issues |
@@ -27,9 +27,13 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 | [Compatibility](compatibility.md) | Tested versus untested host/device/API combinations and protocol boundaries |
 | [Source provenance](source-provenance.md) | Original/reused code, exact upstream revision, repository and registry checks |
 | [Agent usage](agent-usage.md) | Observation, action, assertion and recovery rules |
-| [Agent operating guide](agent-operating-guide.md) | Ordinary project guide used for independent tasks; not an installed Skill |
+| [Agent operating guide](agent-operating-guide.md) | Stable link to the canonical, portable Skill workflow |
+| [Skill delivery](skill-delivery-2026-11-10.md) | Source, installed-copy parity, explicit offline Agent use and package checks; not a new device test |
+| [External trial plan](external-trial.md) | Procedure and empty report template; not evidence of executed trials |
 
 The original alpha2 offline regression count was 147 passed tests. The [2026-11-10 publication review](publication-review-2026-11-10.md) records 150 after the scroll validation fix. The original device results and frozen wheel remain historical evidence and were not rerun or relabeled for the new source. Agent subtask trials can measure agent usability, but they do not replace independent human installation trials.
+
+The earlier claim that only personal Skill installation remained was too broad: the repository had calling guides, while the local Skill was still an unfinished scaffold. That delivery gap is addressed by the complete Skill source and installation evidence above. The six packages have different acceptance scopes; completed fixture samples or package checks do not make external trials, a clean SDK setup or broad device support complete.
 
 ## Local release checks
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## Portable Skill delivery — 2026-11-10
+
+- Added the complete `skills/harmony-agent/` package, including frontmatter, workflow, request/outcome references, Agent metadata and MIT license. Existing guide URLs forward to the maintained Skill resources.
+- Added public installation instructions and links from both READMEs; updated the existing maintainer installation from the same source.
+- Validated structure, reference closure, installed-file parity, JSON examples, an independent Agent's offline decisions and a new isolated wheel build/install. See [Skill delivery](docs/skill-delivery-2026-11-10.md).
+- Corrected the six-package readiness record and added an executable external-user trial plan. External trials, fresh device testing and clean-host SDK validation remain incomplete.
+
 ## GitHub alpha source publication — 2026-11-10
 
 - Fixed automatic scroll-container selection bypassing the existing actionability checks. A disabled or zero-area container now fails with `TARGET_NOT_ACTIONABLE` before dispatch, matching an explicitly selected target.

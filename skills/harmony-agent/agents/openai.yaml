@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harmony Agent"
+  short_description: "Operate and verify HarmonyOS apps through the CLI"
+  default_prompt: "Use $harmony-agent to operate my HarmonyOS app and verify the requested result."

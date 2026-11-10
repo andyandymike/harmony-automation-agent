@@ -1,0 +1,123 @@
+{
+  "date": "2026-11-10",
+  "version": "0.1.0a2",
+  "scope": "Skill delivery and offline explicit-use validation; no device acceptance",
+  "skillSource": "skills/harmony-agent",
+  "structureValidation": {
+    "repository": "pass",
+    "installed": "pass",
+    "oldScaffold": "fail: description must be a string, got list"
+  },
+  "fileChecks": {
+    "sourceAndInstalledSkillMatch": true,
+    "selfContainedReferences": true,
+    "installedRuntimeMatchesSource": true,
+    "files": [
+      {
+        "path": "agents/openai.yaml",
+        "sha256": "87da248c77e6363c7d9969c85c41e6a986e34f03599b4efb4ef6940252bccbb7"
+      },
+      {
+        "path": "LICENSE",
+        "sha256": "bd7003ec076c5f770414357618027e6ab582c3794d1991922055309255ad4f5a"
+      },
+      {
+        "path": "references/outcomes.md",
+        "sha256": "3762e2548e3721973354f524bf9cb946d5e25a52250bf12426e155d3d4878004"
+      },
+      {
+        "path": "references/requests.md",
+        "sha256": "80390a67e10b3bbc0208e235bb0f6d8efb328004348cb483d969fb3c2966ac39"
+      },
+      {
+        "path": "SKILL.md",
+        "sha256": "273d6b3db4c8b700b72fb0270683f2e55d80d56f7ff979b4ec4ba42d513ba04e"
+      }
+    ],
+    "runtimeFilesMatched": 9,
+    "schemaValidatedRequestExamples": 3,
+    "localMarkdownLinksValid": true
+  },
+  "forwardCheck": {
+    "agentCount": 1,
+    "readOnlyInstalledSkillAndReferences": true,
+    "actualCliCommandCount": 5,
+    "deviceCommandsExecuted": 0,
+    "requestsValidatedWithRuntimeParser": true,
+    "requests": {
+      "A": {
+        "schemaVersion": "1",
+        "command": "fill",
+        "input": {
+          "session": "trial",
+          "target": {
+            "id": "customer-name"
+          },
+          "text": "",
+          "timeout_ms": 15000,
+          "expect": {
+            "selector": {
+              "id": "customer-name"
+            },
+            "property": "text",
+            "equals": "",
+            "timeoutMs": 5000
+          }
+        }
+      },
+      "B": {
+        "schemaVersion": "1",
+        "command": "press",
+        "input": {
+          "session": "trial",
+          "target": {
+            "id": "row-b-choose"
+          },
+          "expect": {
+            "selector": {
+              "id": "selected-order"
+            },
+            "property": "text",
+            "equals": "Order B",
+            "timeoutMs": 5000
+          }
+        }
+      },
+      "C": {
+        "schemaVersion": "1",
+        "command": "observe",
+        "input": {
+          "session": "trial"
+        }
+      }
+    },
+    "doctorSuccess": true,
+    "doctorReady": false,
+    "doctorError": "HDC_NOT_FOUND",
+    "sessionNote": "B/C use trial as an explicit hypothetical session assumption; proposed requests were not executed.",
+    "localRecorderIssue": "One PowerShell JSON readback syntax error was corrected; no device action was attempted."
+  },
+  "packageCheck": {
+    "status": "pass",
+    "passed": 14,
+    "elapsedMs": 8141.0,
+    "wheel": {
+      "file": "wheel/harmony_automation_agent-0.1.0a2-py3-none-any.whl",
+      "name": "harmony-automation-agent",
+      "version": "0.1.0a2",
+      "runtimeDependencies": [],
+      "runtimeFiles": 9,
+      "archiveFiles": 15,
+      "bytes": 34563,
+      "sha256": "82c4f793c8869e5451325b93f6b65a31069f41685c985c1e69103c19bba8e23a",
+      "contentScan": "known_patterns_only"
+    }
+  },
+  "notRun": [
+    "Automatic Skill selection in a fresh desktop turn",
+    "Device tasks using the installed Skill",
+    "External human trials",
+    "Clean-host SDK setup"
+  ],
+  "githubSkillInstall": "pending until source push"
+}

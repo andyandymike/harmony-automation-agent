@@ -1,6 +1,6 @@
 # Calling the CLI from an AI agent
 
-This is a usage reference, not an installed Skill or a separate planning agent. The outer agent owns intent and planning; the CLI owns device operations, observations, deterministic checks, and evidence. The [operating guide](agent-operating-guide.md) and its request/outcome references are ordinary project documents. Personal Skill installation did not complete in this environment.
+This is a quick usage reference. The outer agent owns intent and planning; the CLI owns device operations, observations, deterministic checks, and evidence. The complete [Harmony Agent Skill](../skills/harmony-agent/SKILL.md) packages the operating workflow and request/outcome references; see [Skill setup](skill-setup.md) for installation. Direct CLI use does not require a Skill.
 
 ## Start with the installed contract
 
