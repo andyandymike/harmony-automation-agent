@@ -2,6 +2,8 @@
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +12,7 @@ from harmony_agent.core import Agent
 from harmony_agent.errors import AgentError
 from harmony_agent.execution import RunStore
 from harmony_agent.schema import request_schema, validate_request
+from harmony_agent.transport import HdcTransport
 from tests.test_core import FakeNativeTransport
 
 
@@ -152,11 +155,62 @@ class ExecutionRuntimeTests(unittest.TestCase):
         self.assertEqual(check.call_count, 1)
         self.assertEqual(result["profile"]["counts"]["projections"], 1)
         self.assertEqual(result["profile"]["counts"]["reusedFrames"], 4)
+        self.assertEqual(result["profile"]["counts"]["targetFrameRequests"], 3)
+        self.assertEqual(result["profile"]["counts"]["reusedTargetFrames"], 3)
+        self.assertEqual(result["profile"]["counts"]["conditionFrameRequests"], 2)
+        self.assertEqual(result["profile"]["counts"]["reusedConditionFrames"], 1)
+        self.assertEqual(result["profile"]["counts"]["beforeConditionChecks"], 3)
         self.assertTrue(result["observation"]["projection"]["compact"])
         receipts = [step["result"] for step in result["steps"] if step["kind"] == "command"]
         self.assertTrue(all(step["observationSource"] == "reused" for step in receipts))
         self.assertEqual(receipts[1]["beforeFrameId"], receipts[0]["afterFrameId"])
         self.assertEqual(result["goalVerification"]["status"], "passed")
+
+    def test_assert_and_before_share_current_target_frame_without_extra_capture(self):
+        result = self.run_plan([{"command": "observe"}, {"assert": condition(0)},
+                                {**press(1), "before": [condition(0), condition(0)]}])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(self.transport.captures, 2)
+        counts = result["profile"]["counts"]
+        self.assertEqual(counts["reusedFrames"], 2)
+        self.assertEqual(counts["reusedConditionFrames"], 1)
+        self.assertEqual(counts["reusedTargetFrames"], 1)
+        self.assertEqual(counts["beforeConditionChecks"], 2)
+        assertion = result["steps"][1]["result"]
+        action = result["steps"][2]["result"]
+        self.assertEqual(assertion["frameId"], action["beforeFrameId"])
+        self.assertTrue(all(item["frameId"] == action["beforeFrameId"] for item in action["guardAssertions"]))
+
+    def test_run_interactive_inherits_and_last_command_explicit_value_overrides(self):
+        cases = [({}, {}, False), ({"interactive": True}, {}, True),
+                 ({"interactive": True}, {"interactive": False}, False),
+                 ({"interactive": False}, {"interactive": True}, True)]
+        for index, (top, last, expected) in enumerate(cases):
+            with self.subTest(top=top, last=last):
+                command, params = validate_request({"command": "run", "input": {
+                    "run_id": "projection-" + str(index), **top,
+                    "plan": {"version": "1", "steps": [
+                        {"command": "observe", "input": {"interactive": not expected}},
+                        {"command": "observe", "input": last}]}}})
+                result = self.agent.execute(command, params)
+                self.assertEqual(result["status"], "completed")
+                self.assertIs(result["observation"]["projection"]["view"]["interactive"], expected)
+                self.assertEqual(result["profile"]["counts"]["projections"], 1)
+        with self.assertRaises(AgentError):
+            validate_request({"command": "run", "input": {"interactive": "true",
+                "plan": {"version": "1", "steps": [{"command": "observe"}]}}})
+
+    def test_semantic_run_does_not_apply_tree_interactive_filter(self):
+        pages = []
+        for enabled in (False, True):
+            command, params = validate_request({"command": "run", "input": {
+                "run_id": "semantic-" + str(enabled), "view": "semantic", "interactive": enabled,
+                "plan": {"version": "1", "steps": [{"command": "observe"}]}}})
+            with patch("harmony_agent.core.project_observation", side_effect=AssertionError("Unexpected tree projection")):
+                result = self.agent.execute(command, params)
+            pages.append([(item.get("id"), item.get("text"), item["roles"]) for item in result["observation"]["items"]])
+        self.assertTrue(pages[0])
+        self.assertEqual(pages[0], pages[1])
 
     def test_expired_run_frame_is_captured_again(self):
         checkpoint = RunStore.checkpoint
@@ -396,6 +450,42 @@ class ExecutionRuntimeTests(unittest.TestCase):
         self.assertIsNone(result["profile"]["modelMs"])
         self.assertIsNone(result["profile"]["inputTokens"])
         self.assertGreaterEqual(result["profile"]["coreWallMs"], result["profile"]["stagesMs"]["capture"])
+        details = result["profile"]["captureBreakdown"]
+        self.assertEqual(details["instrumentedCaptures"], 0)
+        self.assertIsNone(details["hdcCalls"])
+        self.assertEqual(details["stagesMs"], {})
+        self.assertIsNone(details["nativeExportMs"])
+        self.assertIsNone(details["transferMs"])
+
+    def test_native_capture_profile_is_optional_and_scoped_to_each_call(self):
+        raw = self.transport.capture_layout(self.transport.serial)
+        executable = Path(self.temp.name) / "hdc-placeholder"
+        executable.write_bytes(b"not executed")
+        native = HdcTransport(str(executable))
+        self.agent._transport = native
+
+        def response(argv, **kwargs):
+            boundary = re.search(r"__HARMONY_LAYOUT_[a-f0-9]+__", argv[-1]).group()
+            receipt = re.search(r"__HARMONY_EXIT_[a-f0-9]+__", argv[-1]).group()
+            body = "\n" + boundary + "\n" + json.dumps(raw) + "\n" + receipt + "0\n"
+            return subprocess.CompletedProcess(argv, 0, body.encode(), b"")
+
+        with patch.object(self.agent, "_check_device"), \
+                patch("harmony_agent.transport.subprocess.run", side_effect=response) as process:
+            plain = self.agent.execute("observe")
+            self.assertNotIn("profile", plain)
+            for _ in range(2):
+                profiled = self.agent.execute("observe", {"profile": True})
+                details = profiled["profile"]["captureBreakdown"]
+                self.assertEqual(details["instrumentedCaptures"], 1)
+                self.assertEqual(details["hdcCalls"], 1)
+                self.assertEqual(set(details["stagesMs"]), {
+                    "hdcProcess", "decodeAndValidation", "shellReceiptValidation", "layoutParseAndValidation"})
+                self.assertTrue(all(value >= 0 for value in details["stagesMs"].values()))
+                self.assertIsNone(details["nativeExportMs"])
+                self.assertIsNone(details["transferMs"])
+                self.assertIsNone(native._capture_metrics)
+            self.assertEqual(process.call_count, 3)
 
     def test_request_plan_schema_refs_resolve(self):
         schema = request_schema("run")

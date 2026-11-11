@@ -1,6 +1,14 @@
 # Bounded plans and execution records
 
-This reference describes `0.1.0a7`. Alpha6 introduced plans but requires every mutation expectation and does not support recent-frame reuse or `refresh`. Read the installed `schema run --json` or MCP `harmony_schema` when the version differs. Plans are declarative input to the local runner; they do not execute arbitrary Python or JavaScript.
+This reference describes `0.1.0a9`. Plan version `"1"` uses literal values; version `"2"` adds bounded reads and scalar data bindings. The outer request schema remains `"1"`. Alpha9 `start` returns the available plan/output contract with the current page. Consult command help/schema for an unfamiliar or incompatible field, rather than reloading the whole schema for each segment. Plans do not execute arbitrary Python or JavaScript.
+
+## Segment boundaries
+
+Once the current evidence establishes an authorized sequence, submit that segment as one plan. For example, if an observed form exposes the editable field, save button and status selector, fill and save can share one run with input readback and a saved-state expectation. Returning to the model between those known steps adds a decision boundary without new interpretation.
+
+Keep a known workflow in one run when only its values are new. Version 2 can read a displayed value, fill it into a known target and compare later state locally; [dynamic workflows](workflows.md) gives the exact supported forms. Read-copy-replan through the outer model is unnecessary for these deterministic data dependencies.
+
+End the segment where a decision requires new interpretation: an unknown destination structure, a user choice or a necessary screenshot. Use `yield` at that boundary, then examine the returned observation. Unknown/failed reads and conditions stop the path. Future selectors and page rules require verified workflow knowledge or an explicit task contract; do not guess them or drop required checks. Direct commands remain suitable for isolated actions and exploration.
 
 ## Request shape
 
@@ -12,6 +20,7 @@ Use a UTF-8 JSON request file with `harmony-agent --request <file> --session <na
   "command": "run",
   "input": {
     "run_id": "example-save-1",
+    "output": "decision",
     "plan": {
       "version": "1",
       "goal": "Save the requested message",
@@ -47,11 +56,15 @@ Use a UTF-8 JSON request file with `harmony-agent --request <file> --session <na
 
 Mutation `expect` is optional. Use it to wait for or verify an outcome that matters to the task. In this example, `fill` verifies the requested text internally; the save action waits for its result, and the final goal records task completion. A passed expectation needs no duplicate `wait`.
 
-The optional `before` list checks declared page or business conditions on the target-resolution frame. Add it only when that context matters; do not manufacture checks for each mutation. The runner does not infer undeclared page semantics. Plan steps cannot attach/detach, switch sessions/devices, invoke arbitrary commands, or use frame refs as future selectors. All branches are validated before execution. The outer session selects the device.
+The optional `before` list checks declared page or business conditions on the action's target-resolution frame. Add it only when that context matters; do not manufacture checks for each mutation. Standalone `assert` steps inside a run also use the recent-frame cache, so rewriting them as `before` does not inherently save a capture. Separate calls, expired frames and explicit refresh can require new captures. The runner does not infer undeclared page semantics. Plan steps cannot attach/detach, switch sessions/devices, invoke arbitrary commands, or use frame refs as future selectors. All branches are validated before execution. The outer session selects the device.
 
 ## Reuse within a run
 
-`run` returns a compact tree by default. Select `view: "semantic"` when the grouping helps analysis; semantic output can be larger. The runner skips intermediate public projections and full session-file rewrites, while keeping the journal and captured frames.
+For the next agent decision, prefer run input `output: "decision"` (CLI `--output decision`). It returns status, goal verification, the final observation, step/action summaries and relevant failure evidence. Successful step details remain in the full saved report; persistence failures retain available receipts in the response. Default `output: "full"` preserves the prior response shape. Neither choice changes execution, checks or stored evidence.
+
+The final tree is compact by default, independently of the run output choice. Select `view: "semantic"` when grouping helps analysis; semantic output can be larger. The runner skips intermediate public projections and full session-file rewrites, while keeping the journal and captured frames.
+
+From alpha8, top-level `interactive: true` applies the tree's interactive projection to the final result; `max_nodes` bounds its size. An explicit projection option on the last executed command can override the corresponding top-level choice. The semantic view uses its own item selection and does not apply the tree's interactive filter. These options affect returned detail, not internal targeting, conditions or native capture cost. Expand the saved frame with `inspect` when the required context was omitted.
 
 Within one uninterrupted run, targets and `before` checks can reuse the last successfully published frame for up to 1000 ms after its capture completes. Expired or invalid frames are captured again. Cached evidence is never reused across CLI calls or model turns. Device readiness is checked once per run by default.
 
@@ -70,15 +83,16 @@ Each step has exactly one operation form:
 | Form | Meaning |
 | --- | --- |
 | `{"command":"observe","input":{}}` | Execute a supported core command |
+| `{"read":{"name":"note","selector":{"id":"note-source"}}}` | Version 2: bind one source text value from the full current frame |
 | `{"assert":condition}` | Check a deterministic condition |
 | `{"if":condition,"then":[steps],"else":[steps]}` | Select a known branch; unknown returns control |
 | `{"repeat":{"limit":3,"until":condition,"steps":[steps]}}` | Check before each iteration; finite bounded repetition |
 | `{"yield":"Need a decision about the new page"}` | Return control with a reason |
 | `{"stop":"This segment is complete"}` | End this segment; declared goals still determine task verification |
 
-`condition` has `selector`, optional `property` (default `text`), `equals`, and optional `timeoutMs`, matching the installed expectation schema. Control-flow checks evaluate the latest verified frame; they do not poll for `timeoutMs`. Use a `wait` command or an action's `expect` when waiting for a change is intended. Preserve actual booleans, empty strings and original display values. A timed-out command stops the plan rather than selecting an alternate branch. Absence and ambiguity must follow the core's explicit condition semantics.
+`condition` has `selector`, optional `property` (default `text`), `equals`, and optional `timeoutMs`. Version 2 additionally allows closed `var`/`concat` expressions in `equals`; they use values already read on the executed path. Control-flow checks evaluate the latest verified frame; they do not poll for `timeoutMs`. Use a `wait` command or an action's `expect` when waiting for a change is intended. Preserve booleans, empty strings and display values. A timed-out command stops the plan rather than selecting an alternate branch. Absence and ambiguity follow the core's explicit condition semantics.
 
-Select finite step, action, capture and time budgets. `maxSteps` includes precondition checks, goal checks and control-flow checks, not only command entries; leave room for final goal verification. `maxActions` counts high-level mutation commands (`press`, `fill`, `scroll`, `back`, `open`), not native transport operations: one `fill` can focus, clear and insert through several native actions. `maxCaptures` bounds native observations across the run. Budget exhaustion returns a partial result; it does not undo earlier steps. Native commands already dispatched may complete before cancellation is observed. Finishing the declared steps alone is not proof of the business outcome.
+Select finite step, action, capture and time budgets. `maxSteps` includes reads, preconditions, goals and control-flow checks, not only commands; leave room for final verification. A read counts one step and no action, and uses the current eligible full frame or a bounded fresh capture. `maxActions` counts high-level mutations (`press`, `fill`, `scroll`, `back`, `open`), not native transport operations: one `fill` can focus, clear and insert through several native actions. `maxCaptures` bounds observations across the run. Exhaustion returns a partial result without undoing earlier steps. Native commands already dispatched may complete before cancellation is observed. Finishing steps alone is not proof of the business outcome.
 
 ## Results and recovery
 
@@ -92,8 +106,8 @@ Record persistence and device execution can fail independently. A missing receip
 
 ## Expand saved evidence
 
-Reports are compact by default. The complete stored evidence is checked before output projection. Receipts, goals and unique errors are retained; duplicated `result.steps` entries are omitted, and `result.observation` is replaced with `result.observationRef`. Expand that frame with `inspect`, or use `report --full` / MCP `full: true` for the complete saved representation. This changes returned context, not the saved journal or evidence checks.
+Reports are compact by default. The complete stored evidence is checked before output projection. Receipts, goals and unique errors are retained; duplicated `result.steps` entries are omitted, and `result.observation` is replaced with `result.observationRef`. Expand that frame with `inspect`, or use `report RUN_ID --full --json` / MCP `full: true` for the complete saved representation. This changes returned context, not the saved journal or evidence checks. A successful run already returns its status, goals and final view; retrieve a report when recovery, review or another evidence question calls for it.
 
-`inspect` requires `frame_id`. Use `run_id` for a recorded run frame, or the current named session's cached frame when no run ID is supplied. Optionally give a target selector and node limit. It reads saved data without HDC and does not make old refs fresh. Use `report` with `run_id` to retrieve execution and verification results.
+`inspect` requires `frame_id`. Use `run_id` for a recorded run frame, or the current named session's cached frame when no run ID is supplied. Optionally give a target selector and node limit. It reads saved data without HDC and does not make old refs fresh. Use `harmony-agent report RUN_ID --json` to retrieve execution and verification results. In JSON requests and MCP arguments, the field is `run_id`; see [the matching CLI, request and MCP examples](requests.md#read-a-saved-run).
 
 For independent review, pass frozen frame and run IDs, the user's goal and the exact question. Do not ask a reviewer to operate the device to make incomplete evidence pass. Report unsupported and inconclusive conclusions separately from verified outcomes.

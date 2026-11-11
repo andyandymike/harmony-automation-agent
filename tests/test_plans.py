@@ -124,13 +124,15 @@ class PlanValidationTests(unittest.TestCase):
 
     def test_projection_settings_inherit_run_unless_explicit(self):
         normalized = validate_plan(plan({"command": "observe"},
-            {"command": "observe", "input": {"max_nodes": 12, "compact": False, "view": "tree"}}))
+            {"command": "observe", "input": {"max_nodes": 12, "compact": False, "view": "tree", "interactive": False}}))
         first, second = normalized["steps"]
         self.assertNotIn("max_nodes", first["input"])
         self.assertNotIn("compact", first["input"])
         self.assertNotIn("view", first["input"])
+        self.assertNotIn("interactive", first["input"])
         self.assertEqual(second["input"]["max_nodes"], 12)
         self.assertIs(second["input"]["compact"], False)
+        self.assertIs(second["input"]["interactive"], False)
         self.assertEqual(second["input"]["view"], "tree")
 
     def test_rejects_foreign_context_commands_refs_and_bad_conditions(self):
@@ -169,7 +171,7 @@ class PlanValidationTests(unittest.TestCase):
 
     def test_schema_is_json_serializable_and_refs_resolve(self):
         schema = json.loads(json.dumps(plan_schema()))
-        self.assertEqual(schema["properties"]["version"]["const"], "1")
+        self.assertEqual(schema["properties"]["version"]["enum"], ["1", "2"])
         self.assertFalse(schema["additionalProperties"])
 
         def check(value):

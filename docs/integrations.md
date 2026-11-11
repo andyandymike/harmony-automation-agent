@@ -11,7 +11,9 @@ harmony-agent --version --json
 harmony-agent schema run --json
 ```
 
-The caller needs permission to start the process and read its JSON output. Use a UTF-8 request file for nested input, Unicode or values that are awkward to quote in a shell. See [request examples](agent-requests.md) and the [execution guide](execution.md).
+The caller needs permission to start the process and read its JSON output. For a reusable plan, use CLI `--plan-file FILE` with `run` or `execute`; the file contains only the raw plan, while device/session context stays on the command line. Complete UTF-8 request envelopes remain available through `--request FILE` for nested input, Unicode or awkward shell values. See [request examples](agent-requests.md) and the [execution guide](execution.md). The checks above are for setup; retain the learned contract during tasks.
+
+Use `execute` for a complete known workflow with explicit initial conditions and final goals; it normally detaches after verified completion. Use `start` and `run` when page exploration or another outer decision is needed. `execute` defaults to decision output, while `run` keeps its full-response default.
 
 Python and HDC must run where the selected device is accessible. A remote workspace, container or WSL session does not automatically inherit another machine's USB access. Keep the selected session and state directory consistent across calls.
 
@@ -31,7 +33,7 @@ python -m harmony_agent.mcp --state-dir .harmony-agent
 
 The host starts the process and exchanges UTF-8 JSON-RPC messages over stdin/stdout. No network listener is opened. Use an absolute state directory when host working directories vary, and supply `--hdc` when the executable cannot be discovered. Keep the process connected across calls to avoid repeated CLI startup.
 
-Commands are exposed as `harmony_<command>` tools with the same validation as the CLI. Use `harmony_schema` to inspect the installed contract. Results include the CLI-style envelope in text and `structuredContent`. Read command success, run status, action dispatch and goal verification separately; their meanings are covered in [execution outcomes](execution.md#interpret-outcomes-separately).
+Commands are exposed as `harmony_<command>` tools with the same validation as the CLI, including `harmony_execute` for complete known tasks. Use `harmony_schema` for unfamiliar contract details and retain the learned contract across calls. Results include the CLI-style envelope in text and `structuredContent`. Read command success, run status, goal verification and session cleanup separately. After response loss, query the business report and its independent `workflowReceipt` without replaying the task; see [execution outcomes](execution.md#interpret-outcomes-separately).
 
 For frozen evidence access, launch a separate process with `--read-only`. Its enforced tool allowlist contains only `harmony_inspect`, `harmony_report` and `harmony_schema`; it cannot capture a new device observation. Point both processes at the same state directory to share evidence. This restricts that server's API, not other tools the host might grant to an agent.
 

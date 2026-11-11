@@ -1,8 +1,8 @@
 # Release readiness
 
-The current `0.1.0a7` performance-correction candidate is unreleased. It removes repeated reads, serialization and output work from alpha6's execution layer. See [alpha7 validation](validation-alpha7.md) for recorded checks and remaining host/device validation. The [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 local package checks, the [alpha3 core-fix record](validation-alpha3.md), and alpha2 publication/CI/device evidence remain historical and version-specific.
+The current `0.1.0a9` candidate is unreleased. It adds local data bindings for known workflows, a combined session/page entry point and decision-sized run responses while retaining full evidence. See [alpha9 validation](validation-alpha9.md) and the [performance guide](performance.md). The [alpha8 measurement record](validation-alpha8.md), [alpha7 performance record](validation-alpha7.md) and earlier validation records remain historical and version-specific.
 
-Updated: 2026-11-10. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
+Updated: 2026-11-11. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 
 Status meanings: **done** has a recorded result; **partial** has useful work completed but a named acceptance gap; **pending** has no completed result. A previous-version result is historical evidence, not acceptance of new code.
 
@@ -21,6 +21,7 @@ Status meanings: **done** has a recorded result; **partial** has useful work com
 | --- | --- |
 | [Alpha2 validation](validation-alpha2.md) | Historical 2026-11-03 regression, device, agent and installation results; includes actual failed attempts and remaining limits |
 | [Alpha6 validation](validation-alpha6.md) | Historical local execution, Skill, protocol and package acceptance before performance correction |
+| [Alpha9 validation](validation-alpha9.md) | Reusable workflow execution, agent-task limits, direct CLI comparisons and local package validation |
 | [Alpha7 validation](validation-alpha7.md) | Performance correction, regression coverage and package checks; local raw device evidence is excluded |
 | [Alpha2 device summary](validation-device-smoke-alpha2.json) | 40 passed steps, 0 failures, 1 skipped independent ordinary-IME suite |
 | [Alpha2 input record](validation-input-alpha2.json) | Six separate standard/native input checks passed |

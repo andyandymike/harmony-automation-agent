@@ -169,6 +169,30 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(shell.call_count, 1)
         cleanup.assert_not_called()
 
+    def test_capture_profile_retains_failure_timing_without_changing_calls(self):
+        def response(argv, **kwargs):
+            receipt = re.search(r"__HARMONY_EXIT_[a-f0-9]+__", argv[-1]).group()
+            boundary = re.search(r"__HARMONY_LAYOUT_[a-f0-9]+__", argv[-1]).group()
+            body = "\n" + boundary + "\ninvalid JSON\n" + receipt + "0\n"
+            return subprocess.CompletedProcess(argv, 0, body.encode(), b"")
+
+        with patch("harmony_agent.transport.subprocess.run", side_effect=response) as run:
+            with self.transport.capture_profile() as metrics:
+                with self.assertRaises(AgentError) as caught:
+                    self.transport.capture_layout("dev")
+            self.assertEqual(caught.exception.code, "LAYOUT_INVALID")
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(metrics["hdcCalls"], 1)
+            self.assertEqual(set(metrics["stagesMs"]), {
+                "hdcProcess", "decodeAndValidation", "shellReceiptValidation", "layoutParseAndValidation"})
+            self.assertTrue(all(value >= 0 for value in metrics["stagesMs"].values()))
+            self.assertIsNone(self.transport._capture_metrics)
+            frozen = dict(metrics["stagesMs"])
+            with self.assertRaises(AgentError):
+                self.transport.capture_layout("dev")
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(metrics["stagesMs"], frozen)
+
     def test_capture_validates_root_and_utf8_byte_limit(self):
         with patch.object(self.transport, "shell", side_effect=self.layout_body('"not a layout"')):
             with self.assertRaises(AgentError) as caught:
