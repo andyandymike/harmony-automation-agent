@@ -20,7 +20,7 @@ TEXT_FIELDS = ("id", "key", "text", "originalText", "type", "hint", "description
                "accessibilityId", "uniqueId")
 ALIASES = {"app": "bundleName", "window": "hostWindowId", "windowId": "hostWindowId",
            "display": "displayId"}
-SELECTOR_FIELDS = set(BOOL_FIELDS + CONTEXT_FIELDS + TEXT_FIELDS + ("ref", "parent"))
+SELECTOR_FIELDS = set(BOOL_FIELDS + CONTEXT_FIELDS + TEXT_FIELDS + ("ref", "parent", "textPrefix"))
 CHANGE_FIELDS = ("text", "originalText", "textSource", "value", "hint", "description", "bounds", "type") + BOOL_FIELDS
 UI_ATTRIBUTE_FIELDS = set(BOOL_FIELDS + CONTEXT_FIELDS + TEXT_FIELDS + ("bounds", "origBounds", "hierarchy"))
 _REF = re.compile(r"^@e[1-9][0-9]*~(.+)$")
@@ -241,6 +241,8 @@ def parse_selector(selector):
             raise AgentError("INVALID_SELECTOR", f"Unsupported selector field: {key}")
         if name in parsed:
             raise AgentError("INVALID_SELECTOR", f"Duplicate selector field: {name}")
+        if name == "textPrefix" and (not isinstance(value, str) or not value):
+            raise AgentError("INVALID_SELECTOR", "textPrefix requires a nonempty literal string.")
         if name in BOOL_FIELDS:
             normalized = _boolean(value)
             if normalized is None and value is not None:
@@ -265,7 +267,7 @@ def selector_uses_refs(selector):
 
 
 def select_nodes(observation, selector):
-    """Select exact matches; within restricts matches to descendants of a container."""
+    """Select field matches, with an explicit literal text prefix and ancestor scope."""
     parsed = parse_selector(selector)
     for field in ("ref", "parent"):
         ref = parsed.get(field)
@@ -276,8 +278,10 @@ def select_nodes(observation, selector):
             raise AgentError("STALE_REF", "The reference does not belong to the current frame.",
                              details={"frameId": observation.get("frameId"), "ref": ref, "field": field})
     within = parsed.pop("within", None)
+    text_prefix = parsed.pop("textPrefix", None)
     nodes = observation.get("nodes", [])
-    matches = [n for n in nodes if all(n.get(k) == v for k, v in parsed.items())]
+    matches = [n for n in nodes if all(n.get(k) == v for k, v in parsed.items())
+               and (text_prefix is None or isinstance(n.get("text"), str) and n["text"].startswith(text_prefix))]
     if within is not None:
         ancestor_refs = {n["ref"] for n in select_nodes(observation, within)}
         by_ref = {n["ref"]: n for n in nodes}

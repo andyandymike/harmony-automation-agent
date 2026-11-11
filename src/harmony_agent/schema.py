@@ -14,7 +14,7 @@ BOOLEAN_PROPERTIES = set(PROPERTIES) - {"text"}
 SELECTOR_BOOLEAN_FIELDS = {"enabled", "checked", "selected", "focused", "scrollable",
                            "clickable", "visible", "longClickable", "editable", "checkable"}
 SELECTOR_STRING_FIELDS = {"id", "key", "text", "originalText", "value", "type", "ref", "description",
-                          "hint", "bundleName", "app", "parent"}
+                          "hint", "bundleName", "app", "parent", "textPrefix"}
 SELECTOR_ID_FIELDS = {"hostWindowId", "displayId", "window", "windowId", "display"}
 
 # A single definition drives argparse, request validation and the schema command.
@@ -41,6 +41,10 @@ FIELDS = {
                 "help": "Omit unknown and empty optional node fields; preserve text values and explicit states."},
     "full": {"kind": "boolean", "default": False,
              "help": "Return the full saved report, including duplicate step copies and the saved page."},
+    "output": {"kind": "enum", "choices": ["full", "decision"], "default": "full",
+               "help": "Run response detail; decision keeps the final view and recovery details, with full evidence saved."},
+    "keep_session": {"kind": "boolean", "default": False,
+                     "help": "Keep the execute session after verified completion instead of detaching it."},
     "direction": {"kind": "enum", "choices": ["up", "down", "left", "right"],
                   "help": "Scroll direction: up, down, left or right."},
     "property": {"kind": "enum", "choices": list(PROPERTIES), "default": "text",
@@ -52,13 +56,20 @@ FIELDS = {
 COMMANDS = {
     "claim": {"help": "Reserve device mutations for this session until release or detach.", "positional": [], "options": [], "required": []},
     "release": {"help": "Release this session's device claim and invalidate cached refs.", "positional": [], "options": [], "required": []},
-    "run": {"help": "Execute a bounded conditional plan under exclusive device ownership.", "positional": [], "options": ["plan", "run_id", "view", "max_nodes", "compact"], "required": ["plan"],
+    "run": {"help": "Execute a bounded conditional plan under exclusive device ownership.", "positional": [], "options": ["plan", "run_id", "view", "max_nodes", "interactive", "compact", "output"], "required": ["plan"],
             "field_overrides": {"compact": {"default": True}}},
+    "execute": {"help": "Attach or resume, execute a known workflow with initial/final checks, and detach after verified completion.",
+                "positional": [], "options": ["plan", "run_id", "view", "max_nodes", "interactive", "compact", "output", "keep_session"],
+                "required": ["device", "plan"],
+                "field_overrides": {"compact": {"default": True}, "output": {"default": "decision"}}},
     "report": {"help": "Read a persisted run without contacting the device or replaying actions.", "positional": ["run_id"], "options": ["full"], "required": ["run_id"]},
     "inspect": {"help": "Expand a frozen frame without contacting the device.", "positional": [], "options": ["frame_id", "run_id", "target", "max_nodes"], "required": ["frame_id"]},
     "doctor": {"help": "Diagnose HDC and device readiness.", "positional": [], "options": [], "required": []},
     "devices": {"help": "List connected HDC devices.", "positional": [], "options": [], "required": []},
     "attach": {"help": "Attach a named session to an explicitly selected device.", "positional": [], "options": [], "required": ["device"]},
+    "start": {"help": "Attach or resume the selected session and return the current page and supported plan contract.",
+              "positional": [], "options": ["view", "max_nodes", "interactive", "compact"], "required": ["device"],
+              "field_overrides": {"compact": {"default": True}, "max_nodes": {"default": 40}}},
     "detach": {"help": "Release a session without stopping an external device.", "positional": [], "options": [], "required": []},
     "open": {"help": "Open an application in the session.", "positional": ["app"], "options": ["ability", "expect", "timeout_ms"], "required": ["app"]},
     "observe": {"help": "Capture a fresh structured UI observation.", "positional": [], "options": ["max_nodes", "interactive"], "required": []},
@@ -118,6 +129,8 @@ def validate_selector(value, *, path="target", depth=0):
             invalid(f"{path}.{field} must be a boolean.")
         elif field in SELECTOR_STRING_FIELDS and not isinstance(item, str):
             invalid(f"{path}.{field} must be a string.")
+        elif field == "textPrefix" and not item:
+            invalid(f"{path}.textPrefix must not be empty.")
         elif field in SELECTOR_ID_FIELDS and type(item) not in (str, int):
             invalid(f"{path}.{field} must be a string or integer.")
     return deepcopy(value)
@@ -212,6 +225,13 @@ def validate_params(command, params, *, from_cli=False):
             if isinstance(expected, str) and expected.lower() in ("true", "false"):
                 result["equals"] = expected.lower() == "true"
         _validate_condition(result["property"], result["equals"], path="wait")
+    if command == "execute":
+        if result["device"].startswith("-"):
+            invalid("execute requires an explicit device identifier, not an option.")
+        for boundary in ("preconditions", "goals"):
+            if not result["plan"].get(boundary):
+                raise AgentError("INVALID_PLAN", "execute requires nonempty initial preconditions and final goals.",
+                                 details={"path": "plan." + boundary}, exit_code=2)
     if command in ("schema", "help") and result.get("command_name") not in (None, *COMMANDS):
         invalid("Unknown help/schema command.", command=result["command_name"])
     return result
@@ -261,6 +281,9 @@ def _field_schema(name, command=None):
         result["$ref"] = "#/$defs/expect"
     elif kind == "plan":
         result["$ref"] = "#/$defs/plan"
+        if command == "execute":
+            result["allOf"] = [{"required": ["preconditions", "goals"], "properties": {
+                "preconditions": {"minItems": 1}, "goals": {"minItems": 1}}}]
     if "default" in spec:
         result["default"] = spec["default"]
     return result
@@ -290,6 +313,7 @@ def request_schema(command=None):
                          "properties": {**common, **properties},
                          "required": ["command", *spec["required"]], **condition})
     selector_fields = {name: {"type": "string"} for name in SELECTOR_STRING_FIELDS}
+    selector_fields["textPrefix"]["minLength"] = 1
     selector_fields.update({name: {"type": "boolean"} for name in SELECTOR_BOOLEAN_FIELDS})
     selector_fields.update({name: {"type": ["string", "integer"]} for name in SELECTOR_ID_FIELDS})
     selector_fields["within"] = {"$ref": "#/$defs/selector"}
@@ -315,7 +339,7 @@ def request_schema(command=None):
                         "equals": {"type": ["string", "boolean"]},
                         "timeoutMs": _field_schema("timeout_ms")}}},
             "oneOf": variants}
-    if "run" in names:
+    if "run" in names or "execute" in names:
         from .plans import plan_schema
         plan = plan_schema()
         def relocate(value):

@@ -1,10 +1,10 @@
 # Compatibility and validation boundaries
 
-Updated: 2026-11-10. Package version, request `schemaVersion`, fixture contract, and environment version are separate identifiers. Check the installed CLI with `harmony-agent --version --json` and `harmony-agent schema --json`.
+Updated: 2026-11-11. Package version, request `schemaVersion`, fixture contract, and environment version are separate identifiers. Responses include the package version; `start` also returns the supported plan contract. Use `harmony-agent --version --json` for a standalone version check and `schema <command> --json` when a command's fields are unfamiliar.
 
 ## Tested combinations
 
-Current source is the unreleased `0.1.0a7` candidate. See [alpha7 validation](validation-alpha7.md) for recorded local results and host/device validation boundaries. The [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 isolated package checks, the [alpha3 validation record](validation-alpha3.md), and alpha2 device/hosted-CI results describe their recorded source versions. Start with [installation](installation.md) and choose an [agent integration](integrations.md) when needed.
+Current source is the unreleased `0.1.0a9` candidate. See [alpha9 validation](validation-alpha9.md) for recorded local results and host/device validation boundaries. The [alpha8 record](validation-alpha8.md), [alpha7 record](validation-alpha7.md), [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 isolated package checks, the [alpha3 validation record](validation-alpha3.md), and alpha2 device/hosted-CI results describe their recorded source versions. Start with [installation](installation.md) and choose an [agent integration](integrations.md) when needed.
 
 | Combination | Recorded evidence | Current boundary |
 | --- | --- | --- |

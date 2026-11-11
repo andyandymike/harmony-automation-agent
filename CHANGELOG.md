@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.0a9 — local workflow execution candidate, 2026-11-11
+
+- Add version 2 plans with bounded reads and typed `var`/`concat` value bindings. Known workflows can consume live page data without sending each value back to a model. Version 1 plans remain supported; expressions cannot choose commands or selectors or execute code.
+- Add literal `textPrefix` selection for exposed labels with runtime values; existing uniqueness and context rules still apply.
+- Add `start` to attach or resume an explicitly selected session and return its current page and supported plan contract in one call.
+- Add `execute` for a complete known workflow with required initial preconditions and final goals. It attaches or resumes the explicit device/session, uses the existing runner, and detaches after verified success; `keep_session` and unresolved outcomes retain the session. Cleanup failure preserves the business result without replay.
+- Add CLI-only `--plan-file` for `run` and `execute`. Reuse a validated raw UTF-8 plan with CLI device/session context and automatic fresh run IDs, without regenerating a request envelope. File and plan validation finish before Agent creation.
+- Default `execute` to decision output and add opt-in `run.output: "decision"`. Full run evidence remains local, and exceptional or unpersisted receipts stay in the response. `run` retains its compatible full-response default.
+- Persist one independent lifecycle receipt after `execute` cleanup. `report.workflowReceipt` exposes the historical cleanup conclusion or unknown availability without changing the business run; a missing lifecycle record never justifies replay.
+- Extend saved-evidence checks to verify bound values against their source frames. Workflow correctness, call boundaries and measured task latency are evaluated separately.
+
+## 0.1.0a8 — call strategy and measurement candidate, 2026-11-11
+
+- Distinguish unfamiliar-page exploration from execution of a known, authorized segment in the portable Skill. Prefer one bounded run for the latter, with explicit stopping points for new information, user decisions and necessary visual interpretation.
+- Combine prepared request-file creation and CLI execution in one host call where supported. Avoid an extra round trip solely for file creation, while retaining new-page decisions and result verification.
+- Correct the positional `report RUN_ID` CLI example and provide matching CLI, JSON and MCP examples. Validate maintained command examples offline.
+- Accept top-level `run.interactive` for tree projections; retain explicit per-command overrides and existing semantic-view behavior.
+- Separate target-frame reuse, plan-condition reuse and checks performed on an action's existing frame. These counts do not imply measured avoided captures.
+- Add optional capture-stage profiling without additional HDC calls. Keep native export and transfer individually unmeasured in the single-call path.
+- Extend local evaluation recording and matched comparisons to separate core time, process overhead and unattributed gaps. Record explicit outer/nested tool boundaries, cold/warm conditions and task milestones without inferring model rounds from CLI counts. Keep unavailable model latency and token usage unknown; partial measurements do not establish end-to-end savings.
+
 ## 0.1.0a7 — performance correction candidate, 2026-11-10
 
 - Reuse a successfully published observation for up to 1,000 ms within the same uninterrupted plan. Do not reuse frames across CLI/model turns or after invalidation. Add per-mutation `refresh: true` for tasks requiring a new observation.

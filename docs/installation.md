@@ -46,7 +46,7 @@ This development alpha has not been published to PyPI. If you have a wheel built
 
 ```powershell
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a7-py3-none-any.whl
+.venv/Scripts/python.exe -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a9-py3-none-any.whl
 .venv/Scripts/harmony-agent.exe --version --json
 ```
 
@@ -60,20 +60,20 @@ Check version and schema without a device:
 
 ```sh
 harmony-agent --version --json
-harmony-agent schema run --json
+harmony-agent schema execute --json
 ```
 
-Then inspect device readiness and select an exact device ID:
+These are installation checks, not steps to repeat before every task. Then select an exact device and read its current page:
 
 ```sh
-harmony-agent doctor --json
-harmony-agent doctor --device YOUR_DEVICE_ID --json
-harmony-agent attach --device YOUR_DEVICE_ID --session demo --json
-harmony-agent observe --session demo --compact --json
+harmony-agent devices --json
+harmony-agent start --device YOUR_DEVICE_ID --session demo --json
 harmony-agent detach --session demo --json
 ```
 
-Inspect `data.ready`, not just command success. An empty device list means device operation is not ready. The observation should identify the expected app and provide usable controls. For a repeatable action with readback, follow the [README example](../README.md#act-and-verify) after installing the fixture.
+Check `data.observationReady`, app identity and usable controls in the returned observation. An empty device list means device operation is not ready. If setup fails, use `doctor --device YOUR_DEVICE_ID --json` and inspect `data.ready` and the individual checks. For a repeatable action with readback, follow the [README example](../README.md#act-and-verify) after installing the fixture.
+
+For an already known complete workflow, `execute` can validate initial conditions, run, verify final goals and detach in one call; it does not require a preliminary `start`. Save a raw plan once and reuse `execute --device DEVICE --session TASK --plan-file FILE` for new authorized tasks with the same contract. See [workflow setup and recovery](../skills/harmony-agent/references/workflows.md). `execute` defaults to decision output; exploratory `run` keeps its compatible full default. A retained or failed cleanup needs separate attention, not a repeated workflow.
 
 Attaching and detaching do not start, stop or reset the device. SDK authorization and input-method initialization remain separate setup steps; there is no all-in-one environment installer.
 
@@ -85,7 +85,7 @@ First check offline version/schema invocation from the host. Then perform a smal
 
 ## Upgrade and uninstall
 
-Retain needed reports and detach active sessions before switching versions. Install the selected replacement wheel into the environment, check version/schema, and establish a new session and observation. Do not reuse old frame refs. Older versions may not read newer state formats; see [version handling](compatibility.md#protocol-and-version-handling).
+Retain needed reports and detach active sessions before switching versions. Install the selected replacement wheel, check its version/schema, and establish fresh device evidence through `start` or a known `execute` workflow's initial conditions. Do not reuse old frame refs. Older versions may not read newer state formats; see [version handling](compatibility.md#protocol-and-version-handling).
 
 To uninstall on Windows:
 

@@ -6,13 +6,15 @@
 
 项目提供 Python CLI、可移植的 Agent Skill 和可选的本地 stdio MCP 适配器。它们共用基于 Python 标准库的执行核心；运行时不调用模型，也不需要 Appium 服务、视觉模型或模型 API Key。
 
-**0.1.0a7 是尚未发布的开发预览版，未发布到 PyPI。** 已验证环境见[兼容性](docs/compatibility.md)，本地结果见 [alpha7 验证记录](docs/validation-alpha7.md)，版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
+**0.1.0a9 是尚未发布的开发预览版，未发布到 PyPI。** 已验证环境见[兼容性](docs/compatibility.md)，本地结果见 [alpha9 验证记录](docs/validation-alpha9.md)，版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
 
 ## 功能
 
 - 读取原生 UI 树、定位控件，返回紧凑或语义化的页面视图。
 - 打开应用、点击、滚动、输入文字，并验证可观察的结果。
 - 执行包含条件、循环和明确完成目标的有界计划。
+- 用一次 `execute` 完成已知流程，包括初始条件检查、最终验证和会话清理。
+- 在已知流程内绑定页面实时值，减少逐页读值、填写时与模型往返。
 - 保存本地执行记录，无需连接设备即可检查已保存的证据。
 - 协调单一设备执行者，允许可选的只读角色检查已有证据。
 
@@ -46,18 +48,25 @@ POSIX 主机：
 
 离线 wheel、环境配置、升级和卸载见[安装指南](docs/installation.md)，排障见[兼容性说明](docs/compatibility.md)。构建可选的 fixture 应用另需 SDK 和签名工具。
 
-## 首次观察
+## 选择任务入口
 
-从 `doctor` 或 `devices` 中明确选择一个设备 ID。`doctor` 执行成功不一定代表设备就绪，需要检查 `data.ready`。
+页面结构和完整流程已明确时，使用 `execute`，提供准确设备 ID，以及包含应用范围明确的初始 `preconditions` 和最终 `goals` 的计划，两者都不能为空。它会连接或恢复会话、执行并验证任务，成功后自动分离会话；需要有意保留会话时使用 `--keep-session`。默认返回用于下一步判断的精简结果。根据已验证的流程契约调整[完整示例](skills/harmony-agent/references/workflows.md#complete-two-page-example)，将原始计划保存为 UTF-8 JSON 文件：
 
 ```sh
-harmony-agent doctor --json
-harmony-agent attach --device YOUR_DEVICE_ID --session demo --json
-harmony-agent observe --session demo --compact --json
+harmony-agent execute --device YOUR_DEVICE_ID --session task --plan-file .harmony-agent/workflow.json --json
+```
+
+新任务仍符合相同流程契约且已获授权时，直接复用已验证的计划文件；每次调用自动生成新的执行 ID。结果不确定时不能自动重试。需要探索或尚不了解当前页面时，先用 `start`，再用 `run` 执行明确的任务片段。
+
+使用任务明确提供的设备 ID，或通过 `devices` 获取。`start` 一次完成会话连接或恢复，并返回当前页面与支持的计划契约；环境异常时再使用 `doctor` 排查。
+
+```sh
+harmony-agent devices --json
+harmony-agent start --device YOUR_DEVICE_ID --session demo --json
 harmony-agent detach --session demo --json
 ```
 
-`observe` 返回当前应用上下文、UI 节点和观察质量。连接和分离会话不会启动或重置设备。若要使用项目提供的示例控件，可构建并安装可选的 [fixture 应用](docs/fixture.md)。
+读取 `start` 返回的 `observation` 获取应用上下文、UI 节点和观察质量，后续需要新页面时使用 `observe`。连接和分离会话不会启动或重置设备。若要使用项目提供的示例控件，可构建并安装可选的 [fixture 应用](docs/fixture.md)。[本地流程说明](skills/harmony-agent/references/workflows.md) 提供实时数据绑定和精简执行结果的完整例子。
 
 ## 操作与验证
 
@@ -90,13 +99,12 @@ harmony-agent press id=fixture.reset --session demo --compact --json
 ```sh
 harmony-agent --request .harmony-agent/increment.json --json
 harmony-agent help press
-harmony-agent schema --json
 harmony-agent detach --session demo --json
 ```
 
 确认计数器结果时，需要检查断言是否通过。动作也会返回观察结果，可直接用于下一步判断。已通过的 `expect` 不需要再用 `wait` 重复验证同一条件。动作结果不确定时，应先重新观察，再决定是否重试。
 
-更长的任务可由 `run` 执行有界计划并记录结果。`report` 和 `inspect` 读取已保存的证据，不采集设备页面。在同一次连续运行中，目标定位可以复用采集完成后不超过 1000 毫秒的页面；动作步骤的 `refresh: true` 会要求重新采集。计划、结果含义和性能取舍见[执行指南](docs/execution.md)，单条命令见[请求示例](docs/agent-requests.md)。
+完整已知任务使用 `execute`，已有会话中的有界片段使用 `run`。`execute` 默认返回 decision 结果；`run` 保持完整响应默认值，也接受 `output: "decision"`，两者均保留完整运行证据。`report` 和 `inspect` 读取已有证据，不采集设备页面。在同一次连续运行中，目标定位可以复用采集完成后不超过 1000 毫秒的页面；动作步骤的 `refresh: true` 会要求重新采集。结果含义和性能取舍见[执行指南](docs/execution.md)，单条命令见[请求示例](docs/agent-requests.md)。
 
 ## 接入 AI Agent
 
@@ -116,7 +124,7 @@ harmony-agent detach --session demo --json
 
 文字输入仍属实验能力。多步骤 `fill` 失败时，先前的编辑可能已经生效；原生文本注入也可能覆盖设备剪贴板。使用前请阅读[输入行为](docs/agent-usage.md#input-limitations)。
 
-动作确认与断言通过是两件事；`run` 命令成功也不等于计划任务成功或目标已经验证。输出被截断、字段未知时，不能据此认定控件不存在。详见[结果解释](skills/harmony-agent/references/outcomes.md)。
+动作确认与断言通过是两件事；命令成功也不等于计划任务成功或目标已经验证。`execute` 还需检查 `sessionCleanup`：失败、未知或主动让出控制的任务会保留会话，清理失败也不会撤销已完成动作。响应丢失时查询 `report RUN_ID`，不要重放流程。独立的 `workflowReceipt` 记录该次任务结束时的清理结论；记录缺失或无效表示清理状态未知，不表示应该重新执行任务。输出被截断、字段未知时，不能据此认定控件不存在。详见[执行结果](docs/execution.md#interpret-outcomes-separately)。
 
 状态和证据默认保存在 `.harmony-agent/`，可用 `--state-dir` 更改位置。分享前应检查 UI 树、截图和输入数据。运行时不会自动上传诊断资料，但 Agent 宿主可能将工具结果发送给其模型。
 
@@ -127,6 +135,7 @@ harmony-agent detach --session demo --json
 | [安装](docs/installation.md) | 环境要求、源码和 wheel 安装、升级及卸载 |
 | [Agent 接入](docs/integrations.md) | CLI、Skill、MCP 和可选宿主示例 |
 | [执行](docs/execution.md) | 有界计划、保存的证据、结果含义和效率 |
+| [性能测量](docs/performance.md) | 时间线、测量边界和配对比较 |
 | [Agent 使用](docs/agent-usage.md) | 定位、输入、错误处理和验证 |
 | [Fixture 应用](docs/fixture.md) | 可复现的测试控件 |
 | [兼容性](docs/compatibility.md) | 已验证环境与排障 |

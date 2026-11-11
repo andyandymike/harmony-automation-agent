@@ -49,9 +49,12 @@ def build_parser():
         command_parser = subparsers.add_parser(name, help=spec["help"], description=spec["help"],
                                                add_help=False, allow_abbrev=False)
         _add_globals(command_parser)
+        plan_inputs = command_parser.add_mutually_exclusive_group() if name in {"run", "execute"} else None
         for field in spec["positional"] + spec["options"]:
             definition = field_definition(field, name)
             kwargs = {"help": definition["help"], "default": argparse.SUPPRESS}
+            if field == "plan" and plan_inputs is not None:
+                kwargs["help"] = "Inline bounded JSON plan; use --plan-file FILE for a reusable raw plan."
             if field in spec["positional"]:
                 kwargs["nargs"] = "?"  # Validation follows --help handling.
                 flags = [field]
@@ -65,7 +68,11 @@ def build_parser():
                 kwargs["action"] = "store_true"
             elif definition["kind"] == "enum":
                 kwargs["choices"] = definition["choices"]
-            command_parser.add_argument(*flags, **kwargs)
+            target_parser = plan_inputs if field == "plan" and plan_inputs is not None else command_parser
+            target_parser.add_argument(*flags, **kwargs)
+        if plan_inputs is not None:
+            plan_inputs.add_argument("--plan-file", metavar="FILE", default=argparse.SUPPRESS,
+                                     help="Read a reusable raw plan from UTF-8 JSON; device and session remain CLI options.")
         commands[name] = command_parser
     return parser, commands
 
@@ -134,6 +141,12 @@ def main(argv=None, *, agent_factory=None):
                 return 0
             invalid("A command or --request FILE is required.")
         else:
+            plan_path = parsed.pop("plan_file", None)
+            if plan_path is not None:
+                try:
+                    parsed["plan"] = json.loads(Path(plan_path).read_text(encoding="utf-8-sig"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise AgentError("INVALID_PLAN", f"Cannot read plan JSON: {exc}", exit_code=2) from exc
             params = validate_params(command, parsed, from_cli=True)
         if command == "help":
             help_parser = command_parsers.get(params.get("command_name"), parser)

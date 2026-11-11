@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import math
 import os
@@ -109,6 +110,35 @@ class HdcTransport:
         self.timeout_ms = timeout_ms
         self.calls = 0
         self.elapsed_ms = 0.0
+        self._capture_metrics = None
+
+    @contextmanager
+    def capture_profile(self):
+        """Measure existing capture work without changing its native command.
+
+        Process wall time includes native export and transfer in one HDC call;
+        the single-call protocol cannot attribute those components separately.
+        """
+        previous = self._capture_metrics
+        metrics = {"hdcCalls": 0, "stagesMs": {}}
+        self._capture_metrics = metrics
+        try:
+            yield metrics
+        finally:
+            self._capture_metrics = previous
+
+    @contextmanager
+    def _capture_measure(self, stage):
+        metrics = self._capture_metrics
+        if metrics is None:
+            yield
+            return
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            stages = metrics["stagesMs"]
+            stages[stage] = stages.get(stage, 0.0) + (time.perf_counter() - started) * 1000
 
     def _run(self, args, *, timeout_ms=None, mutating=False, operation="HDC command"):
         guard = getattr(self, "execution_guard", None)
@@ -135,17 +165,23 @@ class HdcTransport:
             raise AgentError("HDC_START_FAILED", "HDC could not be started.",
                              details={"osError": exc.errno}) from exc
         finally:
-            self.elapsed_ms += (time.monotonic() - started) * 1000
-        try:
-            stdout = completed.stdout if isinstance(completed.stdout, str) else completed.stdout.decode("utf-8")
-            stderr = completed.stderr if isinstance(completed.stderr, str) else completed.stderr.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise AgentError("HDC_ENCODING_ERROR", "HDC returned output that is not valid UTF-8.",
-                             dispatched=dispatched) from exc
-        if completed.returncode or _FAILURE.search(stdout) or _FAILURE.search(stderr):
-            # Do not include argv or device text in errors: input may contain secrets.
-            raise AgentError("HDC_COMMAND_FAILED", f"{operation} reported a failure.",
-                             details={"exitCode": completed.returncode}, dispatched=dispatched)
+            elapsed = (time.monotonic() - started) * 1000
+            self.elapsed_ms += elapsed
+            if self._capture_metrics is not None:
+                self._capture_metrics["hdcCalls"] += 1
+                stages = self._capture_metrics["stagesMs"]
+                stages["hdcProcess"] = stages.get("hdcProcess", 0.0) + elapsed
+        with self._capture_measure("decodeAndValidation"):
+            try:
+                stdout = completed.stdout if isinstance(completed.stdout, str) else completed.stdout.decode("utf-8")
+                stderr = completed.stderr if isinstance(completed.stderr, str) else completed.stderr.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise AgentError("HDC_ENCODING_ERROR", "HDC returned output that is not valid UTF-8.",
+                                 dispatched=dispatched) from exc
+            if completed.returncode or _FAILURE.search(stdout) or _FAILURE.search(stderr):
+                # Do not include argv or device text in errors: input may contain secrets.
+                raise AgentError("HDC_COMMAND_FAILED", f"{operation} reported a failure.",
+                                 details={"exitCode": completed.returncode}, dispatched=dispatched)
         return stdout
 
     def version(self):
@@ -176,15 +212,16 @@ class HdcTransport:
         wrapped = f'{command}; __ha_rc=$?; printf "\\n{marker}%s\\n" "$__ha_rc"'
         output = self._run(["-t", device, "shell", wrapped], timeout_ms=timeout_ms,
                            mutating=mutating, operation="Device command")
-        match = re.search(r"\r?\n" + re.escape(marker) + r"(\d+)\r?\n?\s*$", output)
-        if not match:
-            raise AgentError("REMOTE_RESULT_UNKNOWN", "The device command did not return an exit receipt.",
-                             dispatched="unknown" if mutating else "no")
-        body = output[:match.start()]
-        code = int(match.group(1))
-        if code or (mutating and _DEVICE_FAILURE.search(body)):
-            raise AgentError("DEVICE_COMMAND_FAILED", "The device command reported a failure.",
-                             details={"remoteExitCode": code}, dispatched="unknown" if mutating else "no")
+        with self._capture_measure("shellReceiptValidation"):
+            match = re.search(r"\r?\n" + re.escape(marker) + r"(\d+)\r?\n?\s*$", output)
+            if not match:
+                raise AgentError("REMOTE_RESULT_UNKNOWN", "The device command did not return an exit receipt.",
+                                 dispatched="unknown" if mutating else "no")
+            body = output[:match.start()]
+            code = int(match.group(1))
+            if code or (mutating and _DEVICE_FAILURE.search(body)):
+                raise AgentError("DEVICE_COMMAND_FAILED", "The device command reported a failure.",
+                                 details={"remoteExitCode": code}, dispatched="unknown" if mutating else "no")
         return body
 
     def _receive(self, device, remote, local, *, timeout_ms=None):
@@ -233,18 +270,19 @@ class HdcTransport:
             raise
         # Preserve exporter diagnostics for _run's zero-exit failure checks,
         # then separate them from the JSON with a per-capture random boundary.
-        boundary = re.search(r"\r?\n" + re.escape(marker) + r"\r?\n", output)
-        if boundary is None:
-            raise AgentError("LAYOUT_INVALID", "The UI capture did not return its layout boundary.")
-        output = output[boundary.end():]
-        if len(output.encode("utf-8")) > _LAYOUT_LIMIT:
-            raise AgentError("LAYOUT_TOO_LARGE", "The UI layout exceeds the 32 MiB limit.")
-        try:
-            raw = json.loads(output.removeprefix("\ufeff"))
-        except json.JSONDecodeError as exc:
-            raise AgentError("LAYOUT_INVALID", "The device UI layout is not valid UTF-8 JSON.") from exc
-        if not isinstance(raw, (dict, list)):
-            raise AgentError("LAYOUT_INVALID", "The device UI layout has an unsupported root value.")
+        with self._capture_measure("layoutParseAndValidation"):
+            boundary = re.search(r"\r?\n" + re.escape(marker) + r"\r?\n", output)
+            if boundary is None:
+                raise AgentError("LAYOUT_INVALID", "The UI capture did not return its layout boundary.")
+            output = output[boundary.end():]
+            if len(output.encode("utf-8")) > _LAYOUT_LIMIT:
+                raise AgentError("LAYOUT_TOO_LARGE", "The UI layout exceeds the 32 MiB limit.")
+            try:
+                raw = json.loads(output.removeprefix("\ufeff"))
+            except json.JSONDecodeError as exc:
+                raise AgentError("LAYOUT_INVALID", "The device UI layout is not valid UTF-8 JSON.") from exc
+            if not isinstance(raw, (dict, list)):
+                raise AgentError("LAYOUT_INVALID", "The device UI layout has an unsupported root value.")
         return raw
 
     def screenshot(self, device, destination):

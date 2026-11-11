@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -41,6 +41,8 @@ class Agent:
         self._last_capture_time = None
         self._metrics = {}
         self._counts = {}
+        self._profile_enabled = False
+        self._capture_details = {"instrumentedCaptures": 0, "hdcCalls": 0, "stagesMs": {}}
 
     def request_cancel(self):
         self.cancel_event.set()
@@ -73,13 +75,15 @@ class Agent:
         started = time.perf_counter()
         self._metrics = {}
         self._counts = {}
+        self._profile_enabled = bool((params or {}).get("profile")) or command in {"run", "execute"}
+        self._capture_details = {"instrumentedCaptures": 0, "hdcCalls": 0, "stagesMs": {}}
         try:
             result = self._execute(command, params)
         except AgentError as exc:
             if (params or {}).get("profile"):
                 exc.details["profile"] = self._profile(started)
             raise
-        if isinstance(result, dict) and ((params or {}).get("profile") or command == "run"):
+        if isinstance(result, dict) and ((params or {}).get("profile") or command in {"run", "execute"}):
             result["profile"] = self._profile(started)
         return result
 
@@ -87,6 +91,13 @@ class Agent:
         return {"schema": "harmony-profile/1", "coreWallMs": round((time.perf_counter() - started) * 1000, 3),
                 "stagesMs": {key: round(value, 3) for key, value in self._metrics.items()},
                 "counts": dict(self._counts),
+                "captureBreakdown": {
+                    "instrumentedCaptures": self._capture_details["instrumentedCaptures"],
+                    "hdcCalls": self._capture_details["hdcCalls"] if self._capture_details["instrumentedCaptures"] else None,
+                    "stagesMs": {key: round(value, 3) for key, value in self._capture_details["stagesMs"].items()},
+                    "nativeExportMs": None, "transferMs": None,
+                    "note": "HDC process time combines host startup/wait, native export, transfer and remote cleanup. "
+                            "Export and transfer are not measured separately; these stages are inside capture."},
                 "modelMs": None, "hostSchedulingMs": None, "inputTokens": None, "outputTokens": None,
                 "note": "Stages can nest. Core wall excludes CLI startup, output serialization and host/model time."}
 
@@ -109,6 +120,8 @@ class Agent:
             positive_integer(params["max_nodes"], "max_nodes", 80, 5000)
         if "compact" in params and type(params["compact"]) is not bool:
             raise AgentError("INVALID_ARGUMENT", "compact must be a boolean.", exit_code=2)
+        if "interactive" in params and type(params["interactive"]) is not bool:
+            raise AgentError("INVALID_ARGUMENT", "interactive must be a boolean.", exit_code=2)
         if "timeout_ms" in params:
             params["timeout_ms"] = positive_integer(params["timeout_ms"], "timeout_ms",
                                                      DEFAULT_INPUT_TIMEOUT_MS if command == "fill" else 5000)
@@ -118,16 +131,27 @@ class Agent:
             devices = self.transport.devices()
             return {"devices": [{"id": item} for item in devices], "count": len(devices),
                     "hint": None if devices else "Connect and authorize a device, then run devices again."}
-        supported = {"attach", "detach", "open", "observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot", "capabilities", "run", "inspect", "claim", "release"}
+        supported = {"execute", "start", "attach", "detach", "open", "observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot", "capabilities", "run", "inspect", "claim", "release"}
         if command not in supported:
             raise AgentError("UNKNOWN_COMMAND", f"Unknown command: {command}", exit_code=2)
         name = session_name(params.get("session"))
+        if command == "execute":
+            from .schema import validate_params
+            params = validate_params(command, params)
+            if params.get("run_id") is not None:
+                session_name(params["run_id"])
         if command == "run":
             from .plans import validate_plan
+            if params.get("output", "full") not in {"full", "decision"}:
+                raise AgentError("INVALID_ARGUMENT", "output must be full or decision.", exit_code=2)
             params["plan"] = validate_plan(params.get("plan"))
         with self.store.lock(name):
+            if command == "execute":
+                return self._execute_workflow(name, params)
             if command == "attach":
                 return self._attach(name, params)
+            if command == "start":
+                return self._start(name, params)
             if command == "detach":
                 try:
                     session = self.store.load(name)
@@ -170,6 +194,84 @@ class Agent:
                 with self._measure("preflight"):
                     self._check_device(name, session)
                 return self._execute_locked(name, session, command, params)
+
+    def _execute_workflow(self, name, params):
+        """Finish a known task in one entry point, without an initial public read."""
+        try:
+            session = self.store.load(name)
+        except AgentError as exc:
+            if exc.code != "NO_SESSION":
+                raise
+            self._attach(name, params)
+            session = self.store.load(name)
+        if session["device"] != params["device"]:
+            raise AgentError("DEVICE_MISMATCH", "This session is attached to a different device.")
+        with self.store.device_lock(session["device"]), self._frame_guard(name, session):
+            self.store.require_device_owner(session)
+            result = self._run_plan(name, session, params)
+            verified = (result.get("status") == "completed"
+                        and result.get("goalVerification", {}).get("status") == "passed")
+            cleanup = {"status": "retained", "reason": "keep_session" if params["keep_session"]
+                       else "workflow_not_verified", "deviceStopped": False}
+            if verified and not params["keep_session"]:
+                session["frameValid"] = False
+                result["frameValidForActions"] = False
+                try:
+                    # The run receipt is already durable. Cleanup updates only
+                    # session lifecycle state and is returned separately.
+                    self.store.save(name, session)
+                    self.store.release_device(session)
+                    self.store.detach(name)
+                    cleanup = {"status": "detached", "reason": "verified_completion", "deviceStopped": False}
+                except (Exception, KeyboardInterrupt) as exc:
+                    error = exc.to_dict() if isinstance(exc, AgentError) else {
+                        "code": "SESSION_CLEANUP_FAILED", "message": "Workflow completed but session cleanup failed.",
+                        "details": {"exception": type(exc).__name__, "cause": str(exc), "dispatched": "no"}}
+                    cleanup = {"status": "failed", "reason": "cleanup_error", "deviceStopped": False,
+                               "error": error}
+            result["sessionCleanup"] = cleanup
+            try:
+                from .execution import RunStore
+                RunStore(self.store.root, result["runId"]).write_workflow_receipt(session, cleanup)
+                result["workflowReceiptAvailable"] = True
+            except (Exception, KeyboardInterrupt) as exc:
+                error = exc.to_dict() if isinstance(exc, AgentError) else {
+                    "code": "WORKFLOW_RECEIPT_WRITE_FAILED", "message": "Workflow cleanup receipt could not be persisted.",
+                    "details": {"exception": type(exc).__name__, "cause": str(exc), "dispatched": "no"}}
+                result["workflowReceiptAvailable"] = False
+                result.setdefault("warnings", []).append({
+                    "code": "WORKFLOW_RECEIPT_UNAVAILABLE",
+                    "message": "Business execution and cleanup results are retained here; their cleanup receipt is unavailable.",
+                    "error": error})
+            return result
+
+    def _start(self, name, params):
+        """One read-only device entry point; keep an existing session's identity."""
+        if not params.get("device"):
+            raise AgentError("INVALID_ARGUMENT", "start requires an explicit device.", exit_code=2)
+        attached = False
+        try:
+            session = self.store.load(name)
+        except AgentError as exc:
+            if exc.code != "NO_SESSION":
+                raise
+            self._attach(name, params)
+            session = self.store.load(name)
+            attached = True
+        if session["device"] != params["device"]:
+            raise AgentError("DEVICE_MISMATCH", "This session is attached to a different device.")
+        with self.store.device_lock(session["device"]), self._frame_guard(name, session):
+            if not attached:
+                with self._measure("preflight"):
+                    self._check_device(name, session)
+            frame = self._capture(session)
+            self._publish(name, session, frame)
+            observation = self._project(frame, {"compact": True, "max_nodes": 40, **params})
+            return {"session": name, "device": session["device"], "epoch": session["epoch"],
+                    "resumed": not attached, "observationReady": True,
+                    "contract": {"planVersions": ["1", "2"], "runOutputs": ["full", "decision"],
+                                 "boundValues": ["read", "var", "concat"]},
+                    "observation": observation}
 
     def _execute_locked(self, name, session, command, params):
         """Execute under the caller's session and device locks, never reacquiring them."""
@@ -225,7 +327,7 @@ class Agent:
                                "omittedMatches": max(0, len(matches) - len(refs)), "ancestorCount": len(ancestors - refs)}}
 
     def _run_plan(self, name, session, params):
-        from .execution import RunStore
+        from .execution import RunStore, decision_result
         from .plans import PlanBudget, run_plan
         run_id = params.get("run_id") or uuid.uuid4().hex
         # Resolve a lazy transport before changing run/ownership state.
@@ -265,7 +367,8 @@ class Agent:
                 with self._measure("preflight"):
                     self._check_device(name, session)
             inputs = {"view": params.get("view", "tree"), "compact": params.get("compact", True),
-                      "max_nodes": params.get("max_nodes", 80), **inputs, "_plan_internal": True}
+                      "max_nodes": params.get("max_nodes", 80), "interactive": params.get("interactive", False),
+                      **inputs, "_plan_internal": True}
             final_projection = {key: value for key, value in inputs.items() if not key.startswith("_")}
             final_query = inputs.get("text") if command == "find" else None
             result = self._execute_locked(name, session, command, inputs)
@@ -273,10 +376,27 @@ class Agent:
 
         def evaluate(condition):
             self._interrupt()
-            observation, source = self._run_frame(session)
+            observation, source = self._run_frame(session, purpose="condition")
             if source == "captured":
                 self._publish(name, session, observation)
             return self._evaluate_frame(session["frame"], condition)
+
+        def reader(spec):
+            self._interrupt()
+            observation, source = self._run_frame(session, purpose="condition")
+            if source == "captured":
+                self._publish(name, session, observation)
+            matches = select_nodes(observation, spec["selector"])
+            prop = spec.get("property", "text")
+            if len(matches) != 1 or matches[0].get(prop) is None:
+                raise AgentError("PLAN_READ_FAILED", "A plan read needs one node with an exposed value.",
+                                 details={"frameId": observation["frameId"], "selector": deepcopy(spec["selector"]),
+                                          "property": prop, "matches": len(matches),
+                                          "evidenceRef": {"runId": run_id, "frameId": observation["frameId"]}},
+                                 dispatched="no")
+            return {"value": matches[0][prop], "frameId": observation["frameId"],
+                    "selector": deepcopy(spec["selector"]), "property": prop,
+                    "evidenceRef": {"runId": run_id, "frameId": observation["frameId"]}}
 
         try:
             # A run always begins with fresh evidence; old cached state is not a precondition proof.
@@ -285,7 +405,7 @@ class Agent:
                 self.store.save(name, session)
             with self._measure("preflight"):
                 self._check_device(name, session)
-            result = run_plan(params["plan"], executor, evaluate, checkpoint=checkpoint, budget=budget)
+            result = run_plan(params["plan"], executor, evaluate, reader=reader, checkpoint=checkpoint, budget=budget)
             result.update(runId=run_id, replayAllowed=False, deviceOwnership="session_until_release_or_detach")
             if result["status"] not in {"completed", "yielded"}:
                 session["frameValid"] = False
@@ -312,7 +432,7 @@ class Agent:
                 result["persistenceError"] = exc.to_dict()
                 result["status"] = "unknown"
                 result["yieldReason"] = "receipt_persistence_failed"
-            return result
+            return decision_result(result) if params.get("output") == "decision" else result
         except BaseException as cause:
             error = cause.to_dict() if isinstance(cause, AgentError) else {"code": "CANCELLED" if isinstance(cause, KeyboardInterrupt) else "INTERNAL_ERROR"}
             try:
@@ -413,7 +533,7 @@ class Agent:
     def _capabilities(self, session):
         return {"backend": "hdc-uitest", "device": session["device"],
                 "runtime": self._runtime_capabilities(session["device"]),
-                "implemented": ["observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot",
+                "implemented": ["start", "execute", "observe", "find", "press", "fill", "scroll", "back", "wait", "screenshot",
                                 "run", "inspect", "report", "claim", "release", "semantic_view"],
                 "experimental": ["native_text_input", "window_metadata"],
                 "unsupported": ["model_planning", "visual_assertions", "event_watch", "automatic_recovery"],
@@ -428,8 +548,19 @@ class Agent:
         if self._budget is not None:
             self._budget.consume_capture()
             timeout_ms = min(timeout_ms or 60000, self._budget.remaining_ms())
-        with self._measure("capture"):
-            raw = self.transport.capture_layout(session["device"], **({"timeout_ms": timeout_ms} if timeout_ms is not None else {}))
+        transport = self.transport
+        profiler = getattr(transport, "capture_profile", None) if self._profile_enabled else None
+        with (profiler() if callable(profiler) else nullcontext(None)) as details:
+            try:
+                with self._measure("capture"):
+                    raw = transport.capture_layout(session["device"], **({"timeout_ms": timeout_ms} if timeout_ms is not None else {}))
+            finally:
+                if details is not None:
+                    self._capture_details["instrumentedCaptures"] += 1
+                    self._capture_details["hdcCalls"] += details["hdcCalls"]
+                    for key, value in details["stagesMs"].items():
+                        stages = self._capture_details["stagesMs"]
+                        stages[key] = stages.get(key, 0.0) + value
         self._last_capture_time = time.perf_counter()
         self._counts["captures"] = self._counts.get("captures", 0) + 1
         with self._measure("normalize"):
@@ -475,18 +606,22 @@ class Agent:
                                for node in public["nodes"]]
         return public
 
-    def _run_frame(self, session, *, refresh=False):
+    def _run_frame(self, session, *, refresh=False, purpose="condition"):
         """Reuse only a just-published frame inside this uninterrupted run.
 
         This is a bounded-age observation, not a guarantee of a static UI.
         Cross-call caches, failed actions and expired observations never qualify.
         """
+        request_count = "targetFrameRequests" if purpose == "target" else "conditionFrameRequests"
+        self._counts[request_count] = self._counts.get(request_count, 0) + 1
         frame = session.get("frame")
         if (not refresh and self._run_store is not None and session.get("frameValid")
                 and frame is not None and frame is self._last_capture
                 and self._last_capture_time is not None
                 and 0 <= time.perf_counter() - self._last_capture_time <= 1.0):
             self._counts["reusedFrames"] = self._counts.get("reusedFrames", 0) + 1
+            reuse_count = "reusedTargetFrames" if purpose == "target" else "reusedConditionFrames"
+            self._counts[reuse_count] = self._counts.get(reuse_count, 0) + 1
             return frame, "reused"
         return self._capture(session), "captured"
 
@@ -499,7 +634,7 @@ class Agent:
             if not session.get("frameValid") or not session.get("frame"):
                 raise AgentError("STALE_REF", "Refs are invalid after an action, timeout or disconnect; observe again.")
             old = resolve_target(session["frame"], target)
-        observation, _ = self._run_frame(session, refresh=refresh)
+        observation, _ = self._run_frame(session, refresh=refresh, purpose="target")
         if old is None:
             node = resolve_target(observation, target)
         else:
@@ -763,7 +898,7 @@ class Agent:
                     if node.get("scrollable") is not True:
                         raise AgentError("TARGET_NOT_SCROLLABLE", "Select a scrollable container.")
                 else:
-                    observation, _ = self._run_frame(session, refresh=params.get("_plan_refresh", False))
+                    observation, _ = self._run_frame(session, refresh=params.get("_plan_refresh", False), purpose="target")
                     candidates = [n for n in observation["nodes"] if n.get("scrollable") is True and n.get("bounds") and n.get("visible") is not False]
                     if len(candidates) != 1:
                         raise AgentError("SCROLL_CONTAINER_REQUIRED", "Specify a scrollable container when zero or multiple containers are visible.", details={"count": len(candidates)})
@@ -773,8 +908,9 @@ class Agent:
                 observation = self._capture(session)
             if params.get("_plan_before"):
                 if observation is None:
-                    observation, _ = self._run_frame(session, refresh=params.get("_plan_refresh", False))
+                    observation, _ = self._run_frame(session, refresh=params.get("_plan_refresh", False), purpose="condition")
                 result["beforeFrameId"] = observation["frameId"]
+                self._counts["beforeConditionChecks"] = self._counts.get("beforeConditionChecks", 0) + len(params["_plan_before"])
                 result["guardAssertions"] = [self._evaluate_frame(observation, condition)
                                              for condition in params["_plan_before"]]
                 if any(item["status"] != "passed" for item in result["guardAssertions"]):
