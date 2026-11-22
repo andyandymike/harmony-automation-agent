@@ -6,7 +6,7 @@ An open-source toolkit for observing, operating, and verifying HarmonyOS apps th
 
 The project provides a Python CLI, a portable Agent Skill, and an optional local stdio MCP adapter. They share a model-free runtime built on the Python standard library; no Appium server, visual model, or model API key is required.
 
-**0.1.0a9 is an unreleased development alpha and has not been published to PyPI.** See [compatibility](docs/compatibility.md) for tested environments, [alpha9 validation](docs/validation-alpha9.md) for recorded results, and the [changelog](CHANGELOG.md) for version history.
+**0.1.0a10 is a local development alpha.** See [compatibility](docs/compatibility.md) for tested environments, [alpha9 validation](docs/validation-alpha9.md) for earlier results, and the [changelog](CHANGELOG.md) for version history.
 
 ## What it does
 

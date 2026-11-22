@@ -6,7 +6,7 @@
 
 项目提供 Python CLI、可移植的 Agent Skill 和可选的本地 stdio MCP 适配器。它们共用基于 Python 标准库的执行核心；运行时不调用模型，也不需要 Appium 服务、视觉模型或模型 API Key。
 
-**0.1.0a9 是尚未发布的开发预览版，未发布到 PyPI。** 已验证环境见[兼容性](docs/compatibility.md)，本地结果见 [alpha9 验证记录](docs/validation-alpha9.md)，版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
+**0.1.0a10 是本地开发预览版。** 已验证环境见[兼容性](docs/compatibility.md)，前一版的结果见 [alpha9 验证记录](docs/validation-alpha9.md)，版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
 
 ## 功能
 

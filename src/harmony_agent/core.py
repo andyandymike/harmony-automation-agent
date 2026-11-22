@@ -30,10 +30,11 @@ def positive_integer(value, name, default, maximum=60000):
 
 
 class Agent:
-    def __init__(self, state_dir=None, hdc_path=None, *, transport=None):
+    def __init__(self, state_dir=None, hdc_path=None, *, transport=None, on_plan_step=None):
         self.store = StateStore(state_dir)
         self.hdc_path = hdc_path
         self._transport = transport
+        self.on_plan_step = on_plan_step
         self.cancel_event = threading.Event()
         self._budget = None
         self._run_store = None
@@ -342,6 +343,7 @@ class Agent:
         old_guard = getattr(transport, "execution_guard", None)
         transport.execution_guard = lambda: (self._interrupt(), budget.remaining_ms())[1]
         frame_before = None
+        debug_step_starts = {}
         final_projection = {"view": "tree", "compact": True, **params}
         final_query = None
 
@@ -355,7 +357,20 @@ class Agent:
             event["beforeFrameId"] = summary.get("beforeFrameId")
             event["afterFrameId"] = summary.get("afterFrameId", summary.get("frameId"))
             event["runId"] = run_id
+            if event["event"] == "step_finished" and event["stepId"] in debug_step_starts:
+                event["startedAt"] = debug_step_starts.pop(event["stepId"])
             journal.checkpoint(event)
+            if self.on_plan_step is not None:
+                # An interactive debugger can wait here, after the intent is durable.
+                # Only a user pause suspends the native execution deadline.
+                entered = budget.clock()
+                if self.on_plan_step(event):
+                    waited = budget.clock() - entered
+                    budget.deadline += waited
+                    budget.started += waited
+                    session["frameValid"] = False
+                if event["event"] == "step_started":
+                    debug_step_starts[event["stepId"]] = now()
 
         def executor(command, inputs):
             nonlocal final_projection, final_query
