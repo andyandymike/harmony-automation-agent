@@ -2,11 +2,11 @@
 
 [English](README.md)
 
-通过原生 HDC / UiTest 观察、操作和验证 HarmonyOS 应用的开源工具。可以在终端、自动化脚本或 AI Agent 中使用。
+通过原生 HDC / UiTest 观察、操作和验证 HarmonyOS 应用的开源工具。可以在 VS Code、终端、自动化脚本或 AI Agent 中使用。
 
-项目提供 Python CLI、可移植的 Agent Skill 和可选的本地 stdio MCP 适配器。它们共用基于 Python 标准库的执行核心；运行时不调用模型，也不需要 Appium 服务、视觉模型或模型 API Key。
+项目提供 Python CLI、[VS Code 工作台](extensions/vscode/README.zh-CN.md)、可移植的 Agent Skill 和本地 stdio MCP 适配器，共用基于 Python 标准库的执行核心。工作台支持真机预览、流程录制与回放，以及逐步调试。
 
-**0.1.0a10 是本地开发预览版。** 已验证环境见[兼容性](docs/compatibility.md)，前一版的结果见 [alpha9 验证记录](docs/validation-alpha9.md)，版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
+**Python 运行时 `0.1.0a10` 和 VS Code 工作台 `0.20.11` 均为开发预览版。** [工作台指南](extensions/vscode/README.zh-CN.md)提供 VSIX 的构建和安装方式。已验证环境见[兼容性](docs/compatibility.md)，运行时版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
 
 ## 功能
 
@@ -133,6 +133,7 @@ harmony-agent detach --session demo --json
 | 指南 | 内容 |
 | --- | --- |
 | [安装](docs/installation.md) | 环境要求、源码和 wheel 安装、升级及卸载 |
+| [VS Code 工作台](extensions/vscode/README.zh-CN.md) | 构建与安装扩展、操作设备、运行测试用例 |
 | [Agent 接入](docs/integrations.md) | CLI、Skill、MCP 和可选宿主示例 |
 | [执行](docs/execution.md) | 有界计划、保存的证据、结果含义和效率 |
 | [性能测量](docs/performance.md) | 时间线、测量边界和配对比较 |

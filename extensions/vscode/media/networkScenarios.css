@@ -1,0 +1,88 @@
+.net-view .sc-overview, .net-view .sc-editor {max-width: 960px; margin: 0; padding: 22px 0; min-width: 0;}
+.sc-workspace {display:grid; grid-template-columns:minmax(185px,23%) minmax(0,1fr); gap:clamp(16px,2.4vw,36px); align-items:start;}
+.sc-shelf {min-width:0; margin-block:22px; padding-inline-end:16px; border-inline-end:1px solid var(--line);}
+.sc-shelf header {display:flex; gap:6px; align-items:center; justify-content:space-between;}
+#workbench .sc-shelf h2 {font-size:15px;}
+.sc-shelf ul {list-style:none; padding:0; margin:10px 0; max-height:52vh; overflow:auto;}
+.sc-shelf .sc-library-item {width:100%; min-width:0; padding:8px 10px; border:0; border-inline-start:2px solid transparent; display:grid; gap:2px; text-align:start; color:var(--ink); background:transparent;}
+.sc-shelf .sc-library-item:hover {background:var(--hover);}
+.sc-shelf .sc-library-item[aria-current=true] {background:var(--selected);border-inline-start-color:var(--accent);}
+.sc-library-item strong,.sc-library-item small {overflow-wrap:anywhere;}
+.sc-library-item small {color:var(--muted);}
+.sc-library-form {padding:12px 2px; margin-top:10px; border-top:1px solid var(--line);}
+.sc-library-form label {display:grid; gap:5px;}
+.sc-library-form h3,.sc-library-form p {margin-bottom:6px;}
+.sc-library-form input {width:100%; min-width:0; max-width:100%;}
+#sc-management {min-width:0; align-self:center;}
+#sc-management summary {cursor:pointer; padding:3px; color:var(--muted);}
+#sc-management > div {display:flex; gap:5px; flex-wrap:wrap; margin-block:6px;}
+.ne-step [aria-invalid=true] {outline:2px solid var(--bad);}
+@container network (max-width:730px) {
+    .sc-workspace {grid-template-columns:minmax(0,1fr);gap:0;}
+    .sc-shelf {padding:0 0 11px; margin:14px 0 0; border-inline-end:0; border-bottom:1px solid var(--line);}
+    .sc-shelf ul {display:flex; gap:5px; overflow:auto; margin-block:7px;}
+    .sc-shelf li {flex:0 0 auto; max-width:min(210px,80%);}
+    .sc-shelf .sc-library-item {padding:5px 9px;}
+}
+.net-view .sc-title, .net-view .sc-sequence li, .net-view .sc-rule-line,
+.net-view .sc-extra, .net-view .sc-file-actions, .net-view .sc-commit {display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;}
+.net-view .sc-title {justify-content: space-between;}
+#workbench .sc-title h2 { font-size:clamp(20px, 1.8vw, 27px); margin-top:3px; overflow-wrap:anywhere;}
+.net-view .sc-caption {color:var(--muted);font-size:12px;}
+.net-view .sc-file-actions {margin-top:9px;}
+.sc-breadcrumb,.sc-rules-head,.sc-rule-actions,.sc-match {display:flex;flex-wrap:wrap;align-items:center;gap:5px 9px;}
+.sc-breadcrumb {margin-bottom:12px;}
+.sc-rules {margin:19px 0 20px;border-top:1px solid var(--line);}
+.sc-rules-head {justify-content:space-between;margin:14px 0 8px;gap:9px 14px;}
+.sc-rules-head p {margin:3px 0 0;}
+.sc-rules-head h3 span {margin-inline-start:4px;}
+.net-view .sc-rule-list, .net-view .sc-sequence {list-style:none;margin:0;padding:0;}
+.net-view .sc-rule {display:grid;grid-template-columns:1.5rem minmax(0,1fr) auto;align-items:start;gap:6px 9px;
+    padding:10px 0;border-bottom:1px solid var(--line);}
+.sc-rule-main {min-width:0;display:grid;gap:3px;}
+#workbench .sc-rule-select {
+    display:grid; gap:3px; justify-items:start; width:100%; text-align:start; min-width:0; padding:4px 6px;
+    background:transparent; border:1px solid transparent; border-radius:4px; color:var(--ink); overflow-wrap:anywhere;
+}
+#workbench .sc-rule-select:is(:hover,[aria-expanded=true]) { background:var(--hover); border-color:var(--line); }
+.sc-title-edit { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:5px; }
+#workbench .sc-title-edit input { flex:1 1 15ch; min-width:0; width:auto; }
+.sc-inline-editor { grid-column:1 / -1; position:relative; min-width:0; }
+.sc-inline-editor .sc-editor { padding:12px; border:1px solid var(--line); border-radius:4px; }
+#workbench .sc-rule-switch { display:flex; align-items:center; width:33px; height:19px; min-height:0; padding:2px; border:1px solid var(--line); border-radius:14px; background:var(--surface); }
+#workbench .sc-rule-switch span { width:12px; height:12px; border-radius:50%; background:var(--muted); }
+#workbench .sc-rule-switch[aria-checked="true"] { justify-content:flex-end; border-color:var(--accent); background:var(--selected); }
+#workbench .sc-rule-switch[aria-checked="true"] span { background:var(--accent); }
+.sc-rule-line strong,.sc-match code,.sc-workflow strong,.sc-workflow h3 {overflow-wrap:anywhere;}
+.sc-priority {display:grid;justify-items:center;align-content:start;font:12px var(--mono);color:var(--muted);padding-top:2px;text-align:center;}
+.ne-step-head {display:flex;align-items:center;gap:6px;margin-bottom:9px;}
+#workbench .ne-step-head h3 {margin:0;flex:1;}
+.sc-match code {font:13px var(--mono);}
+.sc-test-action {display:grid;justify-items:start;gap:3px;}
+.sc-response-preview {font-size:12px;min-width:0;}
+.sc-response-preview summary {cursor:pointer;overflow-wrap:anywhere;}
+.sc-rules > button {margin-top:8px;}
+.sc-workflow {margin:18px 0 0;padding-top:14px;border-top:1px solid var(--line);}
+.sc-workflow p {margin:5px 0;}
+.sc-workflow .sc-extra {margin-top:8px;}
+.net-view .sc-sequence {display:grid;gap:0;margin:9px 0;}
+.net-view .sc-sequence li {min-height:30px; font-size:12px;}
+.net-view .sc-sequence li code {color:var(--muted);overflow-wrap:anywhere;}
+.net-view .sc-number {font:11px var(--mono);color:var(--muted);width:1.6rem;text-align:center;align-self:stretch;align-content:center;border-inline-start:2px solid var(--line);}
+.net-view .sc-extra {margin-top:16px;gap:8px;}
+#workbench .sc-feedback {padding:9px 12px;border-inline-start:2px solid var(--accent);background:var(--net-well);margin:12px 0;}
+#workbench .sc-feedback[role=alert] {border-color:var(--bad);color:var(--bad);}
+.sc-rule > .sc-feedback {grid-column:2/-1;overflow-wrap:anywhere;}
+.net-view .sc-draft {border:0;padding:0;margin:12px 0;min-width:0;}
+.net-view .sc-formats {display:flex;justify-content:flex-end;margin-bottom:8px;}
+.net-view .sc-rule-picker {display:flex;align-items:end;gap:9px;flex-wrap:wrap;margin:10px 0;}
+.net-view .sc-rule-picker label {flex:1;min-width:min(100%,13rem);margin:0;}
+.net-view .sc-rule-picker select {width:100%;}
+.net-view .sc-caption[for=net-draft] {display:block;margin:8px 0 4px;}
+.net-view .sc-commit {margin-top:16px; padding-top:12px;border-top:1px solid var(--line);}
+.net-view .vscode-button {width:auto;max-width:100%;}
+@container network (max-width:460px) {
+    .net-view .sc-overview, .net-view .sc-editor {padding-block:14px;}
+    .net-view .sc-rule {grid-template-columns:1.25rem minmax(0,1fr);}
+    .sc-rule>.sc-rule-actions {grid-column:2;}
+}

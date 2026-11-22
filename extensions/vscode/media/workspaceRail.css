@@ -1,0 +1,78 @@
+#live-task-pane {
+    --live-stroke: var(--line);
+    --live-text: var(--ink);
+    --live-muted: var(--muted);
+    --live-hover: var(--hover);
+    --live-accent: var(--accent);
+    --live-focus: var(--vscode-focusBorder, var(--accent));
+    min-width: 0;
+    color: var(--ink);
+    margin-top: 15px;
+}
+#live-task-pane #task-output header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px;
+}
+#live-task-pane [hidden] { display: none !important; }
+#live-task-pane button { font: inherit; }
+#live-task-pane button:not(:disabled), #live-task-pane summary { cursor: pointer; }
+#live-task-pane :is(button,summary):focus-visible { outline: 2px solid var(--live-focus); outline-offset: 2px; }
+#live-task-pane :is(h3,p) { margin: 0; }
+#live-task-pane .task-actions {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px;
+}
+#live-task-pane :is(.rail-button, .rail-link) {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 32px; max-width: 100%; border-radius: 4px; line-height: 1.25;
+}
+#live-task-pane .rail-button {
+    padding: 5px 11px; border: 1px solid var(--live-stroke); color: var(--live-text);
+    background: var(--vscode-button-secondaryBackground, var(--live-hover));
+}
+#live-task-pane .rail-link {
+    padding: 4px 6px; border: 1px solid transparent; color: var(--live-muted); background: transparent;
+}
+#live-task-pane .rail-button:enabled:hover { color: var(--live-text); filter: brightness(1.12); }
+#live-task-pane .rail-link:enabled:hover { background: var(--live-hover); color: var(--live-text); }
+#live-task-pane :is(#task-run, #task-save) {
+    border-color: transparent; color: var(--accent-ink); background: var(--live-accent); font-weight: 590;
+}
+#live-task-pane #ai-assistant { border-top: 1px solid var(--live-stroke); }
+#live-task-pane #ai-assistant > summary {
+    display: flex; align-items: center; gap: 9px; min-height: 41px;
+    color: var(--live-muted);
+}
+#live-task-pane #ai-assistant > summary strong { font-weight: 550; }
+#live-task-pane #ai-assistant > summary:hover,
+#live-task-pane #ai-assistant[open] > summary { color: var(--live-text); }
+#live-task-pane #ai-assistant > summary .live-icon:last-child { margin-inline-start: auto; }
+#live-task-pane #ai-assistant[open] > summary .live-icon:last-child { rotate: 180deg; }
+#live-task-pane #assistant-status { font-size: 12px; }
+#live-task-pane #ai-assistant[open] #assistant-status { display: none; }
+#live-task-pane #goal-label { display: block; color: var(--live-muted); margin: 4px 0 6px; }
+#live-task-pane .task-compose {
+    border: 1px solid var(--live-stroke); border-radius: 4px;
+    background: var(--vscode-input-background, var(--surface));
+}
+#live-task-pane .task-compose:focus-within { border-color: var(--live-focus); }
+#live-task-pane #task-goal {
+    display: block; width: 100%; min-height: 65px; padding: 10px; resize: vertical;
+    border: 0; font: inherit; color: var(--vscode-input-foreground, var(--live-text)); background: transparent;
+}
+#live-task-pane #task-goal:focus-visible { outline: 0; }
+#live-task-pane #task-goal::placeholder { color: var(--vscode-input-placeholderForeground, var(--live-muted)); }
+#live-task-pane .task-actions { justify-content: space-between; padding: 6px; }
+#live-task-pane #task-output { margin-top: 16px; overflow-wrap: anywhere; }
+#live-task-pane #result-title { font-size: 16px; }
+#live-task-pane :is(#task-status, #result-goal) { color: var(--live-muted); font-size: 12px; }
+#live-task-pane #task-output:is([data-status="error"],[data-status="blocked"]) #task-status { color: var(--bad); }
+#live-task-pane #result-goal { margin-top: 6px; }
+#live-task-pane #task-steps { margin: 8px 0; padding-inline-start: 22px; }
+#live-task-pane #task-steps:empty, #live-task-pane #task-answer:empty { display: none; }
+#live-task-pane #task-evidence div { white-space: pre-wrap; overflow-wrap: anywhere; margin-block: 8px; }
+#live-task-pane #task-answer { margin-top: 8px; white-space: pre-wrap; }
+#live-task-pane #task-save, #live-task-pane #task-provider-settings { margin-top: 10px; }
+
+@media (forced-colors: active) {
+    #live-task-pane :is(.rail-link, .rail-button) { border-color: ButtonText; }
+    #live-task-pane .task-compose:focus-within { border-color: Highlight; }
+}

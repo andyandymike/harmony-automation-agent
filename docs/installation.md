@@ -46,13 +46,13 @@ This development alpha has not been published to PyPI. If you have a wheel built
 
 ```powershell
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a9-py3-none-any.whl
+.venv/Scripts/python.exe -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl
 .venv/Scripts/harmony-agent.exe --version --json
 ```
 
 On POSIX hosts, substitute `.venv/bin/python` and `.venv/bin/harmony-agent`. Check the filename, reported version and matching documentation; do not substitute an older wheel when evaluating current source.
 
-The wheel includes the Python CLI and MCP adapter. The Skill and device tools are installed separately. An optional local distribution bundle can include the wheel, complete Skill, installer, documentation and integration examples. Such a bundle is a convenience artifact, not a registry release or a full source checkout. Use its included manifest when checking the supplied files.
+The wheel includes the Python CLI and MCP adapter. Install the Skill and device tools separately as needed. The [VS Code workbench](../extensions/vscode/README.md) has its own VSIX build and installation steps and uses the installed Python runtime.
 
 ## Verify the installation
 
