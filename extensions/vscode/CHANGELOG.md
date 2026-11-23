@@ -1,5 +1,15 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.23
+
+- Save same-name cases in separate directories, including when an earlier case has been removed from the library.
+- Edit a step’s action and parameters from its row or context menu, and choose overlapping controls on the device preview.
+- Release the workbench’s device sessions after unsuccessful runs while keeping their recorded evidence.
+
+## 0.20.22
+
+- Restore the Harmony Agent Activity Bar icon. It opens the editor workbench and shows the project tree.
+
 ## 0.20.21
 
 - Diagnose failures with the saved failing page, preceding step, a prior passing run, and relevant local HTTP errors.

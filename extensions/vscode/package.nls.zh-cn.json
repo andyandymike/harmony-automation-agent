@@ -6,6 +6,7 @@
   "extension.description": "在 VS Code 中录制、重跑和诊断 HarmonyOS 界面工作流。",
   "workspaceTrust.description": "Harmony Agent 会运行本机工具，也能执行工作区中的 pytest 用例。",
   "command.open": "打开工作台",
+  "view.workbench": "工作台",
   "command.inspect": "元素定位",
   "command.recordings": "录制与回放",
   "command.exploration": "探索测试",

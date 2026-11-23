@@ -28,6 +28,21 @@ function safeCaseName(value) {
         !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value);
 }
 
+async function reserveCaseFolder(parent, name) {
+    if (!safeCaseName(name)) throw new Error("Invalid case folder name");
+    for (let index=1; ; index++) {
+        const suffix = index===1 ? "" : "-"+index;
+        const base = name.slice(0,70-suffix.length).replace(/[\uD800-\uDBFF]$/u,"").replace(/[ .]+$/u,"");
+        const folder = path.join(parent,base+suffix);
+        try {
+            await fs.mkdir(folder,{mode:0o700});
+            return folder;
+        } catch (error) {
+            if (error.code!=="EEXIST") throw error;
+        }
+    }
+}
+
 function testFilename(name) {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -42,8 +57,7 @@ async function writeCase(parent, name, plan, group) {
     const workflow = group ? workflowWithScenario(plan, validateScenario(group)) : plan;
     const contents = [["workflow.json", JSON.stringify(workflow, null, 2) + "\n"],
         [filename, template.replace("__REQUIRES_RULE_GROUP__", group ? "True" : "False")]];
-    const folder = path.join(parent, name);
-    await fs.mkdir(folder, { mode: 0o700 });
+    const folder = await reserveCaseFolder(parent,name);
     const created = [];
     try {
         for (const [file, content] of contents) {
@@ -165,7 +179,9 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
         stopProgress?.();
     }
     // Resolve paths the same way as the generated Python test, which runs in entry.folder.
-    const result = await finishPytest({directory, invocation, plan, time, device, sharedState, sourceFile, ...outcome});
+    const releaseSession = !outcome.launchError && bench.reportAgent && ((id,stateDir)=>
+        bench.reportAgent({pytest:{stateDir}}).call("detach",{session:"pytest-"+id}));
+    const result = await finishPytest({directory,invocation,plan,time,device,sharedState,sourceFile,releaseSession,...outcome});
     if (candidate && result.entry.status === "passed") {
         const deviceRun = result.entry.pytest.deviceRun;
         let actual, execution;
@@ -188,4 +204,4 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
     return result;
 }
 
-module.exports = { readiness, safeCaseName, writeCase, findCase, startPytest, testFilename, templatePath };
+module.exports = { readiness, safeCaseName, reserveCaseFolder, writeCase, findCase, startPytest, testFilename, templatePath };

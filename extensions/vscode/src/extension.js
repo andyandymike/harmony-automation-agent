@@ -470,7 +470,8 @@ class Workbench {
         if (error.code === "ENOENT") return this.text.cliNotFound;
         const message = error.code === "INVALID_AGENT_RESPONSE" ? this.text.invalidAgentResponse :
             this.text[error.code] || error.message;
-        return error.code ? error.code + " · " + message : message;
+        const owner = error.code==="DEVICE_OWNED" && error.details?.ownerSession;
+        return [error.code,message,typeof owner==="string" && /^[\w.-]{1,100}$/.test(owner) && owner].filter(Boolean).join(" · ");
     }
 
     async perform(action, { runtime = true } = {}) {
@@ -638,7 +639,15 @@ class Workbench {
                     this.lastScreenStepAt = Date.now();
                 }
             } finally {
-                await agent.call("release", { session });
+                try { await agent.call("release",{session}); }
+                catch {
+                    try {
+                        await agent.call("detach",{session});
+                        sessions.delete(device);
+                    } catch (error) {
+                        this.state.error = this.errorMessage(error);
+                    }
+                }
             }
             await this.refreshInspector(isCurrent);
         });
@@ -1051,13 +1060,7 @@ class Workbench {
             value: safeCaseName(suggested) ? suggested : "workflow", ignoreFocusOut: true,
             validateInput: value => safeCaseName(value) ? undefined : (zh ? "请输入 1–70 个字母、数字、汉字、空格或连接符。" : "Use 1–70 letters, numbers, spaces or separators.") });
         if (!name) return;
-        let entry;
-        try { entry = await writeCase(parent[0].fsPath, name, plan, group); }
-        catch (error) {
-            if (error.code === "EEXIST") throw new Error(zh ? "这个用例目录已经存在。请选择新的名称，或打开已有用例。" :
-                "This case folder already exists. Choose a new name or open the existing case.");
-            throw error;
-        }
+        const entry = await writeCase(parent[0].fsPath,name,plan,group);
         const uri = vscode.Uri.file(path.join(entry.folder, "workflow.json"));
         const existing = this.state.cases.find(row => row.uri === selected?.uri);
         await this.caseLibrary.add(uri, {name, source: this.state.draft ? "recording" : (existing?.source || "workflow"), origin: existing?.origin});
@@ -1282,34 +1285,39 @@ class Workbench {
             await this.replayDevicePlan(entry, plan);
             return;
         }
-        let result;
+        const agent = this.agent, session = this.session, device = this.state.device;
+        let result, failure;
         try {
-            const request = { session: this.session, run_id: entry.id, plan, output: "full", ...observationOptions };
+            const request = {session,run_id:entry.id,plan,output:"full",...observationOptions};
             if (plan.preconditions?.length && plan.goals?.length) {
-                result = await this.agent.call("execute", { ...request, device: this.state.device });
+                result = await agent.call("execute",{...request,device});
             } else {
                 // execute requires both boundary checks. A session run journals the same steps and frames.
-                await this.agent.call("start", { device: this.state.device, session: this.session, max_nodes: 1, compact: true });
-                result = await this.agent.call("run", request);
-                entry.cleanup = "retained";
-                if (result.status === "completed") {
-                    try {
-                        await this.agent.call("detach", { session: this.session });
-                        entry.cleanup = "detached";
-                    } catch (error) {
-                        entry.cleanup = "failed";
-                        this.state.error = this.errorMessage(error);
-                    }
-                }
+                await agent.call("start",{device,session,max_nodes:1,compact:true});
+                result = await agent.call("run",request);
             }
         } catch (error) {
-            entry.status = ["INVALID_PLAN","INVALID_ARGUMENT","INVALID_REQUEST"].includes(error.code) ? "rejected" : "unknown";
-            entry.failureCode = this.state.run.errorCode = error.code;
-            entry.failureMessage = this.state.run.error = this.errorMessage(error);
-            await this.persistRuns();
-            throw error;
+            failure = error;
         } finally {
             stopProgress?.();
+            entry.cleanup = "detached";
+            if (result?.sessionCleanup?.status!=="detached") {
+                try {
+                    // Reports read frozen files. The live session can be released even when a step failed.
+                    await agent.call("detach",{session});
+                } catch (error) {
+                    entry.cleanup = "failed";
+                    this.state.error = this.errorMessage(error);
+                }
+            }
+        }
+        if (failure) {
+            entry.status = ["INVALID_PLAN","INVALID_ARGUMENT","INVALID_REQUEST"].includes(failure.code) ? "rejected" : "unknown";
+            entry.failureCode = this.state.run.errorCode = failure.code;
+            this.state.run.cleanup = entry.cleanup;
+            entry.failureMessage = this.state.run.error = this.errorMessage(failure);
+            await this.persistRuns();
+            throw failure;
         }
         await this.setRun(entry, result, plan, group);
         return entry;

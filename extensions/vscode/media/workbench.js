@@ -2,7 +2,7 @@ import { vscode } from "./bridge.js";
 import { pytestWorkflow } from "./pytestCase.js";
 import { recordingWorkspace } from "./recordingWorkspace.js";
 import { caseBddView, caseStepLabel, caseLibraryView, caseRunHistory, caseRunStatus, caseRunTime, isCaseRun } from "./caseLibrary.js";
-import { caseReviewView, caseStepActions, caseEditorClick, caseEditorInput, caseEditorSubmit,
+import { caseReviewView, caseStepActions, stepEditArea, caseEditorClick, caseEditorInput, caseEditorSubmit,
     endCasePicture, selectCasePictureTarget } from "./caseAuthoring.js";
 import { pytestPhases } from "./pytestReport.js";
 import { repairView } from "./caseRepair.js";
@@ -445,11 +445,12 @@ function caseRunSummary(run, locked = false) {
             ${runs.length>1 ? caseRunHistory(runs,language,{id:"case-run-history",label:word("Case history","用例历史"),selected:run?.entry.id,disabled:model.busy||locked}) : ""}</div></section>`;
 }
 
-function caseEditValue(text,area,{index,path,add,defaultName,stepLabel}={}) {
+function caseEditValue(text,area,{index,path,add,defaultName,stepLabel,primaryStep}={}) {
     const className = area==="name" ? "case-value case-title" : stepLabel ? "case-value case-step-name" : "case-value";
     return actionButton(text,{quiet:true,className,
         disabled:model.busy,attrs:{"data-type":"caseReview","data-case-area":area,"data-case-index":index,
-            "data-case-path":path,"data-case-add":add,"data-step-default":defaultName,"data-order-hit":stepLabel?"":undefined}});
+            "data-case-path":path,"data-case-add":add,"data-step-default":defaultName,"data-order-hit":stepLabel?"":undefined,
+            "data-step-editor":primaryStep?"":undefined}});
 }
 
 function definitionBdd(run, coordinates) {
@@ -459,7 +460,7 @@ function definitionBdd(run, coordinates) {
     const stepActions = defs && !model.busy ? step=>caseStepActions(step,defs.steps[step.path],caseEditValue,word) : undefined;
     return caseBddView(model.caseBdd,language,{coordinates,tools,stepActions,reorder:Boolean(defs && !model.busy),renderRow:runRows(run,(text,context)=>{
         const {area,path,index,step}=context;
-        if (area==="step") return caseStepLabel(text,step,defs?.steps[path] && caseEditValue(step.name || text,"stepName",
+        if (area==="step") return caseStepLabel(text,step,defs?.steps[path] && caseEditValue(step.name || text,stepEditArea(defs.steps[path]),
             {path,defaultName:text,stepLabel:true}));
         return defs?.[area]?.[index] ? caseEditValue(text,area,context) : h(text);
     }),boundaryEditor:area=>{
@@ -1042,6 +1043,14 @@ toolNav.addEventListener("click", handleClick);
 toolNav.addEventListener("keydown", tabKeydown);
 root.addEventListener("click", handleClick);
 const sendWorkbench = message=>vscode.postMessage(message);
+root.addEventListener("dblclick", event=>{
+    if (event.button!==0 || model?.busy || event.target.closest("button,a,input,textarea,select,summary,[data-order-grip],.case-step-evidence")) return;
+    const row = event.target.closest("[data-case-step]");
+    const edit = row?.querySelector(":scope > [data-item-menu] [data-step-editor]");
+    if (!edit) return;
+    event.preventDefault();
+    edit.click();
+});
 bindItemMenus(root,owner=>{
     if (!model || model.busy) return [];
     if (owner.dataset.itemActions==="request") return requestMenuItems(owner,model,language,sendWorkbench,render);
@@ -1077,6 +1086,12 @@ root.addEventListener("keydown", event => {
         if (title) {event.preventDefault();title.click();}
         return;
     }
+    if (event.key==="F2" && event.target.closest(".case-step-name")) {
+        const row = event.target.closest("[data-case-step]");
+        const rename = row?.querySelector(':scope > [data-item-menu] :is([data-area="stepName"],[data-case-area="stepName"])');
+        if (rename) {event.preventDefault();rename.click();}
+        return;
+    }
     if (!event.isComposing && ["sc-library-name","ns-rename-rule"].includes(event.target.id) && ["Enter","Escape"].includes(event.key)) {
         event.preventDefault();
         const action=event.target.id==="sc-library-name" ? (event.key==="Enter"?"sc-confirm":"sc-dismiss") :
@@ -1097,7 +1112,7 @@ root.addEventListener("keydown", event => {
 });
 
 root.addEventListener("input", event => {
-    if (caseEditorInput(event.target,render)) return;
+    if (caseEditorInput(event.target,model,sendWorkbench,render)) return;
     if (event.target.id === "ai-diagnosis-goal") {
         diagnosisGoals.set(event.target.dataset.diagnosis,event.target.value);
         return;
@@ -1124,7 +1139,7 @@ root.addEventListener("input", event => {
 });
 
 function changeField(event) {
-    if (caseEditorInput(event.target,render)) return;
+    if (caseEditorInput(event.target,model,sendWorkbench,render)) return;
     if (event.target.dataset.x === "mode" && event.target.checked) {
         exploreClick(event.target,model,sendWorkbench,render);
         return;

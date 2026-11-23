@@ -2,7 +2,7 @@
   "name": "harmony-agent-workbench",
   "displayName": "Harmony Agent",
   "description": "%extension.description%",
-  "version": "0.20.21",
+  "version": "0.20.23",
   "publisher": "harmony-automation-agent",
   "license": "MIT",
   "repository": {
@@ -29,6 +29,16 @@
     "mcpServerDefinitionProviders": [
       { "id": "harmonyAgent.phoneTools", "label": "%mcp.phoneTools%" }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "harmony-agent", "title": "Harmony Agent", "icon": "media/device.svg" }
+      ]
+    },
+    "views": {
+      "harmony-agent": [
+        { "id": "harmonyAgent.launcher", "name": "%view.workbench%" }
+      ]
+    },
     "commands": [
       { "command": "harmonyAgent.askAI", "category": "Harmony Agent", "title": "%command.askAI%" },
       { "command": "harmonyAgent.openAIChat", "category": "Harmony Agent", "title": "%command.aiChat%" },

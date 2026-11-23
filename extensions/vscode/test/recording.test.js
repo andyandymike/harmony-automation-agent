@@ -27,7 +27,7 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
     const storagePath = mkdtempSync(path.join(workbenchFixtures, "workspace-"));
     storage.set("runs", runs);
     if (selectedPlan) storage.set("plan", selectedPlan);
-    let state, navigation, launcher, receive, disposePanel, saved, panel, notifyView, notifyEdit, panelCount = 0;
+    let state, navigation, launcher, receive, disposePanel, saved, panel, notifyView, notifyEdit, notifyLauncher, panelCount = 0;
     const live = { messages: [] };
     const uri = { fsPath: path.join(storagePath, "recording.json"), path: "/recording.json", toString: () => "file:///recording.json" };
     const vscode = {
@@ -51,6 +51,11 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
             openTextDocument: async () => ({ getText: () => JSON.stringify(saved) }),
         },
         window: {
+            createTreeView(id, {treeDataProvider}) {
+                assert.equal(id,"harmonyAgent.launcher");
+                assert.deepEqual(treeDataProvider.getChildren(),[]);
+                return {visible:false,dispose(){},onDidChangeVisibility(fn){notifyLauncher=fn;return {dispose(){}};}};
+            },
             createStatusBarItem(id, alignment) {
                 assert.equal(id, "harmonyAgent.workbenchLauncher");
                 assert.equal(alignment,vscode.StatusBarAlignment.Left);
@@ -108,6 +113,7 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
         screenshotPath: filename => path.join(storagePath, "agent", filename),
         get navigation() { return navigation; },
         launcher, hostCommands,
+        showActivityLauncher(visible) { return notifyLauncher({visible}); },
         clickLauncher() { return commands.get(launcher.command)(); },
         send(type, fields) { return receive({ type, ...fields }); },
         openLive() { commands.get("harmonyAgent.openLiveDevice")(); return live; },
@@ -288,6 +294,23 @@ test("long workflow previews identify each target and default text assertion wit
     assert.deepEqual(preview.initialChecks, ["cart · visible = true"]);
     assert.deepEqual(preview.finalChecks, ["password · text = ••••"]);
     assert.doesNotMatch(JSON.stringify(preview), /private/);
+});
+
+test("the Activity Bar launcher restores Explorer and opens or reveals the same editor", async () => {
+    const {views,viewsContainers} = require("../package.json").contributes;
+    const icon = viewsContainers.activitybar.find(container=>container.id==="harmony-agent");
+    assert.equal(icon?.icon,"media/device.svg");
+    assert.equal(views[icon.id][0].id,"harmonyAgent.launcher");
+    const bench = openWorkbench(async()=>({devices:[]}),{},undefined,undefined,[],undefined,{openOnStart:false});
+    await bench.showActivityLauncher(false);
+    assert.equal(bench.panelCount,0);
+    await bench.showActivityLauncher(true);
+    assert.equal(bench.panelCount,1);
+    await bench.showActivityLauncher(false);
+    await bench.showActivityLauncher(true);
+    assert.equal(bench.panelCount,1);
+    assert.deepEqual(bench.hostCommands,["workbench.view.explorer","workbench.view.explorer"]);
+    bench.close();
 });
 
 test("the status bar launcher opens or reveals one editor without issuing sidebar commands", async () => {
@@ -673,7 +696,7 @@ test("device changes in the inspector replace both the feed and the controls", a
 });
 
 test("one-click workbench recording retains acknowledged steps across a failed action and page refresh", async () => {
-    let starts = 0;
+    let starts = 0, replayFails = false;
     const requests = [];
     const observed = { frameId: "current", nodes: [{ ref: "@button", id: "hello", clickable: true }] };
     const bench = openWorkbench(async (command, input) => {
@@ -681,7 +704,8 @@ test("one-click workbench recording retains acknowledged steps across a failed a
         if (command === "devices") return { devices: [{ id: "test" }] };
         if (command === "start") starts++;
         if (command === "back") throw new Error("Device stopped responding");
-        if (command === "run" || command === "report") return { status: "completed", goalVerification: { status: "not_requested" } };
+        if (command === "run" || command === "report") return {status:replayFails?"failed":"completed",
+            goalVerification:{status:"not_requested"}};
         return { observation: observed, afterFrameId: observed.frameId };
     });
     await bench.send("devices");
@@ -711,6 +735,17 @@ test("one-click workbench recording retains acknowledged steps across a failed a
     assert.equal(bench.state.run.entry.status, "completed");
     await bench.send("report", { id });
     assert.equal(bench.state.run.cleanup, "detached");
+    replayFails = true;
+    requests.length = 0;
+    await bench.send("run");
+    assert.deepEqual(requests.map(([command])=>command),["start","run","detach"]);
+    const [,run,cleanup] = requests;
+    assert.equal(cleanup[1].session,run[1].session);
+    assert.equal(bench.state.run.entry.status,"failed");
+    assert.equal(bench.state.run.cleanup,"detached");
+    await bench.send("report",{id:bench.state.run.entry.id});
+    assert.equal(bench.state.run.entry.status,"failed");
+    assert.equal(bench.state.run.cleanup,"detached");
 });
 
 test("the phone preview records stable control actions and blocks ambiguous or unsupported input", async t => {

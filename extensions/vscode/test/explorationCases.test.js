@@ -221,7 +221,14 @@ test("named steps can use observed compatible locators, be duplicated and restor
         calls.push("observe");
         b.state.page={complete:true,nodes:[
             {label:"Pay now",id:"pay",pressable:true,visible:true,selector:{id:"pay"},attributes:{id:"pay"},bounds},
-            {label:"Amount",id:"amount",pressable:false,editable:true,selector:{id:"amount"},attributes:{id:"amount"},bounds},
+            {label:"Amount",id:"amount",pressable:false,editable:true,selector:{id:"amount"},
+                attributes:{id:"amount",hint:"Amount",editable:true,type:"TextInput"},bounds},
+            {label:"Shipping",ref:"shipping",attributes:{id:"shipping"},bounds},
+            {label:"Express",ref:"express",attributes:{id:"express"},bounds},
+            {label:"Continue",parent:"shipping",attributes:{id:"continue",text:"Continue",type:"Text"},bounds},
+            {label:"Continue",parent:"express",attributes:{id:"continue",text:"Continue",type:"Text"},bounds},
+            {label:"Disabled panel",ref:"disabled",attributes:{id:"disabled",enabled:false},bounds},
+            {label:"Submit",parent:"disabled",attributes:{id:"submit"},bounds},
         ]};
     };
     author.begin({name:"Checkout steps",plan,source:"workflow"});
@@ -231,7 +238,9 @@ test("named steps can use observed compatible locators, be duplicated and restor
     await author.loadTargets({...current(),area:"step",path:step,live:true,pick:true});
     assert.deepEqual(calls,["begin","observe","screenshot","end"]);
     assert.deepEqual(b.state.caseReview.stepTargets.matches,{count:0,complete:true});
-    assert.deepEqual(b.state.caseReview.stepTargets.choices.map(choice=>choice.label),["Pay now"]);
+    assert.deepEqual(b.state.caseReview.stepTargets.choices.map(choice=>choice.label),["Pay now","Amount","Shipping","Express","Continue","Continue"]);
+    const nested = b.state.caseReview.stepTargets.choices.filter(choice=>choice.label==="Continue").map(choice=>JSON.parse(choice.locator));
+    assert.deepEqual(nested,[{id:"continue",within:{id:"shipping"}},{id:"continue",within:{id:"express"}}]);
     assert.deepEqual(b.state.caseReview.stepTargets.choices[0].bounds,bounds);
     const picture=b.state.caseReview.stepTargets.picture;
     assert.equal(picture.src,"webview/current.png");
@@ -252,6 +261,61 @@ test("named steps can use observed compatible locators, be duplicated and restor
     const saved=JSON.parse(await fs.readFile(b.selected.fsPath,"utf8"));
     const {presentation}=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
     assert.deepEqual([...restorePresentation(saved,presentation).values()].map(entry=>entry.group),["Checkout","Checkout"]);
+});
+
+test("a case can edit action parameters and insert an operation while preserving existing conditions", async t=>{
+    const {directory,b,author,folders} = await host(t);
+    const start = condition("cart"), goal = condition("receipt");
+    const fill = {command:"fill",before:[start],input:{target:{id:"search"},text:"already saved",expect:goal}};
+    author.begin({name:"Search",source:"workflow",plan:{version:"1",preconditions:[start],steps:[fill],goals:[goal]}});
+    const edit = fields=>author.edit({id:b.state.caseReview.id,revision:b.state.caseReview.revision,area:"stepOperation",path:"steps[0]",...fields});
+    assert.doesNotMatch(JSON.stringify(b.state.caseReview.definitions),/already saved/);
+    await edit({command:"fill",target:"keep",replaceInput:false,text:"unused",timeout:"1200"});
+    assert.equal(author.candidate.plan.steps[0].input.text,"already saved");
+    await edit({command:"fill",target:"manual",locatorField:"id",controlId:"search-v2",replaceInput:true,text:"test input",timeout:"1200"});
+    await edit({add:true,command:"wait",target:"manual",locatorField:"id",controlId:"suggestion",property:"visible",expected:"true",timeout:"2000"});
+    await edit({command:"wait",target:"keep",property:"visible",expected:"true"});
+    assert.equal(author.candidate.plan.steps[0].command,"fill");
+    const original = author.candidate.plan;
+    assert.deepEqual(original.steps,[{...fill,input:{target:{id:"search-v2"},text:"test input",timeout_ms:1200,expect:goal}},
+        {command:"wait",input:{target:{id:"suggestion"},property:"visible",equals:true,timeout_ms:2000}}]);
+    assert.deepEqual([original.preconditions,original.goals],[[start],[goal]]);
+    folders.push([uri(directory)]);
+    await author.save({id:b.state.caseReview.id,name:"Search"});
+    assert.deepEqual(JSON.parse(await fs.readFile(b.selected.fsPath,"utf8")),original);
+});
+
+test("a replay case can save again beside a same-name case left on disk", async t=>{
+    const {directory,b,author,folders} = await host(t);
+    const plan = {version:"1",steps:[press("original")]};
+    const save = async workflow=>{
+        author.begin({name:"Replay",source:"recording",plan:workflow});
+        folders.push([uri(directory)]);
+        await author.save({id:b.state.caseReview.id,name:"Replay"});
+        return b.selected;
+    };
+    const first=await save(plan);
+    const second=await save({...plan,steps:[press("new")]});
+    assert.equal(path.basename(path.dirname(second.fsPath)),"Replay-2");
+    assert.deepEqual(JSON.parse(await fs.readFile(first.fsPath,"utf8")),plan);
+    assert.equal(JSON.parse(await fs.readFile(second.fsPath,"utf8")).steps[0].input.target.id,"new");
+});
+
+test("gesture editing validates the saved coordinates and keeps the original input unless it is replaced", async t=>{
+    const {b,author} = await host(t);
+    const input = {kind:"typeText",text:"secret fixture text"};
+    const plan = {format:"harmony-agent.device-recording",version:1,steps:[
+        {command:"deviceGesture",input:{kind:"swipe",x:4,y:8,toX:4,toY:80,velocity:900}},
+        {command:"deviceGesture",input,delayMs:500},
+    ]};
+    author.begin({name:"Gesture replay",source:"recording",plan});
+    const edit = fields=>author.edit({id:b.state.caseReview.id,revision:b.state.caseReview.revision,area:"stepGesture",...fields});
+    assert.doesNotMatch(JSON.stringify(b.state.caseReview.definitions),/secret fixture text/);
+    await assert.rejects(edit({path:"steps[0]",coordinates:{x:"-1",y:"8",toX:"4",toY:"80",velocity:"900"},delay:"0"}));
+    await edit({path:"steps[0]",coordinates:{x:"5",y:"8",toX:"5",toY:"80",velocity:"1200"},delay:"0"});
+    await edit({path:"steps[1]",replaceInput:false,delay:"750"});
+    assert.deepEqual(author.candidate.plan.steps[0].input,{kind:"swipe",x:5,y:8,toX:5,toY:80,velocity:1200});
+    assert.deepEqual(author.candidate.plan.steps[1],{command:"deviceGesture",input,delayMs:750});
 });
 
 test("a check inserted after a Then runs at that position and can describe the next Given", async t=>{

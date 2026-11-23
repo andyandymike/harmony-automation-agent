@@ -27,7 +27,7 @@ function pytestStatus(code, phases) {
     return "passed";
 }
 
-async function finishPytest({directory, invocation, plan, device, time, code, sharedState, sourceFile, launchError}) {
+async function finishPytest({directory, invocation, plan, device, time, code, sharedState, sourceFile, launchError, releaseSession}) {
     const pytest = await readJson(path.join(directory, "pytest.json"));
     const phases = Array.isArray(pytest?.phases) ? pytest.phases : [];
     const exitCode = code ?? pytest?.exitCode;
@@ -35,8 +35,26 @@ async function finishPytest({directory, invocation, plan, device, time, code, sh
     // Each generated test creates its own UUID directory. Preparation can fail before any device run exists.
     const executions = [];
     for (const dir of dirs) {
-        const execution = await readJson(path.join(directory, dir.name, "execution.json"));
+        const folder = path.join(directory,dir.name);
+        const execution = await readJson(path.join(folder,"execution.json"));
         if (execution) executions.push(dir.name);
+        if (!releaseSession || execution?.data?.sessionCleanup?.status==="detached") continue;
+        const receiptFile = path.join(folder,"cleanup.json");
+        if ((await readJson(receiptFile))?.success) continue;
+        const stateDir = sharedState || path.join(folder,"state");
+        const journal = !execution && await readJson(path.join(stateDir,"runs",dir.name,"run.json"));
+        // A stopped task may leave a journal without execution.json or a cleanup receipt.
+        if (!execution && journal?.runId!==dir.name) continue;
+        let receipt;
+        try {
+            const data = await releaseSession(dir.name,stateDir);
+            receipt = {success:true,data};
+        } catch (error) {
+            receipt = {success:false,error:{code:error.code,message:error.message}};
+        }
+        await fs.writeFile(receiptFile,JSON.stringify(receipt)+"\n",{mode:0o600}).catch(error=>{
+            console.warn("Harmony Agent could not save pytest cleanup evidence",error);
+        });
     }
     const deviceRun = executions.length === 1 ? executions[0] : undefined;
     let workflowSource;
@@ -80,7 +98,7 @@ async function loadPytestRun(entry, language, presentationData) {
         const execution = await readJson(path.join(folder, "execution.json"));
         executionError = execution?.error;
         const finalCleanup = await readJson(path.join(folder, "cleanup.json"));
-        if (finalCleanup?.success && finalCleanup.data?.detached) cleanup = "detached";
+        if (finalCleanup?.success) cleanup = "detached";
         else if (finalCleanup?.success === false) cleanup = "failed";
         if (!record) record = execution?.data;
         if (record && execution?.data?.sessionCleanup) {

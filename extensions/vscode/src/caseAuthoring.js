@@ -7,10 +7,11 @@ const {isDeepStrictEqual} = require("node:util");
 const {createBdd, readCaseMetadata} = require("./caseLibrary");
 const {maxSteps, title, stepRoles, roleOverride, stepEntries, restorePresentation, storePresentation, stepEvidence, pageCue, entriesForOrganization,
     organizationPrompt, parseOrganization} = require("./casePresentation");
-const {stepLocator, canonicalLocator, describeLocator, observationsForStep, manualLocator} = require("./caseLocators");
+const {stepLocator, canonicalLocator, describeLocator, observationsForStep, manualLocator, targetCommands} = require("./caseLocators");
+const {editableCommands, actionDefinition, buildAction, gestureDefinition, buildGesture} = require("./caseStepEditing");
 const {deviceRecordingFormat, moveListItem} = require("./model");
 const {sourceDigest} = require("./caseRepair");
-const {readiness, safeCaseName, writeCase, findCase, templatePath, testFilename} = require("./pytestCase");
+const {readiness, safeCaseName, reserveCaseFolder, writeCase, findCase, templatePath, testFilename} = require("./pytestCase");
 const {readWorkflow, workflowWithScenario} = require("./workflowFile");
 
 const booleanProperties = ["visible", "enabled", "checked", "selected", "focused"];
@@ -43,12 +44,13 @@ function caseDefinitions(plan, presentation) {
         const roles = controls ? stepRoles(step) : [];
         const {name,group,role} = presentation?.get(step) || {};
         const check = editableCheck(step.assert);
-        const replaceText = step.command === "fill" && typeof step.input?.text === "string";
+        const action = controls ? actionDefinition(step) : undefined;
+        const gesture = controls ? undefined : gestureDefinition(step);
         return [path,{name,group,roles,role:role || roles[0],removable:siblings>1 || /\.else\[\d+\]$/.test(path),
             insertCheck:controls && entries.length<maxSteps && !step.stop && !step.yield,
-            ...(locator && {locator:describeLocator(locator.owner[locator.field])}), ...(check && {check}), ...(replaceText && {replaceText:true})}];
+            ...(locator && {locator:describeLocator(locator.owner[locator.field])}), ...(check && {check}),action,gesture}];
     }));
-    return {start:conditions("preconditions"),goal:conditions("goals"),steps};
+    return {start:conditions("preconditions"),goal:conditions("goals"),steps,commands:controls ? editableCommands() : []};
 }
 
 function setStepPresentation(candidate, step, display) {
@@ -68,10 +70,9 @@ function suggestedName(value) {
 }
 
 async function writeReplay(parent, name, plan, group) {
-    const folder = path.join(parent, name);
     const contents = group ? workflowWithScenario(plan,group) : plan;
     const json = JSON.stringify(contents,null,2) + "\n";
-    await fs.mkdir(folder, {mode:0o700});
+    const folder = await reserveCaseFolder(parent,name);
     const target = path.join(folder,"workflow.json");
     let file;
     try {
@@ -183,7 +184,8 @@ class CaseAuthoring {
             values.map(({label},index)=>({label,key:String(index)}))]));
         const picker = c.stepTargets;
         const stepTargets = picker && (!picker.device || picker.device === this.bench.state.device) ? {
-            path:picker.path, insert:picker.insert, matches:picker.matches, live:Boolean(picker.device), picture:picker.picture,
+            path:picker.path,area:picker.area,command:picker.command,insert:picker.insert,matches:picker.matches,
+            live:Boolean(picker.device),picture:picker.picture,
             choices:picker.choices.map(({label,source,detail,selector,bounds},index)=>({label,source,detail,key:String(index),
                 locator:describeLocator(selector),...(picker.picture && bounds && {bounds})})),
         } : undefined;
@@ -202,11 +204,12 @@ class CaseAuthoring {
         if (!stay && c?.previousTool && this.bench.state.tool === "recordings") this.bench.state.tool = c.previousTool;
     }
 
-    async loadTargets({id, revision, area, path, live, add, pick}) {
+    async loadTargets({id, revision, area, path, live, add, pick, command}) {
         const c = this.candidate;
         if (!c || c.id !== id || c.uri || (revision !== undefined && c.revision !== revision)) return;
-        if (area === "step" || area === "stepCheck") {
-            if (c.revision === revision) await this.loadStepTargets(c,path,live===true,area==="stepCheck" && add===true,pick===true);
+        if (["step","stepCheck","stepOperation"].includes(area)) {
+            if (c.revision===revision) await this.loadStepTargets(c,path,{area,live:live===true,
+                insert:area!=="step" && add===true,pick:pick===true,command:area==="stepOperation" ? command : undefined});
             return;
         }
         if (!["start","goal"].includes(area) || c.targets[area]) return;
@@ -226,12 +229,18 @@ class CaseAuthoring {
         this.update();
     }
 
-    async loadStepTargets(c, path, live, insert, pick) {
+    async loadStepTargets(c, path, {area,live,insert,pick,command}) {
         const location = stepLocation(c.plan,path);
         const step = location?.list?.[location.index];
         const anchor = stepLocator(step);
-        const locator = insert ? undefined : anchor;
-        if (!step || (!locator && !insert) || (insert && c.plan.format===deviceRecordingFormat)) return;
+        if (!step || (insert && c.plan.format===deviceRecordingFormat)) return;
+        let locator = insert ? undefined : anchor;
+        if (area==="stepOperation") {
+            if (!targetCommands.has(command) || !editableCommands(insert ? undefined : step).includes(command) ||
+                (!insert && !actionDefinition(step))) return;
+            const target = !insert && command===step.command ? step.input?.target : undefined;
+            locator = stepLocator({command,input:{target:target || {}}});
+        } else if (!locator && !insert) return;
         const bench = this.bench;
         const revision = c.revision;
         const panel = bench.panel;
@@ -264,7 +273,7 @@ class CaseAuthoring {
         }
         if (!current() || (device && (bench.state.device !== device || !bench.state.devices.includes(device)))) return;
         const bundle = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
-        c.stepTargets = {path,insert,device,picture,pageCue:pageCue(page),...observationsForStep(locator,sources,bundle)};
+        c.stepTargets = {path,area,command,insert,device,picture,pageCue:pageCue(page),...observationsForStep(locator,sources,bundle)};
         this.update();
     }
 
@@ -294,10 +303,10 @@ class CaseAuthoring {
         return {...(bundleName && {bundleName}),id};
     }
 
-    stepTarget(c, path, message, current, {insert=false, scope}={}) {
+    stepTarget(c, path, message, current, {area="step",command,insert=false,scope}={}) {
         const picker = c.stepTargets;
         const state = this.bench.state;
-        const selected = picker?.path===path && picker.insert===insert &&
+        const selected = picker?.path===path && picker.area===area && picker.command===command && picker.insert===insert &&
             (!picker.device || (picker.device===state.device && state.devices.includes(picker.device))) &&
             /^\d+$/.test(message.target || "") && picker.choices[Number(message.target)];
         const selector = message.target === "keep" ? current :
@@ -322,7 +331,7 @@ class CaseAuthoring {
         if (!["Given","Then"].includes(role)) return false;
         const anchor = stepLocator(step);
         const scope = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
-        const chosen = this.stepTarget(c,path,target,prior?.selector,{insert,scope});
+        const chosen = this.stepTarget(c,path,target,prior?.selector,{area:"stepCheck",insert,scope});
         const equals = this.expectedValue(property,expected,prior,check?.protectedValue && target.target==="keep");
         const assertion = {...prior,selector:chosen.selector,property,equals};
         const edited = insert ? {assert:assertion} : step;
@@ -343,6 +352,42 @@ class CaseAuthoring {
         return true;
     }
 
+    editStepOperation(c,location,step,path,fields) {
+        const {command,add,target} = fields;
+        const prior = add ? undefined : step;
+        if (c.plan.format===deviceRecordingFormat || !editableCommands(prior).includes(command) ||
+            (!add && !actionDefinition(step)) ||
+            (add && (step.stop || step.yield || [...stepEntries(c.plan.steps)].length>=maxSteps))) return false;
+        const current = prior?.command===command ? prior.input?.target : undefined;
+        const anchor = stepLocator(step);
+        const scope = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
+        const chosen = targetCommands.has(command) && !(command==="scroll" && target==="auto") ?
+            this.stepTarget(c,path,fields,current,{area:"stepOperation",command,insert:add===true,scope}) : undefined;
+        const edited = buildAction(prior,fields,chosen?.selector,(en,zh)=>this.words(en,zh));
+        if (add) {
+            location.list.splice(location.index+1,0,edited);
+            setStepPresentation(c,edited,{evidence:chosen?.evidence});
+            c.removedStep = undefined;
+            c.added = true;
+        } else this.replaceOperation(c,location,step,edited,target==="keep" ? undefined : chosen?.evidence);
+        c.stepTargets = undefined;
+        return true;
+    }
+
+    replaceOperation(c,location,step,edited,selectedEvidence) {
+        if (isDeepStrictEqual(step,edited)) return;
+        const display = c.presentation.get(step);
+        const sameTarget = step.command===edited.command && isDeepStrictEqual(step.input?.target,edited.input?.target);
+        const evidence = selectedEvidence || (sameTarget && stepEvidence({control:display?.evidence?.control,from:display?.evidence?.from}));
+        const role = roleOverride(stepRoles(edited),display?.role);
+        c.presentation.delete(step);
+        setStepPresentation(c,edited,{...display,role,evidence});
+        c.presentationChanged ||= Boolean(display?.evidence && !isDeepStrictEqual(evidence,display.evidence));
+        location.list[location.index] = edited;
+        c.removedStep = undefined;
+        c.added = true;
+    }
+
     async edit({id, revision, area, path, index, property, expected, name, role, add, text, saveName, ...target}) {
         const c = this.candidate;
         if (!c || c.id !== id || c.revision !== revision || c.uri) return;
@@ -350,7 +395,7 @@ class CaseAuthoring {
             const value = typeof name === "string" ? name.trim() : "";
             if (!safeCaseName(value)) throw new Error(this.words("Enter a valid case name of up to 70 characters.","请输入不超过 70 个字符的有效用例名称。"));
             c.name = value;
-        } else if (["step","stepName","stepText","stepCheck"].includes(area)) {
+        } else if (["step","stepName","stepCheck","stepOperation","stepGesture"].includes(area)) {
             const location = stepLocation(c.plan,path);
             const step = location?.list?.[location.index];
             if (!step) return;
@@ -365,13 +410,13 @@ class CaseAuthoring {
                 c.presentationChanged ||= label !== (previous?.name || "") || group !== (previous?.group || "") || override !== previous?.role;
             } else if (area === "stepCheck") {
                 if (!this.editStepCheck(c,location,step,path,{add,property,expected,role,...target})) return;
-            } else if (area === "stepText") {
-                if (step.command !== "fill" || typeof step.input?.text !== "string" || typeof text !== "string" || text.length > 4096) return;
-                step.input.text = text;
-                const previous = c.presentation.get(step);
-                if (previous?.evidence?.to)
-                    setStepPresentation(c,step,{...previous,evidence:stepEvidence({...previous.evidence,to:undefined})});
-                c.added = true;
+            } else if (area==="stepOperation") {
+                if (!this.editStepOperation(c,location,step,path,{...target,add,property,expected,text})) return;
+            } else if (area==="stepGesture") {
+                if (c.plan.format!==deviceRecordingFormat) return;
+                const edited = buildGesture(step,{...target,text},(en,zh)=>this.words(en,zh));
+                if (!edited) return;
+                this.replaceOperation(c,location,step,edited);
             } else {
                 const locator = stepLocator(step);
                 if (!locator) return;
@@ -591,14 +636,8 @@ class CaseAuthoring {
                 validateInput:value=>safeCaseName(value) ? undefined : w("Use a short folder name.","请输入不超过 70 个字符的有效目录名。")});
             if (!name || this.candidate !== c) return;
             if (!safeCaseName(name)) throw new Error(w("Invalid case name.","用例名称无效。"));
-            let folder;
-            try {
-                folder = readiness(c.plan) ? await writeReplay(parent[0].fsPath,name,c.plan,c.group) :
-                    (await writeCase(parent[0].fsPath,name,c.plan,c.group)).folder;
-            } catch (error) {
-                if (error.code==="EEXIST") throw new Error(w("A case folder with this name already exists.","此名称的目录已存在，请换一个名称。"));
-                throw error;
-            }
+            const folder = readiness(c.plan) ? await writeReplay(parent[0].fsPath,name,c.plan,c.group) :
+                (await writeCase(parent[0].fsPath,name,c.plan,c.group)).folder;
             c.uri = v.Uri.file(path.join(folder,"workflow.json"));
             c.savedName = name;
         }

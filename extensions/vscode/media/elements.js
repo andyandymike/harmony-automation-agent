@@ -15,8 +15,8 @@ const words = {
     includesSelected:["includes selected control","包含当前选中控件"], excludesSelected:["excludes selected control","未匹配当前选中控件"],
     useLocator:["Observe or add to a workflow","观察属性或加入流程"],
     operateSelected:["Operate selected control","操作选中控件"],
-    casePick:["Click a highlighted control to choose its locator.","点击高亮控件选择定位器。"],
-    caseNone:["No compatible control at this point.","这里没有适用于当前步骤的控件。"],
+    casePick:["Click to select. Right-click to choose overlapping controls.","单击选取，右键可选重叠控件。"],
+    caseNone:["No unique locator for this action at this point.","此处没有适用于当前动作的唯一定位器。"],
     caseEmpty:["No selectable controls on this page.","当前页没有可点选的控件。"],
     casePhotoError:["Could not load the preview. You can still choose from the control list.","无法加载画面，可以在右侧控件列表中选取。"],
     caseExit:["Exit selection","退出选取"],
@@ -71,9 +71,16 @@ export function bindElements(onRender,onSelect,{selectCaseTarget,endCasePick}={}
         if(node) choose(node.ref);
     });
     canvas.addEventListener("contextmenu",event=>{
-        if (casePicker()) return;
-        const items=elementMenuItems(under(event)?.ref);
+        const picker = casePicker();
+        if (picker && model.busy) return;
+        const items=picker ? hits(event).map(node=>({
+            label:[node.label,node.detail].filter(Boolean).join(" · "),run:()=>selectCaseTarget?.(node.key,picker.picture.id),
+        })) : elementMenuItems(under(event)?.ref);
         if(showItemMenu(items,{anchor:canvas,label:w("actions"),point:{x:event.clientX,y:event.clientY}})) event.preventDefault();
+        else if (picker) {
+            event.preventDefault();
+            $("element-picker-message").textContent=w("caseNone");
+        }
     });
     $("case-pick-exit").addEventListener("click",()=>{
         if (endCasePick?.()) $("bdd-pick-screen")?.focus();
@@ -160,10 +167,11 @@ function coords(event) {
     return {x:(event.clientX-box.left-(box.width-img.naturalWidth*scale)/2)/scale,
         y:(event.clientY-box.top-(box.height-img.naturalHeight*scale)/2)/scale};
 }
-function under(event) {
+function hits(event) {
     const xy=coords(event);
-    return xy && hitsAt(casePicker()?.choices || model.page?.nodes || [],xy)[0];
+    return xy ? hitsAt(casePicker()?.choices || model.page?.nodes || [],xy) : [];
 }
+const under = event=>hits(event)[0];
 
 function paint() {
     const canvas=$("element-overlay"), img=$("element-photo");

@@ -95,7 +95,7 @@ const entries = {
     liveDecode: ["Could not display this frame. Reconnect to try again.", "这帧画面无法显示，请重新连接。"],
     liveSending: ["Sending gesture…", "正在发送手势…"],
     liveSent: ["Phone acknowledged the gesture", "手机已确认手势"],
-    DEVICE_OWNED: ["Another task has control of this phone.", "另一个任务正在操作这台手机。"],
+    DEVICE_OWNED: ["A task still holds this phone. Finish that task before trying again.", "这台手机仍被另一个会话占用。结束对应任务后再试。"],
     DEVICE_RECORDING_UNAVAILABLE: ["The phone recorder stopped or could not start. Check the connection and try again.","手机录制未能启动或已中断。请检查连接后再试。"],
     DEVICE_RECORDER_BUSY: ["Another recording is already running on this phone.","这台手机上已有录制在运行。"],
     HDC_NOT_FOUND: ["Set the HDC executable path in Agent settings.","请在 Agent 设置中填写 HDC 可执行文件的路径。"],

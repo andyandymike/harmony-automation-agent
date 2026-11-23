@@ -100,8 +100,16 @@ test("removing a case from the library persists without changing files, and a sh
     const reopened=host(project,paths,store);
     assert.deepEqual(await reopened.list(),[]);
     assert.equal(await fs.readFile(file.fsPath,"utf8"),contents);
+    const original = JSON.parse(await fs.readFile(file.fsPath+".harmony-case.json","utf8"));
+    const next = await writeCase(project,"Checkout",{...plan,steps:[{command:"back",input:{}}]});
+    const replacement = Uri.file(path.join(next.folder,"workflow.json"));
+    const registered = await reopened.add(replacement,{name:"Checkout",source:"recording"});
+    assert.equal(path.basename(next.folder),"Checkout-2");
+    assert.notEqual(registered.id,original.id);
+    assert.deepEqual((await reopened.list()).map(row=>row.uri),[replacement.toString()]);
+    assert.equal(await fs.readFile(file.fsPath,"utf8"),contents);
     assert.equal(await reopened.registerExisting(file),true);
-    assert.equal((await reopened.list())[0].name,"Checkout");
+    assert.deepEqual((await reopened.list()).map(row=>row.name),["Checkout","Checkout"]);
     await fs.writeFile(path.join(folder,"company_fixture.py"),"fixture = 1\n");
     assert.equal(await reopened.managedFolder(file),undefined);
 });

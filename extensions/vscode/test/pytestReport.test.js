@@ -6,7 +6,7 @@ const path = require("node:path");
 const os = require("node:os");
 const test = require("node:test");
 const {writeCase, startPytest} = require("../src/pytestCase");
-const {loadPytestRun} = require("../src/pytestReport");
+const {finishPytest,loadPytestRun} = require("../src/pytestReport");
 const {CaseRepair,sourceDigest} = require("../src/caseRepair");
 const {diagnoseCase} = require("../src/caseDiagnosis");
 const {reviewCaseFailure} = require("../src/caseFailure");
@@ -27,6 +27,26 @@ test("receipt labels recover nested loop/branch targets and exclude entered text
     assert.equal(view.steps[0].authoredTarget,"username");
     assert.deepEqual(view.steps.slice(1),steps.slice(1));
     assert.doesNotMatch(JSON.stringify(view),/private test input/);
+});
+
+test("a stopped pytest task releases the session identified by its own retained journal", async t=>{
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(),"ha-pytest-owner-"));
+    t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+    const id = "be1de8d3-f621-482e-8000-a85f5643cc99";
+    const other = "3f3ea98b-1bc7-4221-9f43-cd9272d4ee5c";
+    const folder = path.join(directory,id), stateDir = path.join(folder,"state");
+    const journal = path.join(stateDir,"runs",id);
+    await fs.mkdir(journal,{recursive:true});
+    await fs.mkdir(path.join(directory,other));
+    await fs.writeFile(path.join(journal,"run.json"),JSON.stringify({runId:id,status:"running"}));
+    const calls = [];
+    const result = await finishPytest({directory,invocation:"stopped",code:2,releaseSession:async (...args)=>{
+        calls.push(args);
+        return {detached:true};
+    }});
+    assert.equal(result.entry.status,"cancelled");
+    assert.deepEqual(calls,[[id,stateDir]]);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(folder,"cleanup.json"),"utf8")),{success:true,data:{detached:true}});
 });
 
 // Run the installed pytest, the repository CLI and its file-backed report through the extension Task entry.

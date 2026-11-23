@@ -6,6 +6,7 @@
   "extension.description": "Record, replay, and diagnose HarmonyOS UI workflows from VS Code.",
   "workspaceTrust.description": "Harmony Agent runs local tools and can execute pytest cases from the workspace.",
   "command.open": "Open Workbench",
+  "view.workbench": "Workbench",
   "command.inspect": "Element locator",
   "command.recordings": "Record & replay",
   "command.exploration": "Explore App",

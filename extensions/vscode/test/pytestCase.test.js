@@ -32,10 +32,9 @@ test("pytest readiness identifies missing boundaries and coordinates before writ
 
 test("an exported group travels with one editable workflow, concurrent exporters cannot overwrite a case", async t => {
     const parent = await temporary(t);
-    const results = await Promise.allSettled([writeCase(parent, "订单", plan, group), writeCase(parent, "订单", plan, group)]);
-    assert.deepEqual(results.map(r => r.status).sort(), ["fulfilled", "rejected"]);
-    const entry = results.find(r => r.status === "fulfilled").value;
-    assert.equal(results.find(r => r.status === "rejected").reason.code, "EEXIST");
+    const results = await Promise.all([writeCase(parent,"订单",plan,group),writeCase(parent,"订单",plan,group)]);
+    assert.deepEqual(results.map(entry=>path.basename(entry.folder)).sort(),["订单","订单-2"]);
+    const entry = results.find(entry=>path.basename(entry.folder)==="订单");
     const source = readWorkflow(await fs.readFile(path.join(entry.folder, "workflow.json"), "utf8"));
     assert.deepEqual(source.plan, plan);
     assert.equal(source.scenario.name, group.name);

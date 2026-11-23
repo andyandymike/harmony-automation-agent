@@ -6,7 +6,7 @@ An open-source toolkit for observing, operating, and verifying HarmonyOS apps th
 
 The project provides a Python CLI, a [VS Code workbench](extensions/vscode/README.md), a portable Agent Skill, and a local stdio MCP adapter. They share a model-free runtime built on the Python standard library. The workbench supports live device preview, workflow recording and replay, and step-by-step debugging.
 
-**Python runtime `0.1.0a10` and VS Code workbench `0.20.21` are development previews.** Build or install the VSIX with the [workbench guide](extensions/vscode/README.md). See [compatibility](docs/compatibility.md) for tested environments and the [changelog](CHANGELOG.md) for runtime history.
+**Python runtime `0.1.0a10` and VS Code workbench `0.20.23` are development previews.** Build or install the VSIX with the [workbench guide](extensions/vscode/README.md). See [compatibility](docs/compatibility.md) for tested environments and the [changelog](CHANGELOG.md) for runtime history.
 
 ## What it does
 

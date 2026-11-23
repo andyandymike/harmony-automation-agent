@@ -4,12 +4,27 @@ import {actionButton,escapeHtml as h} from "./ui/controls.js";
 const properties = {visible:["Visibility","可见性"], text:["Text","文字"], enabled:["Enabled","可用状态"],
     checked:["Checked","勾选状态"], selected:["Selected","选中状态"], focused:["Focused","焦点状态"]};
 let editor;
-const stepAreas = ["step","stepName","stepText","stepCheck"];
-const usesPicker = area=>area==="step" || area==="stepCheck";
+const stepAreas = ["step","stepName","stepCheck","stepOperation","stepGesture"];
+const targetActions = new Set(["press","fill","scroll","wait"]);
+const usesPicker = current=>current && (["step","stepCheck"].includes(current.area) ||
+    current.area==="stepOperation" && targetActions.has(current.values.command));
+const actions = {press:["Tap","点按"],fill:["Enter text","输入文字"],scroll:["Scroll","滑动"],back:["Go back","返回"],
+    wait:["Wait for a condition","等待条件"],open:["Open app","打开应用"],find:["Find text","查找文字"],observe:["Read page","读取页面"]};
+const gestures = {click:["Tap","点按"],doubleClick:["Double tap","双击"],longClick:["Long press","长按"],
+    swipe:["Swipe","滑动"],drag:["Drag","拖拽"],fling:["Fling","快速滑动"],pinch:["Pinch","缩放"],back:actions.back,
+    home:["Home","主页"],recents:["Recent apps","最近任务"],typeText:actions.fill};
+const directions = {up:["Up","向上"],down:["Down","向下"],left:["Left","向左"],right:["Right","向右"]};
+
+function requestTargets(current, send, extra = {}) {
+    const {id,revision,area,path,existing,values} = current;
+    send({type:"caseTargets",id,revision,area,path,add:!existing,...(area==="stepOperation" && {command:values.command}),...extra});
+}
 
 function currentPicker(review, current) {
     const picker = review.stepTargets;
-    return picker && picker.path===current.path && picker.insert===(current.area==="stepCheck" && !current.existing) ? picker : undefined;
+    const command = current.area==="stepOperation" ? current.values.command : undefined;
+    return picker?.path===current.path && picker.area===current.area && picker.command===command &&
+        picker.insert===(!current.existing && current.area!=="step") ? picker : undefined;
 }
 
 export function endCasePicture(model, send) {
@@ -21,7 +36,7 @@ export function endCasePicture(model, send) {
 
 export function selectCasePictureTarget(key, id, model, send, render) {
     const review = model.caseReview;
-    if (!review || model.busy || !usesPicker(editor?.area) ||
+    if (!review || model.busy || !usesPicker(editor) ||
         editor.id!==review.id || editor.revision!==review.revision) return false;
     const picker = currentPicker(review,editor);
     if (!picker?.picture || picker.picture.id!==id || !picker.choices.some(choice=>choice.key===key && choice.bounds)) return false;
@@ -39,8 +54,9 @@ function options(values, current) {
 
 function locatorFields(model, review, w, field, input) {
     const {path, values, area, existing} = editor;
-    const insert = area==="stepCheck" && !existing;
-    const locator = insert ? undefined : review.definitions.steps[path].locator;
+    const insert = area!=="step" && !existing;
+    const operation = area==="stepOperation";
+    const locator = insert || operation && editor.action?.command!==values.command ? undefined : review.definitions.steps[path].locator;
     const picker = currentPicker(review,editor);
     const normalize = value=>value.normalize("NFKC").toLocaleLowerCase();
     const terms = normalize(values.query.trim()).split(/\s+/);
@@ -65,8 +81,11 @@ function locatorFields(model, review, w, field, input) {
     const scan = Boolean(model.device && model.devices.includes(model.device));
     return `${locator ? `<div class="case-locator-current"><strong>${w("Current locator","当前定位器")}</strong><code>${h(locator)}</code>
         ${matchText ? `<small>${h(matchText)}</small>` : ""}
-        ${area==="stepCheck" && values.target!=="keep" ? actionButton(w("Keep current locator","保留当前定位器"),
+        ${area!=="step" && values.target!=="keep" ? actionButton(w("Keep current locator","保留当前定位器"),
             {quiet:true,attrs:{"data-bdd":"keep"}}) : ""}</div>` : ""}
+        ${pick ? `<div class="case-locator-current case-locator-chosen"><strong>${h((insert ? w("Selected control","已选控件") : w("Replacement locator","替换为"))+" · "+pick.label)}</strong><code>${h(pick.locator)}</code></div>` : ""}
+        ${operation && values.command==="scroll" ? actionButton(w("Use the page’s scroll area","使用页面滚动区域"),
+            {quiet:true,attrs:{"data-bdd":"auto","aria-pressed":values.target==="auto"}}) : ""}
         <div class="case-target-head">${picker?.picture ? "" : `<p class="muted">${scan ? w("Open the page containing the target control.","先打开目标控件所在的页面。") :
             w("Connect a phone to read controls from its current page.","连接手机后，就可以读取当前页面的控件。")}</p>`}
         ${actionButton(picker?.picture ? w("Cancel screen selection","取消画面选取") : w("Pick on screen","在画面中选取"),
@@ -79,7 +98,6 @@ function locatorFields(model, review, w, field, input) {
             picker?.live ? `<p class="muted">${w("No suitable visible controls were found on this page.","当前页没有找到可以执行这一步的可见控件。")}</p>` : ""}
         ${found.length>shown.length ? `<small class="muted">${w(`Showing ${shown.length} of ${found.length}. Refine the search to see other controls.`,
             `显示 ${shown.length} 个，共 ${found.length} 个。可缩小搜索范围。`)}</small>` : ""}
-        ${pick ? `<div class="case-locator-current"><strong>${h((insert ? w("Selected control","已选控件") : w("Replacement locator","替换为"))+" · "+pick.label)}</strong><code>${h(pick.locator)}</code></div>` : ""}
         <details id="bdd-manual" ${values.target==="manual"?"open":""}><summary>${w("Enter a locator manually","手动输入定位条件")}</summary>
         ${field(w("Match by","匹配方式"),`<select id="bdd-locator-field" data-bdd-field="locatorField">${options(choices,values.locatorField)}</select>`)}
         ${field(w("Exact value","精确值"),input("controlId",values.controlId,'maxlength="256" autocomplete="off"'))}</details>`;
@@ -105,6 +123,55 @@ function checkFields(w, values, protectedValue, field, input) {
             `<p class="muted">${w("Leave the value empty to keep the current text.","留空可保留现有预期文字。")}</p>` : "");
 }
 
+function inputTextFields(w, values, field, input, required) {
+    const change = !required ? `<label class="case-inline-field"><input type="checkbox" data-bdd-field="replaceInput"
+        ${values.replaceInput ? "checked" : ""}>${w("Replace saved text","替换已保存的输入内容")}</label>` : "";
+    if (!required && !values.replaceInput) return change;
+    const text = field(w("Text to enter","输入内容"),input("text",values.text,
+        'type="'+(values.revealInput?"text":"password")+'" autocomplete="off" spellcheck="false" maxlength="4096"'));
+    return change+text+`<label class="case-inline-field"><input type="checkbox" data-bdd-field="revealInput"
+        ${values.revealInput?"checked":""}>${w("Show entered text","显示输入内容")}</label>`;
+}
+
+function operationFields(model, review, w, field, input) {
+    const {action,existing,values} = editor, {command} = values;
+    const choices = (action?.choices || review.definitions.commands).map(name=>[name,w(...actions[name])]);
+    const select = (key,items)=>`<select id="bdd-${key}" data-bdd-field="${key}">${options(items,values[key])}</select>`;
+    const actionField = field(w("Action","操作"),select("command",choices));
+    let parameters = "";
+    if (command==="fill") parameters = inputTextFields(w,values,field,input,!existing || action?.command!=="fill");
+    if (command==="scroll") parameters = field(w("Direction","方向"),
+        select("direction",Object.entries(directions).map(([name,label])=>[name,w(...label)])));
+    if (command==="open") parameters = `<div class="case-editor-fields">${field(w("App bundle name","应用包名"),
+        input("app",values.app,'required maxlength="256"'))}${field(w("Ability (optional)","Ability（可选）"),
+        input("ability",values.ability,'maxlength="256"'))}</div>`;
+    if (command==="find") parameters = field(w("Find text","查找文字"),input("queryText",values.queryText,'required maxlength="4096"'));
+    if (command==="wait") parameters = `<div class="case-editor-fields">${checkFields(w,values,
+        action?.command==="wait" && action.keepExpected,field,input)}</div>`;
+    const timeout = !["find","observe"].includes(command) ? field(w("Timeout in milliseconds (optional)","超时毫秒数（可选）"),
+        input("timeout",values.timeout,'type="number" min="1" max="60000" step="1"')) : "";
+    const timing = command==="wait" || !timeout ? timeout :
+        `<details id="bdd-action-timing"><summary>${w("Timeout","超时设置")}</summary>${timeout}</details>`;
+    return actionField+parameters+(usesPicker(editor) ? locatorFields(model,review,w,field,input) : "")+timing;
+}
+
+function gestureFields(w, field, input) {
+    const {gesture,values} = editor;
+    const names = {x:w("Start X","起点 X"),y:w("Start Y","起点 Y"),toX:w("End X","终点 X"),toY:w("End Y","终点 Y"),
+        velocity:w("Speed (px/s)","速度（像素/秒）")};
+    const coordinates = Object.keys(gesture.fields).map(key=>{
+        const finger = /^finger([12])-(\w+)$/.exec(key);
+        const label = finger ? w("Finger ","手指 ")+finger[1]+" · "+names[finger[2]] : names[key];
+        const velocity = key==="velocity";
+        return field(label,`<input id="bdd-${key}" type="number" min="${velocity?200:0}" max="${velocity?40000:2147483647}"
+            step="1" required data-bdd-field="coordinate" data-coordinate="${key}" value="${h(values.coordinates[key])}">`);
+    }).join("");
+    return `<strong>${h(w(...(gestures[gesture.kind] || [gesture.kind,gesture.kind])))}</strong>`+
+        (coordinates ? `<div class="case-editor-fields">${coordinates}</div>` : "")+
+        (gesture.kind==="typeText" ? inputTextFields(w,values,field,input,false) : "")+
+        field(w("Delay before this step (ms)","执行前间隔（毫秒）"),input("delay",values.delay,'type="number" min="0" max="2147483647" step="1" required'));
+}
+
 function editForm(model, review, w, blocked) {
     if (!editor) return "";
     const {area, values} = editor;
@@ -117,9 +184,11 @@ function editForm(model, review, w, blocked) {
         fields = field(w("Step name","步骤名称"),input("name",values.name,`maxlength="120" placeholder="${h(editor.defaultName)}"`)) +
             field(w("Group name (optional)","分组名称（可选）"),input("group",values.group,'maxlength="120"')) +
             roleFields(w,editor.roles,values.role);
-    } else if (area === "stepText") {
-        fields = field(w("New text","新输入内容"),input("text",values.text,'type="password" autocomplete="off" maxlength="4096"'));
-    } else if (usesPicker(area)) {
+    } else if (area==="stepOperation") {
+        fields = operationFields(model,review,w,field,input);
+    } else if (area==="stepGesture") {
+        fields = gestureFields(w,field,input);
+    } else if (usesPicker(editor)) {
         fields = locatorFields(model,review,w,field,input);
         if (area==="stepCheck") fields = roleFields(w,editor.roles,values.role) + fields + checkFields(w,values,editor.protectedValue,field,input);
     } else {
@@ -130,9 +199,9 @@ function editForm(model, review, w, blocked) {
         const custom = values.target === "manual" ? field(w("Control ID","控件 ID"),input("controlId",values.controlId,'maxlength="256" required')) : "";
         fields = target + custom + checkFields(w,values,editor.protectedValue,field,input);
     }
-    const canApply = !usesPicker(area) || values.target==="keep" || (values.target === "manual" ? values.controlId.trim() :
+    const canApply = !usesPicker(editor) || ["keep","auto"].includes(values.target) || (values.target === "manual" ? values.controlId.trim() :
         currentPicker(review,editor)?.choices.some(item=>item.key===values.target));
-    const variant = area === "name" ? " case-rename" : usesPicker(area) ? " case-locator-editor" : "";
+    const variant = area === "name" ? " case-rename" : usesPicker(editor) ? " case-locator-editor" : "";
     return `<form class="case-editor${variant}" id="bdd-editor" data-bdd-form>
         <fieldset ${blocked ? "disabled" : ""}>${fields}
         <div class="toolbar"><button id="bdd-apply" type="submit" class="button vscode-button primary" ${canApply?"":"disabled"}>${area==="name"&&review.edit&&!review.dirty?w("Save","保存"):w("Apply","应用")}</button>
@@ -150,19 +219,19 @@ export function caseEditorClick(control, model, send, render) {
         return true;
     }
     if (review.organization?.working) return true;
-    if (["pick","keep"].includes(action) && usesPicker(editor?.area)) {
-        editor.values.target = action==="keep" ? "keep" : control.dataset.target;
+    if (["pick","keep","auto"].includes(action) && usesPicker(editor)) {
+        editor.values.target = action==="pick" ? control.dataset.target : action;
         render();
         return true;
     }
-    if (["scan","picture"].includes(action) && usesPicker(editor?.area)) {
+    if (["scan","picture"].includes(action) && usesPicker(editor)) {
         if (action==="picture" && currentPicker(review,editor)?.picture) {
             endCasePicture(model,send);
             return true;
         }
         editor.values.query = "";
-        editor.values.target = editor.area==="stepCheck" && editor.existing ? "keep" : "";
-        send({type:"caseTargets",...request,area:editor.area,path:editor.path,add:!editor.existing,live:true,pick:action==="picture"});
+        if (!["keep","auto","manual"].includes(editor.values.target)) editor.values.target = defaultTarget(editor);
+        requestTargets(editor,send,{live:true,pick:action==="picture"});
         return true;
     }
     if (action === "cancel") {
@@ -189,31 +258,63 @@ export function caseEditorClick(control, model, send, render) {
     const roles = area==="stepCheck" ? ["Then","Given"] : step?.roles;
     endCasePicture(model,send);
     editor = {...request,area,path,index,existing,roles,defaultName:control.dataset.stepDefault,protectedValue:check?.protectedValue,
+        action:existing ? step?.action : undefined,gesture:step?.gesture,hasLocator:Boolean(step?.locator),
         values:{name:area==="name" ? review.name : step?.name || "",group:step?.group || "",query:"",locatorField:"id",
             role:area==="stepCheck" && !existing ? "Then" : step?.role,
-            target:area==="step" ? "" : existing ? "keep" : usesPicker(area) ? "" : "manual",
-            controlId:"",property:check?.property || "visible",expected:check?.expected ?? "true",text:""}};
+            target:area==="step" ? "" : existing ? "keep" : area==="stepCheck" ? "" : "manual",
+            controlId:"",property:check?.property || "visible",expected:check?.expected ?? "true",text:"",replaceInput:false,
+            coordinates:{...step?.gesture?.fields},delay:step?.gesture?.delay}};
+    if (area==="stepOperation") setCommand(editor,editor.action?.command || "press");
     render();
-    const field = usesPicker(area) ? document.querySelector("#bdd-pick-screen:enabled, #bdd-query, #bdd-scan:enabled, #bdd-manual > summary") :
+    const field = area==="stepOperation" ? document.getElementById("bdd-command") : usesPicker(editor) ?
+        document.querySelector("#bdd-pick-screen:enabled, #bdd-query, #bdd-scan:enabled, #bdd-manual > summary") :
         document.querySelector("#bdd-editor input, #bdd-editor select");
     field?.focus();
     if (area === "name" || area === "stepName") field?.select();
-    if ((["start","goal"].includes(area) && !review.targets?.[area]) || (usesPicker(area) && !currentPicker(review,editor)))
-        send({type:"caseTargets",...request,area,path,add:!existing});
+    if ((["start","goal"].includes(area) && !review.targets?.[area]) || (usesPicker(editor) && !currentPicker(review,editor)))
+        requestTargets(editor,send);
     return true;
 }
 
-export function caseEditorInput(field, render) {
+function defaultTarget(current) {
+    if (current.area==="stepOperation") {
+        if (current.hasLocator && current.action?.command===current.values.command) return "keep";
+        return current.values.command==="scroll" ? "auto" : "";
+    }
+    return current.area==="stepCheck" && current.existing ? "keep" : "";
+}
+
+function setCommand(current, command) {
+    const saved = current.action?.command===command ? current.action : undefined;
+    Object.assign(current.values,{command,direction:saved?.direction || "down",app:saved?.app || "",ability:saved?.ability || "",
+        timeout:saved?.timeout ?? "",queryText:saved?.queryText || "",property:saved?.property || "visible",
+        expected:saved?.expected ?? "true",text:"",replaceInput:command==="fill" && !saved,revealInput:false,
+        query:"",controlId:"",locatorField:"id"});
+    current.values.target = defaultTarget(current);
+}
+
+export function caseEditorInput(field, model, send, render) {
     const key = field.dataset.bddField;
     if (!key || !editor) return false;
     if (field.type==="radio" && !field.checked) return true;
     const value = field.type === "checkbox" ? field.checked : field.value;
+    if (key==="coordinate") {
+        editor.values.coordinates[field.dataset.coordinate] = value;
+        return true;
+    }
     if (editor.values[key] === value) return true;
+    if (key==="command" && editor.area==="stepOperation") {
+        endCasePicture(model,send);
+        setCommand(editor,value);
+        render();
+        if (usesPicker(editor)) requestTargets(editor,send);
+        return true;
+    }
     editor.values[key] = value;
     if (key === "property") editor.values.expected = value === "text" ? "" : "true";
-    const manual = usesPicker(editor.area) && ["controlId","locatorField"].includes(key);
+    const manual = usesPicker(editor) && ["controlId","locatorField"].includes(key);
     if (manual) editor.values.target = "manual";
-    if (["property","target","query"].includes(key) || manual) render();
+    if (["property","target","query","replaceInput","revealInput"].includes(key) || manual) render();
     return true;
 }
 
@@ -226,14 +327,20 @@ export function caseEditorSubmit(event, model, send) {
     }
 }
 
+export function stepEditArea(definition) {
+    return definition.action ? "stepOperation" : definition.gesture ? "stepGesture" :
+        definition.check ? "stepCheck" : definition.locator ? "step" : "stepName";
+}
+
 export function caseStepActions(step, definition, edit, w) {
     if (!definition) return "";
     const change = (action,label)=>actionButton(label,{attrs:{"data-type":"caseStepAction","data-step-action":action,"data-case-path":step.path}});
-    return edit(w("Edit step details…","编辑步骤信息…"),"stepName",{path:step.path,defaultName:step.text}) +
-        (definition.check ? edit(w("Edit check…","编辑检查…"),"stepCheck",{path:step.path}) :
-            definition.locator ? edit(w("Replace locator…","更换定位器…"),"step",{path:step.path}) : "") +
-        (definition.replaceText ? edit(w("Change entered text…","修改输入内容…"),"stepText",{path:step.path}) : "") +
-        (definition.insertCheck ? edit(w("Insert a check after…","在此后添加检查…"),"stepCheck",{path:step.path,add:true}) : "") +
+    const main = stepEditArea(definition), context = {path:step.path,defaultName:step.text};
+    return edit(w("Edit step…","编辑步骤…"),main,{...context,primaryStep:true}) +
+        (main!=="stepName" ? edit(w("Name and BDD role…","名称和 BDD 角色…"),"stepName",context) : "") +
+        (definition.action && definition.locator ? edit(w("Replace locator…","更换定位器…"),"step",context) : "") +
+        (definition.insertCheck ? edit(w("Insert an action after…","在此后添加操作…"),"stepOperation",{...context,add:true}) +
+            edit(w("Insert a check after…","在此后添加检查…"),"stepCheck",{...context,add:true}) : "") +
         change("duplicate",w("Duplicate step","复制步骤")) + (definition.removable ? change("remove",w("Delete step","删除步骤")) : "");
 }
 
@@ -246,11 +353,11 @@ export function caseReviewView(model,language,runSummary="") {
     const button = (type,label,extra={},primary=false)=>actionButton(label,{primary,disabled:model.busy ||
         (type==="caseSave" && (Boolean(editor) || (review.edit && !review.dirty))) || (type==="caseCancel" && review.pendingSave),
         attrs:{"data-type":type,"data-id":review.id,...extra}});
-    const edit = (label,area,{index,path,add,defaultName,stepLabel}={})=>actionButton(label,{quiet:true,
+    const edit = (label,area,{index,path,add,defaultName,stepLabel,primaryStep}={})=>actionButton(label,{quiet:true,
         className:stepLabel ? "case-value case-step-name" : "",
         disabled:editingDisabled,
         attrs:{"data-bdd":add ? "add" : "edit","data-area":area,"data-index":index,"data-path":path,"data-step-default":defaultName,
-            "data-order-hit":stepLabel ? "" : undefined}});
+            "data-order-hit":stepLabel ? "" : undefined,"data-step-editor":primaryStep ? "" : undefined}});
     const sources = {recording:w("Recording","录制"),exploration:w("AI exploration","AI 探索"),workflow:w("Workflow file","流程文件")};
     const outcomes = {
         observed:w("The original run recorded these actions.","原始记录已确认这些操作。"),
@@ -267,12 +374,12 @@ export function caseReviewView(model,language,runSummary="") {
             "可以先保存草稿用于回放。pytest 执行器要求设置起始条件和最终断言。") : "";
     const form = editForm(model,review,w,model.busy);
     const editingStep = path=>stepAreas.includes(editor?.area) && editor?.path === path;
-    const insertingCheck = editor?.area==="stepCheck" && !editor.existing;
+    const inserting = ["stepCheck","stepOperation"].includes(editor?.area) && !editor.existing;
     const renderRow = (text,{area,index,path,step}) => {
         const editable = area === "step" ? review.definitions?.steps[path] : review.definitions?.[area]?.[index];
         if (!editable) return;
-        if (area === "step") return editingStep(path) && !insertingCheck ? form : caseStepLabel(text,step,
-            edit(step.name || text,"stepName",{path,defaultName:text,stepLabel:true}));
+        if (area === "step") return editingStep(path) && !inserting ? form : caseStepLabel(text,step,
+            edit(step.name || text,stepEditArea(editable),{path,defaultName:text,stepLabel:true}));
         return editor?.area === area && editor.index === index ? form : `<button type="button" class="case-value" data-bdd="edit" data-area="${area}"
             data-index="${index}" data-path="${h(path)}" ${editingDisabled?"disabled":""}>${h(text)}</button>`;
     };
@@ -307,7 +414,7 @@ export function caseReviewView(model,language,runSummary="") {
         ${status && (!review.edit || issue!=="gestures") ? `<p class="case-review-note">${h(status)}</p>` : ""}
         ${organizationNote ? `<p class="case-review-note" role="status">${h(organizationNote)}</p>` : ""}
         ${caseBddView(review.bdd,language,{renderRow,boundaryEditor,tools,coordinates:issue==="gestures",
-            renderAfterStep:step=>editingStep(step.path) && (step.branches || insertingCheck) ? form : "",
+            renderAfterStep:step=>editingStep(step.path) && (step.branches || inserting) ? form : "",
             stepActions:!editor && !editingDisabled ? step=>caseStepActions(step,review.definitions.steps[step.path],edit,w) : undefined,
             reorder:!editor && !editingDisabled})}</section>`;
 }
