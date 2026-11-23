@@ -1,5 +1,19 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.21
+
+- Diagnose failures with the saved failing page, preceding step, a prior passing run, and relevant local HTTP errors.
+- Review, verify, and apply grounded locator replacements or page readiness checks from the failure report.
+
+## 0.20.20
+
+- Use case intent, recorded page context, and existing checks when suggesting BDD step names, groups, and roles.
+- Pick a replacement locator directly from the phone preview while editing a step.
+
+## 0.20.19
+
+- Open the workbench from the phone icon in the Explorer's project toolbar.
+
 ## 0.20.18
 
 - Open the workbench from the status bar and keep the selected VS Code sidebar in place.

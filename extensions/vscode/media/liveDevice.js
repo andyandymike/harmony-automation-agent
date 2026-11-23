@@ -93,7 +93,7 @@ function status() {
         button.title = coordinateOnly ? t.recordingGestureOnly : button.id === "recents" ? t.stationRecentsHelp : "";
     }
     keyboard.disabled = disabled && textForm.hidden;
-    byId("phone-controls").hidden = !state.connected;
+    byId("phone-controls").hidden = !state.connected || state.casePicking;
     updateKeyboard();
     byId("phone-text-help").textContent = recordingControls ? t.stationControlTextHelp :
         recordingHere ? t.stationRecordedTextHelp : t.stationPhoneTextHelp;
@@ -104,6 +104,7 @@ function status() {
     buttonText("record", state.recording ? t.finish : t.beginRecording);
     record.title = state.recording ? t.screenCounter.replace("{n}", state.steps) : "";
     byId("live-preview").dataset.recording = String(state.recording);
+    byId("preview-actions").hidden = state.casePicking;
     byId("toggle").disabled = !state.connected || state.picking;
     buttonText("toggle", state.error ? t.liveRetry : state.paused ? t.liveResume : t.livePause);
     byId("toggle").dataset.play = String(Boolean(state.paused || state.error));

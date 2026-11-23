@@ -5,7 +5,7 @@ const path = require("node:path");
 const {randomUUID} = require("node:crypto");
 const {isDeepStrictEqual} = require("node:util");
 const {createBdd, readCaseMetadata} = require("./caseLibrary");
-const {maxSteps, title, stepRoles, roleOverride, stepEntries, restorePresentation, storePresentation, entriesForOrganization,
+const {maxSteps, title, stepRoles, roleOverride, stepEntries, restorePresentation, storePresentation, stepEvidence, pageCue, entriesForOrganization,
     organizationPrompt, parseOrganization} = require("./casePresentation");
 const {stepLocator, canonicalLocator, describeLocator, observationsForStep, manualLocator} = require("./caseLocators");
 const {deviceRecordingFormat, moveListItem} = require("./model");
@@ -41,14 +41,19 @@ function caseDefinitions(plan, presentation) {
     const steps = Object.fromEntries(entries.map(({path,step,siblings})=>{
         const locator = stepLocator(step);
         const roles = controls ? stepRoles(step) : [];
-        const display = presentation?.get(step);
+        const {name,group,role} = presentation?.get(step) || {};
         const check = editableCheck(step.assert);
         const replaceText = step.command === "fill" && typeof step.input?.text === "string";
-        return [path,{...display, roles, role:display?.role || roles[0], removable:siblings>1 || /\.else\[\d+\]$/.test(path),
+        return [path,{name,group,roles,role:role || roles[0],removable:siblings>1 || /\.else\[\d+\]$/.test(path),
             insertCheck:controls && entries.length<maxSteps && !step.stop && !step.yield,
             ...(locator && {locator:describeLocator(locator.owner[locator.field])}), ...(check && {check}), ...(replaceText && {replaceText:true})}];
     }));
     return {start:conditions("preconditions"),goal:conditions("goals"),steps};
+}
+
+function setStepPresentation(candidate, step, display) {
+    if (display.name || display.group || display.role || display.evidence) candidate.presentation.set(step,display);
+    else candidate.presentation.delete(step);
 }
 
 async function canEditCase(uri, entry) {
@@ -98,8 +103,8 @@ class CaseAuthoring {
                 throw new Error(this.words("Remove unsupported gestures before saving a case.", "请先移除无法回放的手势，再保存用例。"));
             const source = draft.originAI ? "exploration" : "recording";
             const name = draft.originAI ? this.words("AI exploration","AI 探索") : this.words("Recording","录制用例");
-            this.begin({source, origin:{outcome:"observed"}, plan, name,
-                observedLabels:Object.fromEntries(draft.steps.map((step,i)=>[`steps[${i}]`,step.label])),
+            this.begin({source, origin:{outcome:"observed"}, plan, name, purpose:draft.goal,
+                stepEvidence:Object.fromEntries(draft.steps.map((step,i)=>[`steps[${i}]`,{...step.evidence,control:step.label}])),
                 recording:draft, nodes:side=>side==="start"?draft.start:draft.end});
             return;
         }
@@ -159,8 +164,12 @@ class CaseAuthoring {
             throw new Error(this.words("No executable steps are available.", "还没有可执行的步骤。"));
         const state = this.bench.state;
         const plan = structuredClone(candidate.plan);
-        this.candidate = {...candidate, plan, presentation:restorePresentation(plan,candidate.presentationData),
-            observedLabels:new Map(Array.from(stepEntries(plan.steps),({path,step})=>[step,candidate.observedLabels?.[path]])),
+        const presentation = restorePresentation(plan,candidate.presentationData);
+        for (const {path,step} of stepEntries(plan.steps)) {
+            const evidence = stepEvidence(candidate.stepEvidence?.[path]);
+            if (evidence) presentation.set(step,{...presentation.get(step),evidence});
+        }
+        this.candidate = {...candidate,plan,presentation,
             group:candidate.group && structuredClone(candidate.group),
             id:randomUUID(), revision:0, targets:{}, originalName:candidate.name, name:candidate.edit ? candidate.name : suggestedName(candidate.name),
             previousTool:state.tool};
@@ -174,8 +183,9 @@ class CaseAuthoring {
             values.map(({label},index)=>({label,key:String(index)}))]));
         const picker = c.stepTargets;
         const stepTargets = picker && (!picker.device || picker.device === this.bench.state.device) ? {
-            path:picker.path, insert:picker.insert, matches:picker.matches, live:Boolean(picker.device),
-            choices:picker.choices.map(({label,source,detail,selector},index)=>({label,source,detail,key:String(index),locator:describeLocator(selector)})),
+            path:picker.path, insert:picker.insert, matches:picker.matches, live:Boolean(picker.device), picture:picker.picture,
+            choices:picker.choices.map(({label,source,detail,selector,bounds},index)=>({label,source,detail,key:String(index),
+                locator:describeLocator(selector),...(picker.picture && bounds && {bounds})})),
         } : undefined;
         this.bench.state.caseReview = {id:c.id,revision:c.revision,name:c.name,source:c.source,origin:c.origin,groupName:c.group?.name,
             issue:readiness(plan),bdd:createBdd(plan,this.bench.language,c.group,c.presentation),added:c.added,timingUnknown:c.timingUnknown,edit:Boolean(c.edit),
@@ -192,11 +202,11 @@ class CaseAuthoring {
         if (!stay && c?.previousTool && this.bench.state.tool === "recordings") this.bench.state.tool = c.previousTool;
     }
 
-    async loadTargets({id, revision, area, path, live, add}) {
+    async loadTargets({id, revision, area, path, live, add, pick}) {
         const c = this.candidate;
         if (!c || c.id !== id || c.uri || (revision !== undefined && c.revision !== revision)) return;
         if (area === "step" || area === "stepCheck") {
-            if (c.revision === revision) await this.loadStepTargets(c,path,live === true,area==="stepCheck" && add===true);
+            if (c.revision === revision) await this.loadStepTargets(c,path,live===true,area==="stepCheck" && add===true,pick===true);
             return;
         }
         if (!["start","goal"].includes(area) || c.targets[area]) return;
@@ -216,7 +226,7 @@ class CaseAuthoring {
         this.update();
     }
 
-    async loadStepTargets(c, path, live, insert) {
+    async loadStepTargets(c, path, live, insert, pick) {
         const location = stepLocation(c.plan,path);
         const step = location?.list?.[location.index];
         const anchor = stepLocator(step);
@@ -224,26 +234,51 @@ class CaseAuthoring {
         if (!step || (!locator && !insert) || (insert && c.plan.format===deviceRecordingFormat)) return;
         const bench = this.bench;
         const revision = c.revision;
-        const current = () => this.candidate === c && c.revision === revision;
+        const panel = bench.panel;
+        const current = () => this.candidate === c && c.revision === revision && bench.panel===panel;
         const sources = [];
-        let device;
+        let device, picture, page;
         if (live) {
             device = bench.state.device;
             if (!device || !bench.state.devices.includes(device)) throw new Error(bench.text.selectDevice);
-            const read = () => bench.observe(() => current() && bench.state.device === device,true);
+            const onDevice = () => current() && bench.state.device === device && bench.state.devices.includes(device);
+            const read = async()=>{
+                await bench.observe(onDevice,true);
+                if (!onDevice()) return;
+                page = bench.state.page;
+                if (!page || !pick) return;
+                const capture = await bench.agent.call("screenshot",{session:bench.session});
+                if (!onDevice()) return;
+                const src = bench.image(capture.path);
+                if (!src) throw new Error(this.words("The page image could not be displayed.","无法显示当前页面的截图。"));
+                picture = {id:randomUUID(),src,device};
+            };
             if (bench.livePanel) await bench.livePanel.withDeviceOperation(read);
             else await read();
             if (!current() || bench.state.device !== device) return;
-            const page = bench.state.page;
             if (page) sources.push({nodes:page.nodes, source:"live", complete:page.complete && !page.truncated});
         }
         if (c.nodes) {
             c.recordedNodes ??= Promise.all([c.nodes("start"),c.nodes("goal")]);
             for (const nodes of await c.recordedNodes) if (nodes?.length) sources.push({nodes,source:"recorded"});
         }
-        if (!current() || (device && bench.state.device !== device)) return;
+        if (!current() || (device && (bench.state.device !== device || !bench.state.devices.includes(device)))) return;
         const bundle = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
-        c.stepTargets = {path,insert,device,...observationsForStep(locator,sources,bundle)};
+        c.stepTargets = {path,insert,device,picture,pageCue:pageCue(page),...observationsForStep(locator,sources,bundle)};
+        this.update();
+    }
+
+    endPick(message) {
+        const c = this.candidate, picture = c?.stepTargets?.picture;
+        if (!picture || (message && (c.id!==message.id || c.revision!==message.revision || picture.id!==message.picture))) return false;
+        c.stepTargets.picture = undefined;
+        this.update();
+        return true;
+    }
+
+    invalidateLiveTargets() {
+        if (!this.candidate?.stepTargets?.device) return;
+        this.candidate.stepTargets = undefined;
         this.update();
     }
 
@@ -261,12 +296,14 @@ class CaseAuthoring {
 
     stepTarget(c, path, message, current, {insert=false, scope}={}) {
         const picker = c.stepTargets;
-        const selected = picker?.path===path && picker.insert===insert && (!picker.device || picker.device===this.bench.state.device) &&
+        const state = this.bench.state;
+        const selected = picker?.path===path && picker.insert===insert &&
+            (!picker.device || (picker.device===state.device && state.devices.includes(picker.device))) &&
             /^\d+$/.test(message.target || "") && picker.choices[Number(message.target)];
         const selector = message.target === "keep" ? current :
             message.target === "manual" ? manualLocator(message.locatorField,message.controlId,scope) : selected?.selector;
         if (!selector) throw new Error(this.words("Choose a control from the page, or enter an exact locator.","请选中页面上的控件，或输入准确的定位条件。"));
-        return {selector:structuredClone(selector),label:selected?.label};
+        return {selector:structuredClone(selector),evidence:stepEvidence({control:selected?.label,from:selected?.source==="live" ? picker.pageCue : undefined})};
     }
 
     expectedValue(property, expected, prior, keepProtected) {
@@ -285,9 +322,9 @@ class CaseAuthoring {
         if (!["Given","Then"].includes(role)) return false;
         const anchor = stepLocator(step);
         const scope = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
-        const {selector,label} = this.stepTarget(c,path,target,prior?.selector,{insert,scope});
+        const chosen = this.stepTarget(c,path,target,prior?.selector,{insert,scope});
         const equals = this.expectedValue(property,expected,prior,check?.protectedValue && target.target==="keep");
-        const assertion = {...prior,selector,property,equals};
+        const assertion = {...prior,selector:chosen.selector,property,equals};
         const edited = insert ? {assert:assertion} : step;
         if (insert) {
             location.list.splice(location.index+1,0,edited);
@@ -297,10 +334,10 @@ class CaseAuthoring {
         const name = insert ? "" : display?.name || "";
         const group = display?.group || "";
         const override = roleOverride(stepRoles(edited),role);
-        if (name || group || override) c.presentation.set(edited,{name,group,...(override && {role:override})});
-        else c.presentation.delete(edited);
-        c.presentationChanged ||= override !== (insert ? undefined : display?.role);
-        if (label || target.target!=="keep") c.observedLabels.set(edited,label);
+        const previousEvidence = insert ? undefined : display?.evidence;
+        const evidence = target.target==="keep" ? previousEvidence : chosen.evidence;
+        setStepPresentation(c,edited,{name,group,role:override,evidence});
+        c.presentationChanged ||= override !== (insert ? undefined : display?.role) || !isDeepStrictEqual(evidence,previousEvidence);
         c.stepTargets = undefined;
         c.added = true;
         return true;
@@ -324,22 +361,26 @@ class CaseAuthoring {
                 const roles = c.plan.format===deviceRecordingFormat ? [] : stepRoles(step);
                 if (role && !roles.includes(role)) return;
                 const override = role ? roleOverride(roles,role) : previous?.role;
-                if (label || group || override) c.presentation.set(step,{name:label,group,...(override && {role:override})});
-                else c.presentation.delete(step);
+                setStepPresentation(c,step,{name:label,group,role:override,evidence:previous?.evidence});
                 c.presentationChanged ||= label !== (previous?.name || "") || group !== (previous?.group || "") || override !== previous?.role;
             } else if (area === "stepCheck") {
                 if (!this.editStepCheck(c,location,step,path,{add,property,expected,role,...target})) return;
             } else if (area === "stepText") {
                 if (step.command !== "fill" || typeof step.input?.text !== "string" || typeof text !== "string" || text.length > 4096) return;
                 step.input.text = text;
+                const previous = c.presentation.get(step);
+                if (previous?.evidence?.to)
+                    setStepPresentation(c,step,{...previous,evidence:stepEvidence({...previous.evidence,to:undefined})});
                 c.added = true;
             } else {
                 const locator = stepLocator(step);
                 if (!locator) return;
                 const scope = canonicalLocator(locator.owner[locator.field])?.bundleName || c.bundle;
-                const {selector,label} = this.stepTarget(c,path,target,undefined,{scope});
+                const {selector,evidence} = this.stepTarget(c,path,target,undefined,{scope});
                 locator.owner[locator.field] = selector;
-                c.observedLabels.set(step,label);
+                const previous = c.presentation.get(step);
+                setStepPresentation(c,step,{...previous,evidence});
+                c.presentationChanged ||= !isDeepStrictEqual(evidence,previous?.evidence);
                 c.stepTargets = undefined;
                 c.added = true;
             }
@@ -422,9 +463,8 @@ class CaseAuthoring {
                 list.splice(index+1,0,copy);
                 const originals = [...stepEntries([step])], copies = [...stepEntries([copy])];
                 originals.forEach(({step:original},i)=>{
-                    const display = c.presentation.get(original);
-                    if (display) c.presentation.set(copies[i].step,display);
-                    c.observedLabels.set(copies[i].step,c.observedLabels.get(original));
+                    const {name,group,role} = c.presentation.get(original) || {};
+                    setStepPresentation(c,copies[i].step,{name,group,role});
                 });
                 c.removedStep = undefined;
             }
@@ -451,9 +491,10 @@ class CaseAuthoring {
         this.update();
         b.publish();
         try {
-            const rows = entriesForOrganization(c.plan,c.observedLabels);
+            const rows = entriesForOrganization(c.plan,c.presentation);
             const ask = await b.modelAsk(signal);
-            const answer = await ask(organizationPrompt(c.plan,rows,b.language),signal);
+            const answer = await ask(organizationPrompt(c.plan,rows,b.language,
+                {name:c.name,goal:c.purpose || c.origin?.label,source:c.source,outcome:c.origin?.outcome}),signal);
             signal.throwIfAborted();
             if (this.candidate !== c || c.organizationJob !== job) return;
             if (c.revision !== revision || c.uri) {
@@ -462,7 +503,7 @@ class CaseAuthoring {
                 return;
             }
             const proposed = parseOrganization(answer,rows);
-            c.presentation = new Map(steps.map(({step},i)=>[step,proposed[i]]));
+            c.presentation = new Map(steps.map(({step},i)=>[step,{...proposed[i],evidence:c.presentation.get(step)?.evidence}]));
             c.presentationChanged = true;
             c.organization = {ready:true};
             c.revision++;

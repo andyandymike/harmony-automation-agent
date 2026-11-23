@@ -12,6 +12,27 @@ function currentPicker(review, current) {
     return picker && picker.path===current.path && picker.insert===(current.area==="stepCheck" && !current.existing) ? picker : undefined;
 }
 
+export function endCasePicture(model, send) {
+    const review = model.caseReview, picture = review?.stepTargets?.picture;
+    if (!picture || model.busy) return false;
+    send({type:"caseEndPick",id:review.id,revision:review.revision,picture:picture.id});
+    return true;
+}
+
+export function selectCasePictureTarget(key, id, model, send, render) {
+    const review = model.caseReview;
+    if (!review || model.busy || !usesPicker(editor?.area) ||
+        editor.id!==review.id || editor.revision!==review.revision) return false;
+    const picker = currentPicker(review,editor);
+    if (!picker?.picture || picker.picture.id!==id || !picker.choices.some(choice=>choice.key===key && choice.bounds)) return false;
+    editor.values.query = "";
+    editor.values.target = key;
+    endCasePicture(model,send);
+    render();
+    document.getElementById("bdd-apply")?.focus();
+    return true;
+}
+
 function options(values, current) {
     return values.map(([value,label])=>`<option value="${h(value)}" ${value===current ? "selected" : ""}>${h(label)}</option>`).join("");
 }
@@ -46,8 +67,10 @@ function locatorFields(model, review, w, field, input) {
         ${matchText ? `<small>${h(matchText)}</small>` : ""}
         ${area==="stepCheck" && values.target!=="keep" ? actionButton(w("Keep current locator","保留当前定位器"),
             {quiet:true,attrs:{"data-bdd":"keep"}}) : ""}</div>` : ""}
-        <div class="case-target-head"><p class="muted">${scan ? w("Open the page containing the target control and scan it.","打开目标控件所在的页面，再读取控件。") :
-            w("Connect a phone to read controls from its current page.","连接手机后，就可以读取当前页面的控件。")}</p>
+        <div class="case-target-head">${picker?.picture ? "" : `<p class="muted">${scan ? w("Open the page containing the target control.","先打开目标控件所在的页面。") :
+            w("Connect a phone to read controls from its current page.","连接手机后，就可以读取当前页面的控件。")}</p>`}
+        ${actionButton(picker?.picture ? w("Cancel screen selection","取消画面选取") : w("Pick on screen","在画面中选取"),
+            {primary:!picker?.picture,attrs:{id:"bdd-pick-screen","data-bdd":"picture","aria-pressed":Boolean(picker?.picture)},disabled:!scan})}
         ${actionButton(picker?.live ? w("Scan again","重新读取") : w("Read current page","读取当前页控件"),
             {attrs:{id:"bdd-scan","data-bdd":"scan"},disabled:!scan})}</div>
         ${picker?.choices.length ? field(w("Search controls","搜索控件"),input("query",values.query,'type="search" autocomplete="off"')) : ""}
@@ -132,10 +155,14 @@ export function caseEditorClick(control, model, send, render) {
         render();
         return true;
     }
-    if (action === "scan" && usesPicker(editor?.area)) {
+    if (["scan","picture"].includes(action) && usesPicker(editor?.area)) {
+        if (action==="picture" && currentPicker(review,editor)?.picture) {
+            endCasePicture(model,send);
+            return true;
+        }
         editor.values.query = "";
         editor.values.target = editor.area==="stepCheck" && editor.existing ? "keep" : "";
-        send({type:"caseTargets",...request,area:editor.area,path:editor.path,add:!editor.existing,live:true});
+        send({type:"caseTargets",...request,area:editor.area,path:editor.path,add:!editor.existing,live:true,pick:action==="picture"});
         return true;
     }
     if (action === "cancel") {
@@ -145,6 +172,7 @@ export function caseEditorClick(control, model, send, render) {
             send({type:"caseCancel",id:review.id});
             return true;
         }
+        endCasePicture(model,send);
         render();
         const row = [...document.querySelectorAll("[data-bdd][data-area]")].find(el=>el.dataset.area===area &&
             !el.closest("[data-item-menu]") && (area==="name" || (stepAreas.includes(area) ? el.dataset.path===path :
@@ -159,13 +187,14 @@ export function caseEditorClick(control, model, send, render) {
     const existing = action === "edit";
     const check = area==="stepCheck" ? (existing && step?.check) : review.definitions?.[area]?.[index];
     const roles = area==="stepCheck" ? ["Then","Given"] : step?.roles;
+    endCasePicture(model,send);
     editor = {...request,area,path,index,existing,roles,defaultName:control.dataset.stepDefault,protectedValue:check?.protectedValue,
         values:{name:area==="name" ? review.name : step?.name || "",group:step?.group || "",query:"",locatorField:"id",
             role:area==="stepCheck" && !existing ? "Then" : step?.role,
             target:area==="step" ? "" : existing ? "keep" : usesPicker(area) ? "" : "manual",
             controlId:"",property:check?.property || "visible",expected:check?.expected ?? "true",text:""}};
     render();
-    const field = usesPicker(area) ? document.querySelector("#bdd-query, #bdd-scan:enabled, #bdd-manual > summary") :
+    const field = usesPicker(area) ? document.querySelector("#bdd-pick-screen:enabled, #bdd-query, #bdd-scan:enabled, #bdd-manual > summary") :
         document.querySelector("#bdd-editor input, #bdd-editor select");
     field?.focus();
     if (area === "name" || area === "stepName") field?.select();

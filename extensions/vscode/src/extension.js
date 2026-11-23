@@ -26,12 +26,13 @@ const { NetworkController } = require("./networkController");
 const { readWorkflow } = require("./workflowFile");
 const { readiness, safeCaseName, writeCase, findCase, startPytest } = require("./pytestCase");
 const { CaseLibrary, createBdd, readCaseMetadata } = require("./caseLibrary");
-const { restorePresentation } = require("./casePresentation");
+const { restorePresentation, pageCue, stepEvidence } = require("./casePresentation");
 const { CaseAuthoring, caseDefinitions, canEditCase } = require("./caseAuthoring");
 const { loadPytestRun } = require("./pytestReport");
 const { journalPath, watchRunJournal } = require("./runProgress");
 const { CaseRepair, sourceDigest } = require("./caseRepair");
 const { reviewCaseFailure } = require("./caseFailure");
+const { diagnoseCase } = require("./caseDiagnosis");
 const { workspaceTools, selectedWorkspaceTab, registerWorkbenchLauncher } = require("./workbenchTools");
 const { FlowDebugger } = require("./flowDebug");
 const { exportProblemClip, openProblemClip } = require("./problemExport");
@@ -50,7 +51,7 @@ const toolMessages = new Map([
     ["openRecordingWorkspace", "recordings"], ["inspect", "inspect"], ["inspectDevice", "inspect"], ["networkOpen", "network"],
 ]);
 const localCaseActions = new Set(["openPlan", "editPlan", "caseOpen", "caseReview", "caseDuplicate", "caseRemove", "caseRestore",
-    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest"]);
+    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest", "repairApply"]);
 
 class Workbench {
     constructor(context) {
@@ -89,6 +90,7 @@ class Workbench {
             if (this.deviceLookup?.runtime) this.cancelDeviceLookup();
             this.state.device = undefined;
             this.state.devices = [];
+            this.caseAuthoring.invalidateLiveTargets();
             this.state.deviceLookupError = undefined;
             this.state.page = this.state.liveImage = undefined;
             this.state.actions = [];
@@ -241,6 +243,8 @@ class Workbench {
             } else if (message.type === "caseOrganizeCancel") {
                 if (message.id) this.caseAuthoring.stopOrganizing(message.id);
                 this.publish();
+            } else if (message.type === "caseEndPick") {
+                if (this.caseAuthoring.endPick(message)) this.publish();
             } else {
                 await this.perform(() => this.dispatch(message), {runtime:!localCaseActions.has(message.type) || Boolean(message.fromRun) ||
                     (message.type === "caseTargets" && message.live === true)});
@@ -259,7 +263,7 @@ class Workbench {
             this.planWatch = this.watchedUri = undefined;
             this.cancelAI();
             this.caseAuthoring.stopOrganizing();
-            this.caseRepair.controller?.abort();
+            this.caseAuthoring.endPick();
             this.explorations.cancel("pause");
             this.flowDebugger.stop();
             this.nativeReplay?.abort();
@@ -349,11 +353,13 @@ class Workbench {
             if (!readOnly) this.state.page = this.state.liveImage = undefined;
         }
         const { signal } = controller;
+        const baseline = failure && this.baseline();
         job.done = this.perform(async () => {
             try {
-                const requestModel = await this.modelAsk(signal, () => { result.waitingForModel = "retry"; this.publish(); });
-                signal.throwIfAborted();
+                let requestModel;
                 const ask = async prompt => {
+                    requestModel ??= await this.modelAsk(signal, () => { result.waitingForModel = "retry"; this.publish(); });
+                    signal.throwIfAborted();
                     result.waitingForModel = true;
                     this.publish();
                     try {
@@ -362,14 +368,11 @@ class Workbench {
                         result.waitingForModel = false;
                     }
                 };
-                const onEvent = ({ type, text, receipt, recommendation }) => {
+                const onEvent = ({ type, text, receipt }) => {
                     if (signal.aborted) return;
                     if (type === "step") result.steps.push(text);
                     if (type === "evidence") (result.evidence ||= []).push({...receipt,text});
-                    if (type === "answer") {
-                        result.answer = text;
-                        if (recommendation) result.recommendation = recommendation;
-                    }
+                    if (type === "answer") result.answer = text;
                     this.publish();
                 };
                 const agent = kind === "diagnosis" ? {call:(...args)=>this.reportAgent(run.entry).call(...args)} :
@@ -384,7 +387,14 @@ class Workbench {
                     result.canSave = Boolean(this.aiDraft);
                     if (outcome?.status === "blocked") result.status = "blocked";
                 } else if (kind === "diagnosis") {
-                    await explainRun({ ...options, run, failure, goal: goal || this.text.aiReportTask });
+                    if (failure) {
+                        const diagnosis = await diagnoseCase({...options,run,failure,agent:entry=>this.reportAgent(entry),
+                            baseline:baseline && (()=>this.readRunView(baseline)),
+                            prepare:input=>this.caseRepair.prepare(input)});
+                        const {summary,proposed,...details} = diagnosis;
+                        Object.assign(result,{answer:summary,...details});
+                        this.caseRepair.propose(proposed);
+                    } else await explainRun({...options,run,goal:goal || this.text.aiReportTask});
                 } else if (kind === "exchange") {
                     await explainExchange({...options,controller:this.networks,id:exchangeId});
                 } else {
@@ -408,7 +418,7 @@ class Workbench {
                 if (signal.aborted) result.status = "cancelled";
                 this.aiJob = undefined;
             }
-        });
+        }, {runtime:!failure});
         return job.done;
     }
 
@@ -522,7 +532,6 @@ class Workbench {
             case "caseCancel": this.caseAuthoring.cancel(); break;
             case "caseOpen": await this.openCase(message.id); break;
             case "caseRun": await this.runCase(message); break;
-            case "repairSuggest": await this.caseRepair.suggest(message); break;
             case "repairVerify": await this.caseRepair.verify(message); break;
             case "repairApply": await this.caseRepair.apply(message); break;
             case "device": await this.selectDevice(message.device); break;
@@ -683,6 +692,7 @@ class Workbench {
         const current = () => this.deviceLookup === job && this.panel === job.panel && this.projectRuntime.current === job.runtime;
         if (!current()) return;
         this.state.devices = devices.map(device => device.id);
+        if (!this.state.devices.includes(this.state.device)) this.caseAuthoring.invalidateLiveTargets();
         await this.networks.devicesChanged(this.state.devices);
         if (!current()) return;
         if (!this.state.draft && !this.networks.activeCapture && !this.state.devices.includes(this.state.device)) {
@@ -701,6 +711,7 @@ class Workbench {
         if (this.state.draft) throw new Error(this.text.activeRecording);
         await this.detach();
         this.state.device = device;
+        this.caseAuthoring.invalidateLiveTargets();
         this.state.actions = [];
         await this.refreshInspector();
     }
@@ -803,7 +814,8 @@ class Workbench {
         this.state.actions = [{ command, label, target: selector, frame: result.afterFrameId }, ...this.state.actions].slice(0, 12);
         if (this.state.recording) {
             if (node) input.target = selector;
-            this.state.draft.steps.push({ command, input, label });
+            const evidence=stepEvidence({from:pageCue(page),to:pageCue(this.state.page)});
+            this.state.draft.steps.push({command,input,label,...(evidence && {evidence})});
         }
     }
 
@@ -1475,6 +1487,12 @@ class Workbench {
             entry.status === "passed" && (!entry.repairOf || entry.repairApplied) && this.planForEntry(entry)?.uri === this.planForEntry(current)?.uri && entry.time < current.time);
     }
 
+    async readRunView(entry) {
+        if (entry.source === "pytest") return loadPytestRun(entry);
+        const record = await this.reportAgent(entry).call("report", {run_id:entry.id,full:true});
+        return {...runView(record),entry};
+    }
+
     async compare() {
         const baseline = this.baseline();
         const run = this.state.run;
@@ -1482,8 +1500,7 @@ class Workbench {
         if (run.comparison) {
             delete run.comparison;
         } else {
-            const earlier = baseline.source === "pytest" ? await loadPytestRun(baseline) :
-                runView(await this.agent.call("report", { run_id: baseline.id, full: true }));
+            const earlier = await this.readRunView(baseline);
             run.comparison = { difference: compareRuns(run, earlier) };
         }
     }

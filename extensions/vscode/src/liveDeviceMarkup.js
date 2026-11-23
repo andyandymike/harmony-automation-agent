@@ -38,6 +38,10 @@ function liveDeviceMarkup() {
             <button type="button" id="element-pick-mode" aria-pressed="false" aria-controls="stage">${icon("inspect")}<span></span></button>
         </div>
         <div class="preview-action-bar">
+            <div id="case-pick-controls" hidden>
+                <span id="case-pick-instructions"></span>
+                <button type="button" id="case-pick-exit"></button>
+            </div>
             <div class="record-choices" id="record-choices" hidden>
                 <fieldset id="record-location"><legend id="record-location-label"></legend><div class="record-segments">
                     <label><input type="radio" name="record-location" value="preview" checked><span id="record-preview-label"></span></label>
@@ -47,7 +51,7 @@ function liveDeviceMarkup() {
                     <label><input type="radio" name="record-format" value="coordinates"><span id="record-coordinates-label"></span></label></div></fieldset>
             </div>
             <p id="record-format-note" role="status" hidden></p>
-            <div class="preview-actions">
+            <div class="preview-actions" id="preview-actions">
                 <button type="button" id="record" hidden><i class="record-start-icon" aria-hidden="true">${icon("record")}</i><i class="record-stop-icon" aria-hidden="true">${icon("stop")}</i><span></span></button>
                 <button type="button" id="toggle">${icon("pause")}<span></span></button>
             </div>

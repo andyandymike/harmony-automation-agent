@@ -1,11 +1,12 @@
 #live-device #live-preview:has(#element-view-modes:not([hidden])) { --element-modes-space: 39px; }
 #element-view-modes { display:flex; gap:3px; margin-bottom:7px; }
-#element-view-modes button {
+#case-pick-controls { display:flex; align-items:center; justify-content:space-between; gap:5px 10px; color:var(--monitor-ink); font-size:12px; }
+#element-view-modes button, #case-pick-exit {
     display:inline-flex; align-items:center; gap:5px; min-height:31px; padding:4px 7px; border:1px solid var(--line);
     border-radius:4px; color:var(--ink); background:transparent; white-space:nowrap;
 }
 #element-view-modes button[aria-pressed="true"] { border-color:var(--accent); background:var(--selected); }
-#element-view-modes button:not(:disabled):hover { background:var(--hover); }
+#element-view-modes button:not(:disabled):hover, #case-pick-exit:enabled:hover { background:var(--hover); }
 #element-picker { position:absolute; inset:var(--preview-inset); background:var(--monitor-bg); overflow:hidden; }
 #element-photo, #element-overlay { width:100%; height:100%; position:absolute; inset:0; object-fit:contain; }
 #element-photo:not([hidden]) + #element-overlay { cursor:crosshair; touch-action:none; }

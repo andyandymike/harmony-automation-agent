@@ -4,13 +4,13 @@ const failures = new Set(["failed", "rejected", "blocked", "unknown", "error", "
 const deviceErrors = new Set(["NO_DEVICE", "DEVICE_NOT_FOUND", "DEVICE_DISCONNECTED", "DEVICE_RESTARTED", "DEVICE_IDENTITY_CHANGED",
     "DEVICE_OWNED", "DEVICE_MISMATCH", "HDC_NOT_FOUND", "HDC_START_FAILED", "HDC_TIMEOUT", "HDC_COMMAND_FAILED"]);
 const pageErrors = new Set(["PRECONDITION_NOT_MET", "TARGET_NOT_ACTIONABLE", "INPUT_FOCUS_BLOCKED", "NOT_EDITABLE", "TARGET_NOT_SCROLLABLE"]);
-const runnerPhases = new Set(["collection", "setup", "teardown", "pytest"]);
+const runnerPhases = new Set(["collection", "setup", "call", "teardown", "pytest"]);
 
 function reviewCaseFailure(run) {
     if (!run?.entry || !failures.has(run.entry.status)) return;
     const index = run.steps?.findIndex(step => failures.has(step.status));
     const step = index >= 0 ? run.steps[index] : undefined;
-    const code = step ? step.errorCode : run.errorCode || run.entry.failureCode;
+    const code = step?.errorCode || run.errorCode || run.entry.failureCode;
     const phase = step ? undefined : run.pytest?.phases?.find(p => p.outcome === "failed" && runnerPhases.has(p.phase))?.phase;
     let kind = "unknown";
     if (deviceErrors.has(code)) kind = "environment";

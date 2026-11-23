@@ -74,7 +74,13 @@
 #workbench .case-failure p { margin:6px 0 0; }
 #workbench .case-failure .case-failure-context { font-weight:600; }
 #workbench .case-failure .toolbar, #workbench .case-failure details { margin-top:8px; }
-#workbench .case-failure .case-recommendation { padding:8px 0 0; border-top:1px solid var(--line); }
+#workbench .case-diagnosis { margin-top:8px; }
+#workbench .case-diagnosis > small { display:block; margin-top:5px; color:var(--muted); }
+#workbench .case-repair { margin:10px 0; padding:10px 12px; border:1px solid var(--line); border-radius:4px; overflow-wrap:anywhere; }
+#workbench .case-repair h3 { margin:0 0 6px; font-size:13px; }
+#workbench .case-repair h3 small, #workbench .case-repair dt { color:var(--muted); font-size:12px; }
+#workbench .case-repair dl { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:4px 10px; margin:0; }
+#workbench .case-repair dd { margin:0; }
 #workbench .case-summary-actions > button { min-height:26px; padding:3px 5px; color:var(--accent); }
 .case-run-picker { position:relative; min-width:0; }
 #workbench .case-run-picker summary { min-height:26px; padding:3px 5px; color:var(--muted); font-size:12px; cursor:pointer; }

@@ -8,6 +8,8 @@ const test = require("node:test");
 const {writeCase, startPytest} = require("../src/pytestCase");
 const {loadPytestRun} = require("../src/pytestReport");
 const {CaseRepair,sourceDigest} = require("../src/caseRepair");
+const {diagnoseCase} = require("../src/caseDiagnosis");
+const {reviewCaseFailure} = require("../src/caseFailure");
 const {withAuthoredTargets} = require("../src/model");
 
 const python = process.env.HARMONY_TEST_PYTHON || "python";
@@ -121,16 +123,11 @@ test("case reports retain real steps, identify framework phases and validate can
             const envelope = JSON.parse(result.stdout);
             assert.equal(envelope.success,true,JSON.stringify(envelope.error)); return envelope.data;
         }});
-        bench.modelAsk = async () => async prompt => {
-            const options = JSON.parse(prompt.split("\n").at(-1)).candidates;
-            const candidate = options.find(c=>c.selector?.id==="fixture.increment");
-            assert.ok(candidate,JSON.stringify(options));
-            return JSON.stringify({candidate:candidate.n});
-        };
         bench.setPlan = async () => {};
         bench.usePytest = async (_,options) => {
             assert.equal(await fs.readFile(workflow,"utf8"),original);
             bench.state.run = await run(options);
+            bench.state.run.entry.repairOf = options.repairOf;
             return bench.state.run.entry;
         };
         bench.refreshPlanSummary = async () => {};
@@ -148,7 +145,16 @@ test("case reports retain real steps, identify framework phases and validate can
             contents = contents.slice(0,e.range.start)+e.text+contents.slice(e.range.end);return true;
         };
         const repair = new CaseRepair(bench,vscode);
-        await repair.suggest({id:failure.entry.id});
+        const diagnosis = await diagnoseCase({run:failure,failure:reviewCaseFailure(failure),language:"en",onEvent:()=>{},
+            agent:bench.reportAgent,prepare:input=>repair.prepare(input),
+            ask:async prompt=>{
+                const {options} = JSON.parse(prompt.split("\n").at(-1));
+                const candidate = options.find(c=>c.proposed?.id==="fixture.increment");
+                assert.ok(candidate,JSON.stringify(options));
+                return JSON.stringify({summary:"The counter control has a changed ID.",next:"Verify the alternative with pytest.",
+                    recommendation:"verifyLocator",option:candidate.number,citations:["page","failure"]});
+            }});
+        repair.propose(diagnosis.proposed);
         assert.equal(bench.state.repair.proposed.id,"fixture.increment");
         assert.equal(await fs.readFile(workflow,"utf8"),original);
         await repair.verify({id:failure.entry.id});

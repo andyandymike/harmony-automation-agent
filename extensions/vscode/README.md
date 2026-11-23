@@ -6,7 +6,7 @@ Operate a connected HarmonyOS phone, inspect the controls on its current screen,
 
 ## Install
 
-Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.18` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
+Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.21` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
 
 To build from source, clone the [project repository](https://github.com/andyandymike/harmony-automation-agent), install Node.js 22+, and run the following from its root on Windows.
 
@@ -15,7 +15,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.18.vsix
+code --install-extension ./harmony-agent-workbench-0.20.21.vsix
 ```
 
 On macOS and Linux, use `.venv/bin/python` and `cd extensions/vscode`. If you already have the wheel and VSIX, use `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl` in your chosen environment and install the VSIX with **Extensions → Install from VSIX…**. Node.js is only needed to develop or build the extension.
@@ -44,7 +44,7 @@ The selected runtime supplies the CLI, Copilot MCP, workflow debugger, device pr
 
 ## Open the workbench
 
-Choose **Harmony Agent** in the bottom-left status bar to open the workbench in an editor tab. The current sidebar stays in place. The Command Palette also offers **Harmony Agent: Open Workbench**. The phone preview stays on the left as you switch between **Tests**, **Elements**, **Network**, and **AI exploration**. You can review a saved workflow or import a HAR offline. To use a phone, connect it by USB and allow HDC debugging. The workbench selects a single connected phone automatically. With several phones, choose one at the top.
+Choose the phone icon in the Explorer's project toolbar to open the workbench in an editor tab alongside the project tree. You can also use **Harmony Agent** in the bottom-left status bar or **Harmony Agent: Open Workbench** in the Command Palette. The phone preview stays on the left as you switch between **Tests**, **Elements**, **Network**, and **AI exploration**. You can review a saved workflow or import a HAR offline. To use a phone, connect it by USB and allow HDC debugging. The workbench selects a single connected phone automatically. With several phones, choose one at the top.
 
 | What you want to do | Where to go |
 |---|---|
@@ -94,11 +94,11 @@ Open **Tests** to find cases saved from a recording or AI exploration. **Open fi
 
 Select **Save as test case** while reviewing a recording, or select a reproducible route or finding in an exploration report. Review the actions and expected result before saving. Share the entire new case directory to keep the steps and their origin together. A recording with no final assertion can be saved for replay. Coordinate gestures replay using the recorded device layout.
 
-Each supported BDD role appears beside the step it describes. An assertion can follow a prerequisite directly, and another prerequisite can appear later in the case. Right-click a step and choose **Insert a check after…** to add a check at that point. Select **Organize with AI** to suggest names, groups, and roles, then review before saving. The case metadata travels with `workflow.json`.
+Each supported BDD role appears beside the step it describes. An assertion can follow a prerequisite directly, and another prerequisite can appear later in the case. Right-click a step and choose **Insert a check after…** to add a check at that point. **Organize with AI** uses the case goal, existing checks, and any recorded page context to suggest names, groups, and roles. Review the suggestions before saving. The case metadata travels with `workflow.json`.
 
-Right-click a step to duplicate, delete, reorder, or replace its locator. For a replacement, open the relevant phone page, select **Read current page**, and search for the control.
+Right-click a step to duplicate, delete, reorder, or replace its locator. For a replacement, open the relevant phone page, choose **Pick on screen**, and click the highlighted control on the left. Review the locator and choose **Apply**. **Read current page** also lets you search the list of controls. Save the case when you finish editing.
 
-Choose **Workbench** or **pytest** in the runner selector, then select **Run**. The report shows recorded step status, expected and actual values, and saved frames. **Failure review** identifies the first problem or the failed pytest phase. **Diagnose failure with AI** uses saved evidence to suggest whether to keep the case, verify a locator on a copy, or review the steps and expected result. For a confirmed locator change, open **View failing step** and choose **Find a replacement locator with AI**. Run the suggested change on a copy. When the copy passes the original final assertions, **Apply verified change** updates the case. Both runs remain in the history.
+Choose **Workbench** or **pytest** in the runner selector, then select **Run**. The report shows recorded step status, expected and actual values, and saved frames. **Diagnose failure with AI** reads the first failure, the preceding step, and any available passing run and local HTTP errors. The failure card shows the finding, next action, and any proposed edit. It can replace a locator grounded in the recorded controls, or wait for a target when the evidence shows a loading page. Choose **Run a copy with this change** to use the original runner. **Apply to case** becomes available after the copy executes the changed step and passes the original final assertions. Both runs remain in the history.
 
 ## Add a recording to pytest
 

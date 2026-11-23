@@ -28,7 +28,9 @@ class LiveDevicePanel {
             this.paused = false;
         }
         const connected = state.devices.includes(this.device);
-        const picking = connected && state.tool === "inspect" && state.elements?.picking === true;
+        const casePicture = state.caseReview?.stepTargets?.picture;
+        const casePicking = connected && state.tool==="recordings" && casePicture?.device===this.device;
+        const picking = casePicking || (connected && state.tool==="inspect" && state.elements?.picking===true);
         const wanted = this.panel.visible && !this.paused && !this.error && connected ? this.device : undefined;
         if (this.feed?.device !== wanted) {
             this.retire();
@@ -42,7 +44,7 @@ class LiveDevicePanel {
         this.picking = picking;
         void this.panel.webview.postMessage({
             type: "state", epoch: this.epoch, streaming: Boolean(this.feed && !picking), paused: Boolean(this.paused), error: this.error,
-            device: this.device, devices: state.devices, connected, picking, tool: state.tool, busy: Boolean(state.busy),
+            device: this.device, devices: state.devices, connected, picking, casePicking, tool: state.tool, busy: Boolean(state.busy),
             caseEditing: Boolean(state.caseReview), focusPreview: Boolean(this.focusPreview),
             recording: Boolean(state.recording), draftLocation: state.draft?.location, draftFormat: state.draft?.stepFormat,
             steps: state.draft?.steps.length, language, text,

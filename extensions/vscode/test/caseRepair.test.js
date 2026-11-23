@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {CaseRepair,sourceDigest,replaceAt,locatorPath,candidatesFor} = require("../src/caseRepair");
 const {runView,pageView} = require("../src/model");
+const {diagnoseCase} = require("../src/caseDiagnosis");
 
 const plan = {version:"1",preconditions:[{selector:{id:"cart"},property:"visible",equals:true}],
     steps:[{command:"press",input:{target:{id:"submit-old"}}}],
@@ -35,17 +36,15 @@ test("a matched locator with an incorrect value and a partial observation cannot
 
 test("AI proposes one observed target, a failed trial stays unapplied, and a passing trial respects intervening source edits", async () => {
     const original=JSON.stringify(plan,null,2);
-    let contents=original, requested=0, passes=false;
+    let contents=original, requested=0, passes=false, reached=true;
     const doc={uri:"workflow",getText:()=>contents,positionAt:n=>n,save:async()=>true};
     class Edit {replace(uri, range, text){ Object.assign(this,{uri,range,text}); }}
     class Range {constructor(start,end){Object.assign(this,{start,end});}}
     const vscode={Uri:{parse:s=>s},WorkspaceEdit:Edit,Range,workspace:{openTextDocument:async()=>doc,
         applyEdit:async e=>{ contents=contents.slice(0,e.range.start)+e.text+contents.slice(e.range.end);return true; }}};
     const entry={id:"failed",plan:{uri:"workflow"},sourceDigest:sourceDigest(original)};
-    const originalRun={...runView(report),entry};
+    const originalRun={...runView(report),entry,selected:10};
     const b={language:"en",state:{device:"fixture",run:originalRun},networks:{bindings:{}},
-        reportAgent:()=>({call:async cmd=>cmd==="report"?report:frozen}),
-        modelAsk:async()=>async prompt=>{requested++; assert.match(prompt,/submit-new/);return '{"candidate":1}';},
         executePlan:async (from,trial)=>{
             assert.equal(from,true);
             const candidate=JSON.parse(trial.contents);
@@ -53,15 +52,36 @@ test("AI proposes one observed target, a failed trial stays unapplied, and a pas
             assert.deepEqual(candidate.goals,plan.goals);
             assert.equal(contents,original);
             const trialEntry={id:passes?"passed":"attempt",status:passes?"passed":"failed",repairOf:entry.id};
-            b.state.run={entry:trialEntry,goalStatus:trialEntry.status};return trialEntry;
+            b.state.run={entry:trialEntry,goalStatus:trialEntry.status,
+                steps:reached?[{path:"steps[0]",status:passes?"completed":"failed"}]:[]};
+            return trialEntry;
         }, persistRuns:async()=>{}, refreshCases:async()=>{}, refreshPlanSummary:async()=>{}};
     const repair=new CaseRepair(b,vscode);
-    await repair.suggest({id:entry.id});
+    const input = {run:originalRun,failure:{kind:"locator",index:0},language:"en",onEvent:()=>{},
+        prepare:input=>repair.prepare(input),agent:()=>({call:async command=>{assert.equal(command,"inspect");return frozen;}})};
+    const backup = await diagnoseCase({...input,ask:async()=>{throw new Error("model unavailable");}});
+    assert.equal(backup.fromSavedEvidence,true);
+    assert.equal(backup.proposed.proposed.id,"submit-new");
+    const analysis = await diagnoseCase({...input,
+        ask:async prompt=>{
+            requested++;
+            const data=JSON.parse(prompt.split("\n").at(-1));
+            assert.equal(data.options[0].proposed.id,"submit-new");
+            return JSON.stringify({summary:"The saved page contains Submit with its new ID.",next:"Run a copy with the new locator.",
+                recommendation:"verifyLocator",option:1,citations:["failure","page"]});
+        }});
+    repair.propose(analysis.proposed);
     assert.equal(requested,1);assert.equal(b.state.repair.stage,"proposed");
     await repair.verify({id:entry.id});
     await repair.apply({id:"attempt"});
     assert.equal(contents,original);assert.equal(b.state.repair.stage,"failed");
-    b.state.run=originalRun;passes=true;
+    b.state.run=originalRun;passes=true;reached=false;
+    await repair.verify({id:entry.id});
+    assert.equal(b.state.repair.stage,"failed");
+    assert.equal(b.state.repair.notReached,true);
+    await repair.apply({id:"passed"});
+    assert.equal(contents,original);
+    b.state.run=originalRun;reached=true;
     await repair.verify({id:entry.id});
     assert.equal(b.state.repair.stage,"verified");
     contents+=" ";
@@ -69,4 +89,32 @@ test("AI proposes one observed target, a failed trial stays unapplied, and a pas
     contents=original;
     await repair.apply({id:"passed"});
     assert.equal(b.state.repair.stage,"applied");assert.deepEqual(JSON.parse(contents).goals,plan.goals);
+});
+
+test("waiting for an existing target requires a saved loading state and a same-version passing page", async () => {
+    const navigation = {command:"open",input:{app:"fixture.shop"}};
+    const workflow = {...plan,steps:[navigation,plan.steps[0]]};
+    const source = JSON.stringify(workflow);
+    const step = {...runView(report).steps[0],path:"steps[1]",dispatched:"no"};
+    const previous = {path:"steps[0]",command:"open",status:"completed",dispatched:"acknowledged"};
+    const entry = {id:"failed",plan:{uri:"file:///workflow.json"},sourceDigest:sourceDigest(source)};
+    const run = {entry,steps:[previous,step]};
+    const b = {state:{run},networks:{bindings:{}}};
+    const v = {Uri:{parse:s=>s},workspace:{openTextDocument:async()=>({getText:()=>source,uri:entry.plan.uri})}};
+    const repair = new CaseRepair(b,v);
+    const loading = {ref:"@loading",id:"checkout.loading",type:"LoadingProgress",visible:true,bundleName:"fixture.shop",pagePath:"checkout"};
+    const ready = {...frozen.nodes[0],id:"submit-old",bundleName:"fixture.shop",pagePath:"checkout"};
+    const frame = nodes=>pageView({...frozen,nodes},{elements:true});
+    const passing = {page:frame([ready]),sameVersion:true,sameRunner:true};
+    const input = {run,step,previous,failure:{kind:"locator",index:1},page:frame([loading]),passing};
+    assert.equal((await repair.prepare({...input,passing:{...passing,sameVersion:false}})).options.length,0);
+    assert.equal((await repair.prepare({...input,page:frame([{...loading,pagePath:"sign-in"}])})).options.length,0);
+    assert.equal((await repair.prepare({...input,page:frame([{...loading,type:"Text"}])})).options.length,0);
+    const {options} = await repair.prepare(input);
+    assert.deepEqual(options.map(option=>option.kind),["wait"]);
+    const edited = JSON.parse(options[0].candidate);
+    assert.deepEqual(edited.steps[0],{...navigation,input:{...navigation.input,
+        expect:{selector:{id:"submit-old"},property:"visible",equals:true,timeoutMs:3000}}});
+    assert.deepEqual(edited.steps[1],workflow.steps[1]);
+    assert.deepEqual(edited.goals,workflow.goals);
 });

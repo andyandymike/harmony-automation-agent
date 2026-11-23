@@ -2,7 +2,7 @@
   "name": "harmony-agent-workbench",
   "displayName": "Harmony Agent",
   "description": "%extension.description%",
-  "version": "0.20.18",
+  "version": "0.20.21",
   "publisher": "harmony-automation-agent",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,7 @@
       { "command": "harmonyAgent.askAI", "category": "Harmony Agent", "title": "%command.askAI%" },
       { "command": "harmonyAgent.openAIChat", "category": "Harmony Agent", "title": "%command.aiChat%" },
       { "command": "harmonyAgent.openLiveDevice", "category": "Harmony Agent", "title": "%command.live%" },
-      { "command": "harmonyAgent.openWorkbench", "category": "Harmony Agent", "title": "%command.open%" },
+      { "command": "harmonyAgent.openWorkbench", "category": "Harmony Agent", "title": "%command.open%", "icon": "$(device-mobile)" },
       { "command": "harmonyAgent.selectProjectRuntime", "category": "Harmony Agent", "title": "%command.selectProjectRuntime%" },
       { "command": "harmonyAgent.inspect", "category": "Harmony Agent", "title": "%command.inspect%" },
       { "command": "harmonyAgent.recordings", "category": "Harmony Agent", "title": "%command.recordings%" },
@@ -42,6 +42,15 @@
       { "command": "harmonyAgent.openPlan", "category": "Harmony Agent", "title": "%command.plan%" },
       { "command": "harmonyAgent.openEvidence", "category": "Harmony Agent", "title": "%command.openEvidence%" }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "harmonyAgent.openWorkbench",
+          "when": "view == workbench.explorer.fileView || view == workbench.explorer.emptyView",
+          "group": "navigation@10"
+        }
+      ]
+    },
     "configuration": {
       "title": "Harmony Agent",
       "properties": {

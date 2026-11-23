@@ -62,7 +62,8 @@ function observationsForStep(locator, sources, bundle) {
             const label = (node.editable ? attrs?.description || attrs?.hint : node.label) || node.id || node.type;
             if (!label) continue;
             seen.add(encoded);
-            choices.push({selector, source, label:String(label).slice(0,120), detail:[node.id, node.type].filter(Boolean).join(" · ").slice(0,210)});
+            choices.push({selector, source, label:String(label).slice(0,120), detail:[node.id, node.type].filter(Boolean).join(" · ").slice(0,210),
+                ...(source==="live" && node.bounds && {bounds:node.bounds})});
         }
     }
     return {choices, matches};

@@ -9,7 +9,7 @@ const {pathToFileURL,fileURLToPath} = require("node:url");
 const {explorationCandidate,caseRoutes} = require("../src/explorationCases");
 const {CaseAuthoring,caseDefinitions} = require("../src/caseAuthoring");
 const {sourceDigest} = require("../src/caseRepair");
-const {writeCaseMetadata} = require("../src/caseLibrary");
+const {CaseLibrary,writeCaseMetadata} = require("../src/caseLibrary");
 const {restorePresentation} = require("../src/casePresentation");
 const {findCase} = require("../src/pytestCase");
 const {messagesFor} = require("../src/strings");
@@ -77,7 +77,8 @@ async function host(t) {
         window:{showOpenDialog:async()=>folders.shift(),showInputBox:async()=>inputs.shift(),
             showQuickPick:async rows=>rows[picks.shift()]}};
     const b={language:"zh",state:{},networks:{},stateDir:directory,
-        caseLibrary:{async add(file,meta){await writeCaseMetadata(file,meta);calls.push("index");}},
+        caseLibrary:{updateMetadata:CaseLibrary.prototype.updateMetadata,
+            async add(file,meta){await writeCaseMetadata(file,meta);calls.push("index");}},
         async refreshCases(){calls.push("refresh");},async setPlan(file){calls.push("open");b.selected=file;}};
     const author=new CaseAuthoring(b,vscode);
     return {directory,b,author,calls,inputs,picks,folders};
@@ -160,14 +161,24 @@ test("AI organizes nested BDD steps without changing the pytest workflow or send
         assert.match(prompt,/Customer name/);
         assert.match(prompt,/receipt/);
         assert.doesNotMatch(prompt,/entered-value|customer-order-value/);
+        const data=JSON.parse(prompt.split("\n").at(-1));
+        assert.deepEqual(data.purpose,["Guest checkout"]);
+        assert.equal(data.steps[1].to,undefined);
+        assert.equal(data.steps[2].from,"Order review");
+        assert.equal(data.steps[2].to,"Receipt");
+        assert.deepEqual(data.steps[0].condition,{property:"visible",control:"Guest",expected:true});
         return JSON.stringify({steps:proposal});
     };
-    author.begin({name:"Guest checkout",plan,source:"recording"});
+    author.begin({name:"Guest checkout",plan,source:"recording",stepEvidence:{
+        "steps[0].then[0]":{to:"entered-value"},
+        "steps[1]":{from:"Order review",to:"Receipt"},
+    }});
     const id=b.state.caseReview.id;
     await author.organize({id,revision:0});
     const {caseReviewView}=await loadMedia("caseAuthoring");
     const view=caseReviewView(b.state,"en");
     assert.match(view,/<h3 class="case-step-group">Prepare order<\/h3>/);
+    assert.doesNotMatch(view,/class="case-step-group">Place order/);
     assert.match(view,/Enter the customer name/);
     assert.match(view,/Tap Confirm order/);
     assert.deepEqual(author.candidate.plan,plan);
@@ -187,6 +198,7 @@ test("AI organizes nested BDD steps without changing the pytest workflow or send
     assert.ok(await findCase(b.selected));
     const {presentation}=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
     assert.equal(restorePresentation(saved,presentation).get(saved.steps[1]).name,"Submit the order");
+    assert.deepEqual(restorePresentation(saved,presentation).get(saved.steps[1]).evidence,{from:"Order review",to:"Receipt"});
     assert.equal(restorePresentation(saved,presentation).get(saved.steps[0].then[0]).role,"Given");
     saved.steps.reverse();
     assert.equal(restorePresentation(saved,presentation).get(saved.steps[0]),undefined);
@@ -198,21 +210,34 @@ test("named steps can use observed compatible locators, be duplicated and restor
     b.state.device="phone";
     b.state.devices=["phone"];
     b.text={};
+    const calls=[];
+    const bounds={left:10,top:40,right:65,bottom:70};
+    b.agent={call:async command=>{calls.push(command);return {path:"current.png"};}};
+    b.image=picture=>"webview/"+picture;
+    b.livePanel={async withDeviceOperation(read) {calls.push("begin");await read();calls.push("end");}};
     b.observe=async(current,full)=>{
         assert.equal(current(),true);
         assert.equal(full,true);
+        calls.push("observe");
         b.state.page={complete:true,nodes:[
-            {label:"Pay now",id:"pay",pressable:true,visible:true,selector:{id:"pay"},attributes:{id:"pay"}},
-            {label:"Amount",id:"amount",pressable:false,editable:true,selector:{id:"amount"},attributes:{id:"amount"}},
+            {label:"Pay now",id:"pay",pressable:true,visible:true,selector:{id:"pay"},attributes:{id:"pay"},bounds},
+            {label:"Amount",id:"amount",pressable:false,editable:true,selector:{id:"amount"},attributes:{id:"amount"},bounds},
         ]};
     };
     author.begin({name:"Checkout steps",plan,source:"workflow"});
     const id=b.state.caseReview.id, step="steps[0]";
     const current=()=>({id,revision:b.state.caseReview.revision});
     await author.edit({...current(),area:"stepName",path:step,name:"Submit payment",group:"Checkout"});
-    await author.loadTargets({...current(),area:"step",path:step,live:true});
+    await author.loadTargets({...current(),area:"step",path:step,live:true,pick:true});
+    assert.deepEqual(calls,["begin","observe","screenshot","end"]);
     assert.deepEqual(b.state.caseReview.stepTargets.matches,{count:0,complete:true});
     assert.deepEqual(b.state.caseReview.stepTargets.choices.map(choice=>choice.label),["Pay now"]);
+    assert.deepEqual(b.state.caseReview.stepTargets.choices[0].bounds,bounds);
+    const picture=b.state.caseReview.stepTargets.picture;
+    assert.equal(picture.src,"webview/current.png");
+    assert.equal(author.endPick({...current(),picture:"stale"}),false);
+    assert.equal(author.endPick({...current(),picture:picture.id}),true);
+    assert.equal(b.state.caseReview.stepTargets.picture,undefined);
     await author.edit({...current(),area:"step",path:step,target:"0"});
     assert.deepEqual(author.candidate.plan.steps[0].input.target,{id:"pay"});
     await author.changeStep({...current(),action:"duplicate",path:step});

@@ -63,7 +63,7 @@ function explorationCandidate(report, request) {
     let {stepId,branchId,findingId} = request;
     const finding = findingId && report.findings.find(f=>f.id===findingId);
     if (findingId && !routes.findingIds.includes(findingId)) return;
-    let plan, first, last, outcome, observedLabels, name = report.goal;
+    let plan, first, last, outcome, stepEvidence, name = report.goal;
     if (finding?.kind==="failure") {
         plan = finding.plan;
         first = report.steps.find(s=>s.key==="baseline");
@@ -86,14 +86,16 @@ function explorationCandidate(report, request) {
         if (index < 0) return;
         const prefix = report.steps.slice(0,index+1);
         plan = {version:"1",steps:prefix.map(s=>acknowledgedFreeStep(report,s))};
-        observedLabels = Object.fromEntries(prefix.map((step,i)=>[`steps[${i}]`,step.label]));
+        const pages = new Map((report.pages || []).flatMap(page=>(page.states || []).map(state=>[state.id,page.label || page.route])));
+        stepEvidence = Object.fromEntries(prefix.map((step,i)=>[`steps[${i}]`,{control:step.label,
+            from:pages.get(step.fromStateId),to:pages.get(step.toStateId)}]));
         first = prefix[0];
         last = prefix.at(-1);
         outcome = finding ? "review" : "observed";
         name = finding?.title || (request.stepId ? last.label : report.goal);
     }
     const scoped = report.bundle ? scopePlan(plan,report.bundle,(en,zh)=>/^zh/i.test(report.language)?zh:en) : structuredClone(plan);
-    return {name,source:"exploration",plan:scoped,group:report.mockScenario,bundle:report.bundle,observedLabels,
+    return {name,source:"exploration",plan:scoped,group:report.mockScenario,bundle:report.bundle,stepEvidence,
         origin:{reportId:report.id,...(findingId&&{findingId}),...(branchId&&{branchId}),...(stepId&&{stepId}),outcome,label:report.goal},
         frames:{start:first?.before && {runId:first.runId,frame:first.before},goal:last?.after && {runId:last.runId,frame:last.after}}};
 }

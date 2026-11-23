@@ -2,7 +2,8 @@ import { vscode } from "./bridge.js";
 import { pytestWorkflow } from "./pytestCase.js";
 import { recordingWorkspace } from "./recordingWorkspace.js";
 import { caseBddView, caseStepLabel, caseLibraryView, caseRunHistory, caseRunStatus, caseRunTime, isCaseRun } from "./caseLibrary.js";
-import { caseReviewView, caseStepActions, caseEditorClick, caseEditorInput, caseEditorSubmit } from "./caseAuthoring.js";
+import { caseReviewView, caseStepActions, caseEditorClick, caseEditorInput, caseEditorSubmit,
+    endCasePicture, selectCasePictureTarget } from "./caseAuthoring.js";
 import { pytestPhases } from "./pytestReport.js";
 import { repairView } from "./caseRepair.js";
 import { failureView } from "./caseFailure.js";
@@ -365,11 +366,20 @@ function aiOutput(result,key) {
     const waiting = result?.waitingForModel === "retry" ? t.modelRetry :
         result?.waitingForModel && t.modelReviewing.replace("{provider}", result.provider === "codex" ? "Codex" : "GitHub Copilot");
     const reads = result?.evidence || [];
+    const evidenceLink = receipt=>{
+        if (!result.next) return "";
+        if (receipt.id==="passingPage" && receipt.status==="read")
+            return button(word("Open passing run","查看通过的报告"),"report",{attrs:{"data-id":receipt.runId}});
+        if (Number.isInteger(receipt.index) && receipt.runId===model.run?.entry.id)
+            return button(word("Open step evidence","查看步骤证据"),"showFailureStep",
+                {attrs:{"data-index":receipt.index,"data-phase":receipt.phase}});
+        return "";
+    };
     return `${aiWorking(result) ? `<p role="status">${h(result.status === "stopping" ? t.taskStopping : waiting || result.steps.at(-1) || t.taskThinking)}</p>` : ""}
         ${result?.status === "cancelled" ? `<p>${h(t.taskCancelled)}</p>` : ""}
         ${result?.answer ? `<p class="ai-answer" role="status">${h(result.answer)}</p>` : ""}
         ${reads.length ? `<details id="diagnosis-evidence-${h(key)}"><summary>${h(t.aiEvidenceRead)} · ${reads.length}</summary>
-            ${reads.map(r=>`<p class="ai-answer">${h(r.text)}</p>${(r.records || []).map(row=>
+            ${reads.map(r=>`<p class="ai-answer">${h(r.text)}</p>${evidenceLink(r)}${(r.records || []).map(row=>
                 button(t.aiOpenRecord+" · "+row.method+" "+row.route+" · "+row.status,"networkEvidenceRecord",{attrs:{"data-id":row.id}})).join("")}`).join("")}
             ${reads.some(r=>r.kind==="http") ? `<small>${h(t.aiEvidenceScope)}</small>` : ""}</details>` : ""}`;
 }
@@ -494,7 +504,7 @@ function caseWorkspace() {
                 "caseRemove",{attrs:{"data-id":model.activeCase.uri}}) : ""}
         ${runnable && !coordinates ? button(word("Explore from these steps","沿这些步骤探索"),"explorationFromCase") : ""}
         ${prior ? button(word("Open source report","查看来源报告"),exploration?"explorationReport":"report",{attrs:{"data-id":origin.reportId}}) : ""}</div></details>`;
-    const joined = run && !run.entry.repairOf && model.planDigest && run.entry.sourceDigest===model.planDigest &&
+    const joined = run && (!run.entry.repairOf || run.entry.repairApplied) && model.planDigest && run.entry.sourceDigest===model.planDigest &&
         model.caseBdd && JSON.stringify(model.caseBdd)===JSON.stringify(run.bdd);
     const definition = model.caseBdd ? definitionBdd(joined ? run : undefined,coordinates) : planPreview(model.planSummary);
     const headingNote = [coordinates&&word("Coordinate recording","坐标录制"),needsPhone&&(coordinates ?
@@ -507,13 +517,17 @@ function caseWorkspace() {
     const failedStep = run?.steps?.[review?.index];
     const failureKey = run?.entry.id + "/failure";
     const ai = model.aiResults?.diagnosis?.key === failureKey ? model.aiResults.diagnosis : undefined;
+    const repair = run && repairView(model,run,language,button);
+    const rerun = run?.entry.source!=="device" && run?.entry.sourceDigest && run.entry.sourceDigest===model.planDigest ?
+        (run.entry.source==="pytest" ? model.pytestCase && "pytest" : ready && "workbench") : undefined;
     return `<section class="plan-sheet case-detail-sheet"><header class="case-detail-head">
         <div class="case-heading"><h1>${model.caseDefinitions ? caseEditValue(title,"name") : h(title)}</h1>
             ${headingNote ? `<small>${h(headingNote)}</small>` : ""}</div>
         <div class="case-header-actions">${runnerSelect}${runButton}${save}${menu}</div></header>
         ${caseRunSummary(run)}
         ${failureView(review,run?.entry.id,language,{stepTitle:failedStep && stepTitle(failedStep),ai,
-            aiOutput:aiOutput(ai,failureKey),stop:aiStop(ai),disabled:model.busy})}
+            aiOutput:aiOutput(ai?.next ? {...ai,answer:undefined} : ai,failureKey),stop:aiStop(ai),disabled:model.busy,repair,runner:rerun})}
+        ${!review && repair ? repair : ""}
         ${model.planSummary?.scenarioName?`<p class="case-review-note">${h(t.netRuleGroup)} · ${h(model.planSummary.scenarioName)}</p>`:""}
         ${definition}${run ? caseReportBody(run,joined) : ""}${settings}</section>`;
 }
@@ -619,7 +633,7 @@ function caseStepEvidence(run,index) {
     const result = model.aiResults?.diagnosis;
     const diagnosis = model.failureReview?.index === index ? "" : inlineAI("diagnosis", t.stationAiExplain, result?.key === key ? result : undefined);
     return `<div class="case-step-evidence" id="run-evidence">${evidence(run,step)}${errorDetails(run.frameError)}
-        ${repairView(model,language,button)}${comparison(run)}
+        ${comparison(run)}
         <details id="case-evidence-tools"><summary>${word("More evidence tools","更多证据工具")}</summary>
             <div class="toolbar">${button(t.netStep,"networkStep")}${evidenceExport(model,language,"run")}</div>${diagnosis}
         </details></div>`;
@@ -912,7 +926,7 @@ function handleClick(event) {
             target?.focus({preventScroll:true});
             target?.scrollIntoView({block:"center"});
         }
-        if (open && run.selected!==receipt) vscode.postMessage({type:"step",index:receipt});
+        if (open && (run.selected!==receipt || phase && phase!==run.phase)) vscode.postMessage({type:"step",index:receipt,phase});
         return;
     }
     if (type==="caseReview" && control.dataset.caseArea) {
@@ -1051,6 +1065,10 @@ root.addEventListener("submit", event => caseEditorSubmit(event,model,message=>v
 root.addEventListener("keydown", event => {
     if (event.key==="Escape" && event.target.closest("#bdd-editor") && !event.isComposing) {
         event.preventDefault();
+        if (endCasePicture(model,sendWorkbench)) {
+            document.getElementById("bdd-pick-screen")?.focus();
+            return;
+        }
         root.querySelector('#bdd-editor [data-bdd="cancel"]')?.click();
         return;
     }
@@ -1174,6 +1192,9 @@ bindElements(render, ref => {
         if (itemBox.top < listBox.top) list.scrollTop += itemBox.top - listBox.top;
         if (itemBox.bottom > listBox.bottom) list.scrollTop += itemBox.bottom - listBox.bottom;
     }
+},{
+    selectCaseTarget:(key,picture)=>selectCasePictureTarget(key,picture,model,sendWorkbench,render),
+    endCasePick:()=>endCasePicture(model,sendWorkbench),
 });
 
 vscode.postMessage({ type: "ready" });

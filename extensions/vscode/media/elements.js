@@ -15,6 +15,11 @@ const words = {
     includesSelected:["includes selected control","包含当前选中控件"], excludesSelected:["excludes selected control","未匹配当前选中控件"],
     useLocator:["Observe or add to a workflow","观察属性或加入流程"],
     operateSelected:["Operate selected control","操作选中控件"],
+    casePick:["Click a highlighted control to choose its locator.","点击高亮控件选择定位器。"],
+    caseNone:["No compatible control at this point.","这里没有适用于当前步骤的控件。"],
+    caseEmpty:["No selectable controls on this page.","当前页没有可点选的控件。"],
+    casePhotoError:["Could not load the preview. You can still choose from the control list.","无法加载画面，可以在右侧控件列表中选取。"],
+    caseExit:["Exit selection","退出选取"],
     noTree:["No exposed native element here.","这里没有可识别的原生控件。"], loading:["Capturing the screen…","正在读取画面…"],
     inspectHint:["Point to highlight. Click to select.","移动指针高亮，单击选中控件。"], partial:["Partial tree · visible matches only","控件树不完整，计数仅代表已读取部分"],
     bad:["Invalid locator. Use a JSON object with native selector fields.","定位器无效，请输入包含原生定位字段的 JSON 对象。"],
@@ -25,14 +30,18 @@ const words = {
     busy:["Reading screen","正在读取画面"], pic:["Screen snapshot","画面快照"], copyDone:["Locator copied.","已复制定位器。"],
 };
 let model, language, render, choose;
-let selected, edit, tested={}, hover;
+let selected, edit, tested={}, hover, pictureKey;
 const $=id=>document.getElementById(id);
 const w=k=>words[k][/^zh/i.test(language)?1:0];
 const btn=(key,action,off=false,attrs="")=>'<button type="button" class="button" data-el="'+action+'" '+(off?'disabled':'')+' '+attrs+'>'+escape(w(key))+'</button>';
 const send=(type,extra={})=>vscode.postMessage({type,...extra});
 const validNode=()=>tested.matches?.length===1 && model?.page?.complete ? tested.matches[0] : undefined;
+const casePicker=()=>{
+    const picker = model?.caseReview?.stepTargets;
+    if (model?.tool==="recordings" && picker?.picture && picker.picture.device===model.device && model.devices.includes(model.device)) return picker;
+};
 
-export function bindElements(onRender,onSelect) {
+export function bindElements(onRender,onSelect,{selectCaseTarget,endCasePick}={}) {
     render=onRender; choose=onSelect;
     $("element-pick-mode").addEventListener("click",()=>{
         if (!model?.elements?.picking) send("elementMode",{picking:true});
@@ -42,18 +51,47 @@ export function bindElements(onRender,onSelect) {
     });
     const canvas=$("element-overlay");
     new ResizeObserver(paint).observe(canvas);
-    canvas.addEventListener("pointermove",event=>{hover=under(event);paint();});
+    canvas.addEventListener("pointermove",event=>{
+        hover=under(event);
+        const message=$("element-picker-message");
+        if (hover && casePicker() && message.textContent) message.textContent="";
+        paint();
+    });
     canvas.addEventListener("pointerleave",()=>{hover=undefined;paint();});
     canvas.addEventListener("click",event=>{
         const node=under(event);
+        const picker = casePicker();
+        if (picker) {
+            if (model.busy) return;
+            $("element-picker-message").textContent=node ? "" : w("caseNone");
+            if (node) selectCaseTarget?.(node.key,picker.picture.id);
+            return;
+        }
         $("element-picker-message").textContent=node?"":w("noTree");
         if(node) choose(node.ref);
     });
     canvas.addEventListener("contextmenu",event=>{
+        if (casePicker()) return;
         const items=elementMenuItems(under(event)?.ref);
         if(showItemMenu(items,{anchor:canvas,label:w("actions"),point:{x:event.clientX,y:event.clientY}})) event.preventDefault();
     });
-    $("element-photo").addEventListener("load",()=>{ $("element-picker-message").textContent="";paint(); });
+    $("case-pick-exit").addEventListener("click",()=>{
+        if (endCasePick?.()) $("bdd-pick-screen")?.focus();
+    });
+    $("live-device").addEventListener("keydown",event=>{
+        if (event.key==="Escape" && !event.isComposing && casePicker() && endCasePick?.()) {
+            event.preventDefault();
+            $("bdd-pick-screen")?.focus();
+        }
+    });
+    $("element-photo").addEventListener("load",()=>{
+        const picker = casePicker();
+        $("element-picker-message").textContent=picker && !picker.choices.some(choice=>choice.bounds) ? w("caseEmpty") : "";
+        paint();
+    });
+    $("element-photo").addEventListener("error",()=>{
+        if (casePicker()) $("element-picker-message").textContent=w("casePhotoError");
+    });
     setInterval(()=>{
         if (!document.hidden && model?.tool==="inspect" && !model.busy && !model.elements?.picking && model.elements?.watches.length)
             send("elementSample");
@@ -80,6 +118,11 @@ export function updateElements(next,lang,t) {
     model=next;language=lang;
     const pick=$("element-pick-mode"),operate=$("element-operate-mode");
     const inspect=next.tool==="inspect" && next.devices.includes(next.device), picking=inspect && !!next.elements?.picking;
+    const casePick = casePicker();
+    $("case-pick-controls").hidden=!casePick;
+    $("case-pick-instructions").textContent=w("casePick");
+    $("case-pick-exit").textContent=w("caseExit");
+    $("case-pick-exit").disabled=Boolean(next.busy);
     $("element-view-modes").hidden=!inspect;
     $("element-view-modes").setAttribute("aria-label",t.stationModeGroup);
     pick.disabled=operate.disabled=Boolean(next.busy || !inspect);
@@ -87,9 +130,13 @@ export function updateElements(next,lang,t) {
     operate.querySelector("span").textContent=w("operate");
     pick.setAttribute("aria-pressed",String(picking));
     operate.setAttribute("aria-pressed",String(!picking));
-    const layer=$("element-picker");layer.hidden=!picking;
-    const pic=next.elements?.picture;
-    const valid=pic?.src && pic.frameId===next.page?.frameId;
+    const shown = picking || Boolean(casePick);
+    const layer=$("element-picker");layer.hidden=!shown;
+    const pic=casePick?.picture || next.elements?.picture;
+    const valid=shown && pic?.src && (casePick || pic.frameId===next.page?.frameId);
+    const key = casePick?.picture.id || (valid && pic.frameId);
+    if (pictureKey!==key) hover=undefined;
+    pictureKey=key;
     const img=$("element-photo");
     if(valid && img.getAttribute("src")!==pic.src) {
         img.src=pic.src;hover=undefined;$("element-picker-message").textContent=w("loading");
@@ -97,9 +144,11 @@ export function updateElements(next,lang,t) {
         img.removeAttribute("src");$("element-picker-message").textContent=next.busy?w("busy"):w("unknown");
         $("element-overlay").getContext("2d").clearRect(0,0,$("element-overlay").width,$("element-overlay").height);
     }
-    if(!picking)hover=undefined;
-    img.hidden=!picking || !valid;img.alt=w("pic");$("element-overlay").setAttribute("aria-label",w("inspectHint"));
-    if (picking && valid && img.complete) paint();
+    if(!shown)hover=undefined;
+    img.hidden=!valid;img.alt=w("pic");
+    $("element-overlay").setAttribute("aria-label",w(casePick ? "casePick" : "inspectHint"));
+    $("element-overlay").setAttribute("aria-describedby",casePick ? "case-pick-instructions" : "gesture-help");
+    if (valid && img.complete) paint();
 }
 
 function coords(event) {
@@ -107,12 +156,13 @@ function coords(event) {
     if (img.hidden || !img.complete || !img.naturalWidth) return;
     const box=$("element-overlay").getBoundingClientRect();
     const scale=Math.min(box.width/img.naturalWidth,box.height/img.naturalHeight);
+    if (!scale) return;
     return {x:(event.clientX-box.left-(box.width-img.naturalWidth*scale)/2)/scale,
         y:(event.clientY-box.top-(box.height-img.naturalHeight*scale)/2)/scale};
 }
 function under(event) {
     const xy=coords(event);
-    return xy && hitsAt(model.page?.nodes || [],xy)[0];
+    return xy && hitsAt(casePicker()?.choices || model.page?.nodes || [],xy)[0];
 }
 
 function paint() {
@@ -130,16 +180,18 @@ function paint() {
         ctx.strokeStyle=color;ctx.lineWidth=2/scale;ctx.fillStyle=fill;
         ctx.fillRect(b.left,b.top,b.right-b.left,b.bottom-b.top);ctx.strokeRect(b.left,b.top,b.right-b.left,b.bottom-b.top);
     }
-    const matches=tested.matches||[];
+    const pickingLocator = Boolean(casePicker());
+    const matches=pickingLocator ? [] : tested.matches||[];
     for(const node of matches) frame(node,"#72dfc1","#39bd9122");
-    if(selected && !matches.some(n=>n.ref===selected.ref)) {
+    if(!pickingLocator && selected && !matches.some(n=>n.ref===selected.ref)) {
         ctx.setLineDash([5/scale,4/scale]);
         frame(model.page?.nodes.find(n=>n.ref===selected.ref),"#c9d0d4","transparent");
         ctx.setLineDash([]);
     }
-    if(hover && hover.ref!==selected?.ref) {
+    if(hover && (pickingLocator || hover.ref!==selected?.ref)) {
         frame(hover,"#ffd272","#f1b5322b");
-        const b=hover.bounds, label=(hover.type||"")+" · "+(b.right-b.left)+" × "+(b.bottom-b.top);
+        const b=hover.bounds, label=pickingLocator ? hover.label.slice(0,40) :
+            (hover.type||"")+" · "+(b.right-b.left)+" × "+(b.bottom-b.top);
         ctx.font=(12/scale)+"px sans-serif";
         const width=ctx.measureText(label).width+8/scale, top=Math.max(0,b.top-19/scale),
             left=Math.max(0,Math.min(b.left,canvas.width-width));
