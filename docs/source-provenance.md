@@ -1,10 +1,12 @@
 # Source provenance and distribution boundaries
 
-Updated: 2026-11-10. This document records source attribution, the owner's licensing authorization and distribution boundaries.
+Updated: 2026-11-23. This document records source attribution, the owner's licensing authorization and distribution boundaries.
 
 | Material | Origin | Treatment |
 | --- | --- | --- |
 | `src/harmony_agent/`, associated CLI tests and new project documentation | Implemented for Harmony Automation Agent | Covered by this project's root MIT license |
+| VS Code workbench, tests and documentation in `extensions/vscode/` | Implemented for Harmony Automation Agent | Covered by the project MIT license, also included inside the VSIX |
+| Button and text-field CSS in `extensions/vscode/media/ui/vendor/elements-lite/` | `@vscode-elements/elements-lite@0.4.0` | Redistributed under upstream MIT terms. The vendored files include the upstream license and a record of their source |
 | Fixture scaffold and resources | Project owner's `andyandymike/harmony-automation`, commit `ddaecb946c59d76648bfbb5ffa6b2273de83272f` | Owner confirmed copyright ownership and authorized MIT distribution on 2026-11-10; covered by the root MIT license with attribution retained |
 | Fixture `Index.ets` | Rewritten for this project using the original fixture's business test contract | Covered by the root MIT license; preserve its derivation record |
 | Playwright CLI, agent-device, Midscene and OpenHarmony interface ideas | Design references and inspected public implementations | No required runtime dependency; importing source later requires the relevant notice and version record |

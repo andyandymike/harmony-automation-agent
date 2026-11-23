@@ -44,6 +44,34 @@ class ExecutionRuntimeTests(unittest.TestCase):
         plan = {"version": "1", "steps": steps, **extra}
         return self.agent.execute("run", {"run_id": "trial", "plan": plan})
 
+    def test_debug_gate_is_durable_and_resume_rechecks_the_actual_screen(self):
+        observed = []
+
+        def gate(event):
+            if event["event"] == "step_started":
+                record = RunStore(self.agent.store.root, event["runId"]).read()
+                self.assertEqual(record["activeStep"]["path"], event["path"])
+            observed.append((event["event"], event["path"]))
+            if event["event"] == "step_started" and event["path"] == "steps[1]":
+                self.transport.counter = 7
+                return True
+
+        self.agent.on_plan_step = gate
+        result = self.run_plan([press(1), {"assert": condition(1)}], preconditions=[condition(0)])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(self.transport.counter, 7)
+        self.assertEqual(result["steps"][-1]["result"]["actual"], "Counter: 7")
+        self.assertIn(("step_finished", "steps[0]"), observed)
+
+    def test_stopping_at_debug_gate_cancels_before_any_device_input(self):
+        def gate(event):
+            if event["event"] == "step_started":
+                raise KeyboardInterrupt
+        self.agent.on_plan_step = gate
+        result = self.run_plan([press(1)])
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(self.transport.mutations, [])
+
     def test_branch_goal_receipts_and_frozen_evidence(self):
         result = self.run_plan([press(1), {"if": condition(1), "then": [press(2)], "else": [{"yield": "unexpected"}]}],
                                preconditions=[condition(0)], goals=[condition(2)])

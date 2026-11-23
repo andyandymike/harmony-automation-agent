@@ -1,0 +1,103 @@
+{
+  "name": "harmony-agent-workbench",
+  "displayName": "Harmony Agent",
+  "description": "%extension.description%",
+  "version": "0.20.12",
+  "publisher": "harmony-automation-agent",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andyandymike/harmony-automation-agent.git",
+    "directory": "extensions/vscode"
+  },
+  "engines": { "vscode": "^1.101.0" },
+  "extensionKind": ["ui"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%workspaceTrust.description%"
+    }
+  },
+  "categories": ["Testing"],
+  "main": "./src/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "scripts": {
+    "test": "node --test",
+    "package": "npx --yes @vscode/vsce@4.1.1 package --no-dependencies"
+  },
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      { "id": "harmonyAgent.phoneTools", "label": "%mcp.phoneTools%" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "harmony-agent", "title": "Harmony Agent", "icon": "media/device.svg" }
+      ]
+    },
+    "views": {
+      "harmony-agent": [
+        { "id": "harmonyAgent.launcher", "name": "%view.workbench%" }
+      ]
+    },
+    "commands": [
+      { "command": "harmonyAgent.askAI", "category": "Harmony Agent", "title": "%command.askAI%" },
+      { "command": "harmonyAgent.openAIChat", "category": "Harmony Agent", "title": "%command.aiChat%" },
+      { "command": "harmonyAgent.openLiveDevice", "category": "Harmony Agent", "title": "%command.live%" },
+      { "command": "harmonyAgent.openWorkbench", "category": "Harmony Agent", "title": "%command.open%" },
+      { "command": "harmonyAgent.inspect", "category": "Harmony Agent", "title": "%command.inspect%" },
+      { "command": "harmonyAgent.recordings", "category": "Harmony Agent", "title": "%command.recordings%" },
+      { "command": "harmonyAgent.exploration", "category": "Harmony Agent", "title": "%command.exploration%" },
+      { "command": "harmonyAgent.network", "category": "Harmony Agent", "title": "%command.network%" },
+      { "command": "harmonyAgent.openPlan", "category": "Harmony Agent", "title": "%command.plan%" },
+      { "command": "harmonyAgent.openEvidence", "category": "Harmony Agent", "title": "%command.openEvidence%" }
+    ],
+    "configuration": {
+      "title": "Harmony Agent",
+      "properties": {
+        "harmonyAgent.aiProvider": {
+          "type": "string", "enum": ["copilot", "codex"], "default": "copilot", "scope": "machine",
+          "description": "%config.aiProvider%"
+        },
+        "harmonyAgent.codexPath": {
+          "type": "string", "default": "", "scope": "machine", "description": "%config.codexPath%"
+        },
+        "harmonyAgent.cliPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "%config.cliPath%"
+        },
+        "harmonyAgent.hdcPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "%config.hdcPath%"
+        },
+        "harmonyAgent.mcpPythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "%config.mcpPythonPath%"
+        },
+        "harmonyAgent.codexProjectPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "%config.codexProjectPath%"
+        },
+        "harmonyAgent.stateDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "%config.stateDir%"
+        },
+        "harmonyAgent.language": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "en", "zh-CN"],
+          "description": "%config.language%"
+        }
+      }
+    }
+  }
+}

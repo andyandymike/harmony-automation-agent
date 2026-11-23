@@ -1,0 +1,56 @@
+"use strict";
+const test=require("node:test");
+const assert=require("node:assert/strict");
+const fs=require("node:fs/promises");
+const os=require("node:os");
+const path=require("node:path");
+const {NetworkController}=require("../src/networkController");
+const load=require("../test-support/loadWebview");
+const rule=(value,id="Language")=>({id,method:"POST",match:{type:"exact",field:"path",value:"/estimate"},action:"rewrite",
+    edits:[{target:"query",key:"lang",op:"set",value}]});
+
+test("rule writes are scoped to the original scenario and rule, including rename, copy and undo",async t=>{
+    const dir=await fs.mkdtemp(path.join(os.tmpdir(),"harmony-own-rule-"));
+    const bench={storage:{fsPath:dir},language:"en",state:{mode:"network"},context:{workspaceState:{get:(_,v)=>v}},publish(){},errorMessage:e=>e.message};
+    const host=new NetworkController(bench,{});
+    t.after(async()=>{await host.close();await fs.rm(dir,{recursive:true,force:true});});
+    const send=(type,payload={})=>host.handle({type,revision:crypto.randomUUID(),...payload});
+    const net=()=>bench.state.network;
+    await send("networkOpen");
+    const a=net().activeScenarioId;
+    await send("networkUpsertRule",{rule:rule("fr"),scenarioId:a,originalRule:null});
+    const original=net().scenario.rules[0];
+    await send("networkScenarioCreate",{name:"Other",scenarioId:a});
+    const b=net().activeScenarioId;assert.notEqual(b,a);
+    await send("networkUpsertRule",{rule:rule("ja"),scenarioId:a,originalRule:original});
+    assert.match(net().operation.error,/another rule group/);assert.equal(net().scenario.rules.length,0);
+    await send("networkUpsertRule",{rule:rule("en"),scenarioId:b,originalRule:null});
+    await send("networkUpsertRule",{rule:rule("ja"),scenarioId:a,originalRule:original});
+    assert.match(net().operation.error,/another rule group/);assert.equal(net().scenario.rules[0].edits[0].value,"en");
+    await send("networkScenarioSelect",{id:a,scenarioId:b});
+    await send("networkUpsertRule",{rule:rule("ja"),scenarioId:a,originalRule:original});
+    assert.equal(net().operation.error,undefined);
+    await send("networkUpsertRule",{rule:rule("de"),scenarioId:a,originalRule:original});
+    assert.match(net().operation.error,/changed/);
+    const stored=net().scenario.rules[0];
+    await send("networkRuleCopy",{scenarioId:a,id:stored.id,originalRule:stored,name:"Language copy"});
+    assert.equal(net().scenario.rules[0].enabled,false);
+    await send("networkRuleRename",{scenarioId:a,id:stored.id,originalRule:stored,name:"New name"});
+    assert.equal(net().scenario.rules[1].id,"New name");
+    const renamed=net().scenario.rules[1];
+    await send("networkRuleRemove",{scenarioId:a,id:renamed.id,originalRule:renamed});assert.equal(net().removedRule,renamed.id);
+    await send("networkRuleUndo",{scenarioId:a,id:renamed.id});assert.deepEqual(net().scenario.rules[1],renamed);
+});
+
+test("switching workspaces parks the rule draft and restores it only for its owner",async()=>{
+    const view=await load("networkStudio");
+    const ra=rule("en"), rb=rule("zh");
+    const scene=(id,r)=>({activeScenarioId:id,scenario:{name:id,rules:[r]},records:[],hits:[],scenarioLibrary:[{id:"A"},{id:"B"}]});
+    const a=scene("A",ra),b=scene("B",rb),en=text=>text;
+    view.openStudio("rule",a,undefined,ra);
+    view.studioInput({dataset:{ns:"value",index:"0"},value:"kept"},()=>{});
+    assert.doesNotMatch(view.studioView({network:b},en),/value="kept"/);
+    assert.match(view.studioView({network:a},en),/value="kept"/);
+    let sent;view.studioClick({dataset:{net:"studio-apply"}},{network:a},m=>{sent=m},()=>{});
+    assert.equal(sent.scenarioId,"A");assert.equal(sent.originalRule.id,ra.id);assert.equal(sent.rule.edits[0].value,"kept");
+});

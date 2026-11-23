@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0a10 — interactive workflow debugging
+
+- Add an optional in-process step callback for interactive debugging. The VS Code workbench can pause and resume the original plan runner while retaining variables, branches and loop state.
+
 ## 0.1.0a9 — local workflow execution candidate, 2026-11-11
 
 - Add version 2 plans with bounded reads and typed `var`/`concat` value bindings. Known workflows can consume live page data without sending each value back to a model. Version 1 plans remain supported; expressions cannot choose commands or selectors or execute code.

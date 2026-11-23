@@ -5,6 +5,8 @@ __pycache__/
 .harmony-agent/
 build/
 dist/
+*.vsix
+.pytest_cache/
 *.hap
 *.p12
 *.p7b

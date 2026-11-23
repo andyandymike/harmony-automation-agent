@@ -2,11 +2,11 @@
 
 [简体中文](README.zh-CN.md)
 
-An open-source toolkit for observing, operating, and verifying HarmonyOS apps through native HDC / UiTest. Use it from a terminal, automation scripts, or an AI agent.
+An open-source toolkit for observing, operating, and verifying HarmonyOS apps through native HDC / UiTest. Use it from VS Code, a terminal, automation scripts, or an AI agent.
 
-The project provides a Python CLI, a portable Agent Skill, and an optional local stdio MCP adapter. They share a model-free runtime built on the Python standard library; no Appium server, visual model, or model API key is required.
+The project provides a Python CLI, a [VS Code workbench](extensions/vscode/README.md), a portable Agent Skill, and a local stdio MCP adapter. They share a model-free runtime built on the Python standard library. The workbench supports live device preview, workflow recording and replay, and step-by-step debugging.
 
-**0.1.0a9 is an unreleased development alpha and has not been published to PyPI.** See [compatibility](docs/compatibility.md) for tested environments, [alpha9 validation](docs/validation-alpha9.md) for recorded results, and the [changelog](CHANGELOG.md) for version history.
+**Python runtime `0.1.0a10` and VS Code workbench `0.20.12` are development previews.** Build or install the VSIX with the [workbench guide](extensions/vscode/README.md). See [compatibility](docs/compatibility.md) for tested environments and the [changelog](CHANGELOG.md) for runtime history.
 
 ## What it does
 
@@ -133,6 +133,7 @@ State and evidence default to `.harmony-agent/`; use `--state-dir` to choose ano
 | Guide | Contents |
 | --- | --- |
 | [Installation](docs/installation.md) | Prerequisites, source/wheel setup, upgrades and removal |
+| [VS Code workbench](extensions/vscode/README.md) | Build and install the extension, operate a device, and run test cases |
 | [Agent integrations](docs/integrations.md) | CLI, Skill, MCP and optional host examples |
 | [Execution](docs/execution.md) | Bounded plans, saved evidence, outcomes and efficiency |
 | [Performance](docs/performance.md) | Timelines, measured boundaries and matched comparisons |

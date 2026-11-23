@@ -1,0 +1,3 @@
+These styles are redistributed unchanged from `@vscode-elements/elements-lite@0.4.0` under the adjacent MIT license. The workbench uses them on native HTML buttons and text fields. Theme adjustments live in `media/ui/components.css`.
+
+To reproduce, run `npm pack @vscode-elements/elements-lite@0.4.0` and extract `package/components/button/button.css`, `package/components/textfield/textfield.css` and `package/LICENSE` into this directory using their basenames. The registry tarball integrity is `sha512-ectIAHDvDmoSgyjyfoWOkRSiQl/s6WWSuRTtDOfdibSO7rwjPjMv4sK+0Fi+sL3vHh33uYg23Y0g8Wm9cCy7Ng==`. [Upstream project](https://github.com/vscode-elements/elements-lite)

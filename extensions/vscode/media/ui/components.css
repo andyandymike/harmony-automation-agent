@@ -1,0 +1,98 @@
+@import url("./vendor/elements-lite/button.css");
+@import url("./vendor/elements-lite/textfield.css");
+
+/* Use the workbench palette for actions. The individual control states come
+   from Elements Lite and continue to use VS Code's focus and contrast tokens. */
+#workbench .vscode-button {
+    --vscode-button-background: var(--accent);
+    --vscode-button-foreground: var(--accent-ink);
+    --vscode-button-hoverBackground: color-mix(in srgb, var(--accent) 85%, var(--ink));
+    min-height: 30px;
+    max-width: 100%;
+    border-radius: 4px;
+    white-space: normal;
+    justify-content: center;
+    gap: 6px;
+    color: var(--vscode-button-foreground);
+}
+#workbench .vscode-button.secondary {
+    color: var(--vscode-button-secondaryForeground, var(--ink));
+}
+#workbench input.vscode-textfield {
+    min-width: 0;
+    max-width: 100%;
+    min-height: 32px;
+    border-radius: 4px;
+    color: var(--vscode-input-foreground, var(--ink));
+    background-color: var(--vscode-input-background, var(--sidebar));
+}
+#workbench .ui-tabs {
+    display: flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 3px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+#workbench .ui-tabs:not(.net-nav) { border-bottom: 1px solid var(--line); }
+#workbench .ui-tabs > [role="tab"] {
+    flex: none;
+    padding: 7px 11px;
+    min-height: 33px;
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    white-space: nowrap;
+    cursor: pointer;
+}
+#workbench .ui-tabs > [role="tab"]:hover { background: var(--hover); color: var(--ink); }
+#workbench .ui-tabs > [aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+#workbench .ui-tabs > [role="tab"]:focus-visible { outline-offset: -3px; }
+.ui-tab-panel { min-width: 0; }
+.ui-tab-panel[hidden] { display: none; }
+.ui-tab-panel:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+#workbench .item-menu-trigger {
+    flex:none; display:inline-grid; place-items:center; width:26px; min-height:26px; padding:0;
+    border:1px solid transparent; border-radius:4px; background:transparent; color:var(--muted); font-size:17px; line-height:1;
+}
+#workbench .item-menu-trigger:enabled:is(:hover,[aria-expanded="true"]) { background:var(--hover); color:var(--ink); }
+.item-action-menu {
+    position:fixed; z-index:30; display:grid; min-width:10.5rem; max-width:calc(100vw - 12px); max-height:calc(100vh - 12px);
+    overflow:auto; padding:4px; border:1px solid var(--vscode-menu-border,var(--line)); border-radius:5px;
+    background:var(--vscode-menu-background,var(--sidebar)); color:var(--vscode-menu-foreground,var(--ink)); box-shadow:0 5px 18px #0005;
+}
+.item-action-menu button {
+    border:0; border-radius:3px; background:transparent; color:inherit; cursor:pointer; font:inherit; text-align:start;
+    min-height:29px; padding:4px 10px; overflow-wrap:anywhere;
+}
+.item-action-menu button:is(:focus,:hover) {
+    background:var(--vscode-menu-selectionBackground,var(--hover)); color:var(--vscode-menu-selectionForeground,var(--ink));
+}
+.item-action-menu button:focus-visible { outline:1px solid var(--vscode-focusBorder,var(--accent)); outline-offset:-1px; }
+.item-action-menu [role="separator"] { height:1px; margin:4px 5px; background:var(--vscode-menu-separatorBackground,var(--line)); }
+.list-order-grip {
+    flex:none; display:inline-grid; place-items:center; min-width:24px; min-height:24px; color:var(--muted); cursor:grab;
+    user-select:none; font-size:16px; line-height:1;
+}
+.list-order-grip:hover { color:var(--accent); background:var(--hover); border-radius:4px; }
+.list-order-grip:active { cursor:grabbing; }
+[data-order-index]:has(> [data-order-grip], > [data-order-head] > [data-order-grip]) { cursor:grab; }
+#workbench [data-order-index]:has(> [data-order-grip], > [data-order-head] > [data-order-grip]) > [data-order-hit],
+#workbench [data-order-index]:has(> [data-order-grip], > [data-order-head] > [data-order-grip]) > :is(.case-sort-content,.sc-rule-main) > [data-order-hit] { cursor:grab; }
+.list-order-active { cursor:grabbing; user-select:none; }
+.list-order-active > [data-order-index] { transform:translateY(var(--order-shift,0px)); transition:transform 160ms ease-out; }
+.list-order-source { visibility:hidden; }
+.list-order-ghost {
+    position:fixed; z-index:32; inset:0 auto auto 0; display:flex; align-items:center; gap:12px; min-height:40px; padding:9px 13px;
+    background:color-mix(in srgb,var(--selected) 92%,transparent); color:var(--ink); border:1px solid var(--accent);
+    border-radius:6px; box-shadow:0 8px 24px #0005; pointer-events:none; opacity:.92;
+}
+.list-order-ghost span { color:var(--muted); font:12px var(--mono); }
+.list-order-ghost strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (prefers-reduced-motion: reduce) {
+    .list-order-active > [data-order-index] { transition:none; }
+}

@@ -1,0 +1,15 @@
+**
+!package.json
+!package.nls*.json
+!README.md
+!README.zh-CN.md
+!CHANGELOG.md
+!NETWORK.md
+!LICENSE
+!src/**/*.js
+!src/**/*.py
+!media/**/*.css
+!media/**/*.js
+!media/device.svg
+!media/ui/vendor/elements-lite/LICENSE
+!media/ui/vendor/elements-lite/README.md

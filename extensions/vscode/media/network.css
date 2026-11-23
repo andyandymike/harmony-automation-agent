@@ -1,0 +1,226 @@
+.net-view {
+    --net-well: color-mix(in srgb, var(--sidebar) 60%, var(--surface));
+    --net-active: var(--vscode-focusBorder, var(--accent));
+    --net-mono-size: 13px;
+    container: network / inline-size;
+    min-width: 0;
+}
+.net-heading, .net-traffic-head, .net-detail-meta, .net-actions, .net-find-controls, .net-find-nav {
+    display: flex; align-items: center; flex-wrap: wrap;
+}
+.net-heading { justify-content: flex-start; gap: 10px clamp(14px,2.2vw,30px); border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+#workbench .net-heading h1 { font-size: 26px; letter-spacing: -.04em; line-height: 1.2; }
+#workbench .net-heading .net-nav {
+    padding: 3px; gap: 2px; border: 1px solid var(--line); background: var(--net-well); border-radius: 6px;
+}
+#workbench .net-heading .net-nav > [role="tab"] { min-height: 29px; padding: 4px 12px; border: 1px solid transparent; border-radius: 3px; }
+#workbench .net-heading .net-nav > [aria-selected="true"] {
+    color: var(--ink); background: var(--selected); border-color: color-mix(in srgb,var(--accent) 43%,var(--line));
+}
+@media (forced-colors: active) {
+    #workbench .net-heading .net-nav > [aria-selected="true"] { border-color: Highlight; }
+}
+.net-intake { margin: clamp(28px,5vh,54px) 0 24px; max-width: 700px; }
+#workbench .net-intake h2 { font-size: clamp(20px,2vw,27px); margin-bottom: 18px; letter-spacing: -.025em; }
+.net-source-list { border-top: 1px solid var(--line); }
+#workbench .net-source-option {
+    display: flex; gap: 14px; align-items: center; width: 100%; background: transparent; color: var(--ink);
+    padding: 15px 7px; text-align: start; border: 0; border-bottom: 1px solid var(--line);
+}
+#workbench .net-source-option > svg { flex: none; color: var(--accent); }
+#workbench .net-source-option :is(strong,small) { display: block; }
+#workbench .net-source-option strong { font-weight: 610; font-size: 14px; }
+#workbench .net-source-option small { margin-top: 3px; color: var(--muted); line-height: 1.45; }
+#workbench .net-source-option:enabled:hover { background: var(--hover); }
+.net-source-arrow { margin-inline-start: auto; color: var(--muted); }
+.net-source-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.net-native { margin: 12px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--net-well); }
+.net-native-bar, .net-native-context, .net-native-actions, .net-native-result { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; min-width:0; }
+.net-native-bar { justify-content:space-between; padding:9px 10px; }
+.net-native-context { flex: 1 1 220px; color:var(--muted); overflow-wrap:anywhere; }
+.net-native-context strong { color:var(--ink); }
+.net-native-app { min-width:0; }
+.net-native-actions { margin-inline-start:auto; gap:8px; }
+#workbench .net-native-options { position:relative; margin:0; }
+#workbench .net-native-options summary {
+    padding:6px 8px; border-radius:4px; color:var(--muted); white-space:nowrap;
+}
+#workbench .net-native-options summary:hover, #workbench .net-native-options[open] summary {
+    color:var(--ink); background:var(--hover);
+}
+.net-native-options-menu {
+    position:absolute; z-index:3; inset-block-start:calc(100% + 4px); inset-inline-end:0;
+    min-width:max-content; padding:4px; border:1px solid var(--line); border-radius:4px;
+    background:var(--surface); box-shadow:0 6px 15px #0004;
+}
+#workbench .net-native-options-menu .button {
+    display:block; width:100%; border-color:transparent; background:transparent; text-align:start;
+}
+.net-native-result { align-items:baseline; padding:7px 10px; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+#network-native-clock { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.net-source-receipt { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 12px; overflow-wrap:anywhere; }
+.net-source-receipts { margin-block:6px 10px; }
+.net-actions { gap: 5px; }
+#workbench .net-view .button { font-size: 12px; }
+#workbench .net-filters .button { font-size: 13px; }
+#workbench .net-view .net-filters .net-failures { color: var(--bad); }
+#workbench .net-filters .net-failures[aria-pressed=true] { border-color: var(--bad); background: color-mix(in srgb,var(--bad) 12%,var(--surface)); }
+#workbench .net-source-actions .button, #workbench .net-detail-head .button { min-height: 29px; padding: 3px 9px; }
+#workbench .net-view :is([data-net=toggleFind],[data-net=filters])[aria-expanded=true],
+#workbench .net-view [data-net=regex][aria-pressed=true] {
+    background: var(--vscode-inputOption-activeBackground,var(--selected));
+    border-color: var(--vscode-inputOption-activeBorder,var(--accent));
+}
+.net-note, .net-context { background: var(--net-well); border-inline-start: 2px solid var(--accent); overflow-wrap: anywhere; }
+#workbench .net-note, .net-context { margin: 2px 0 10px; padding: 7px 10px; }
+.net-view details { margin-block: 5px; }
+.net-view summary { cursor: pointer; }
+.net-traffic-head { justify-content: space-between; gap: 8px 14px; margin-top: 18px; }
+#workbench .net-traffic-head h2 { display: inline-flex; gap: 7px; align-items: baseline; font-size: 17px; }
+.net-count { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--muted); }
+#workbench .net-traffic-head button, #workbench .net-find-nav button { min-height: 24px; padding: 2px 7px; }
+.net-filters, .net-filter-options { display: flex; flex-wrap: wrap; align-items: end; gap: 6px; margin: 9px 0 12px; }
+.net-filter-options[hidden] { display: none; }
+.net-filter-options { padding: 8px 10px; background: var(--net-well); }
+.net-filters label, .net-filter-options label, .net-find-controls label, .net-compare-field { display: grid; align-content: end; gap: 3px; min-width: 0; }
+.net-filter-options label > span, .net-find-controls label > span, .net-compare-field { font-size: 11px; font-weight: 550; color: var(--muted); }
+.net-url-filter { flex: 1 1 200px; }
+.net-picker { flex: 0 1 auto; }
+#workbench .net-view :is(.net-filter-options,.net-filters,.net-find-controls,.net-compare-field) :is(input,select) {
+    min-height: 29px; width: 100%; font-size: 13px; padding: 3px 7px; font-weight: normal;
+}
+#workbench .net-view .net-text-action { border-color: transparent; color: var(--muted); min-height: 27px; }
+.net-find { border: 1px solid var(--line); border-inline-start: 2px solid var(--accent); padding: 8px 10px; margin-bottom: 12px; background: var(--net-well); }
+.net-find-controls { align-items: end; gap: 5px; }
+.net-find-input { flex: 1 1 160px; }
+#workbench .net-find-controls button { min-height: 28px; padding: 2px 8px; }
+.net-find-nav { gap: 5px; margin-top: 7px; color: var(--muted); font-size: 12px; }
+.net-find-nav span { margin-inline-end: auto; overflow-wrap: anywhere; }
+.net-find-nav [role=alert], .net-detail [role=alert] { color: var(--bad); }
+.net-grid { display: grid; grid-template-columns: minmax(265px,.92fr) minmax(0,1.08fr); align-items: start; border-block: 1px solid var(--line); overflow: clip; }
+.net-collection-heading, .net-detail-title, .net-saved-name, .net-undo, .net-field-browse-nav {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px;
+}
+.net-detail-title { justify-content: space-between; align-items: start; }
+.net-detail-title h2 { flex: 1 1 165px; }
+#workbench .net-saved-name { margin: 6px 0; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+#workbench .net-record-item { position: relative; }
+#workbench .net-record-item .net-row, #workbench .net-columns { padding-inline-start: 32px; }
+#workbench .net-record-item .net-row, #workbench .net-columns { padding-inline-end: 27px; }
+#workbench .net-record-item > .item-menu-trigger { position:absolute; inset-inline-end:0; top:50%; transform:translateY(-50%); width:24px; }
+#workbench .net-record-item .net-row-star {
+    position:absolute; inset-inline-start:3px; top:50%; transform:translateY(-50%); min-height:28px; width:25px;
+    background:transparent; border:0; color:var(--muted); font-size:17px; line-height:1; padding:0; cursor:pointer;
+}
+#workbench .net-record-item .net-row-star[aria-pressed=true], #workbench .net-save-exchange[aria-pressed=true] { color:var(--accent); }
+#workbench .net-favorites-filter[aria-pressed=true] { border-color:var(--accent); background:var(--selected); }
+.net-undo { padding:4px 8px; background:var(--net-well); }
+#workbench .net-field-action {
+    display:inline; min-height:0; padding:0; border:0; border-radius:2px; font:inherit; color:inherit; background:transparent;
+    text-decoration:underline dotted color-mix(in srgb,var(--muted) 50%,transparent); text-underline-offset:3px;
+    white-space:pre-wrap; overflow-wrap:anywhere; text-align:start; cursor:pointer;
+}
+#workbench .net-field-action:hover, #workbench .net-field-action:focus-visible { background:var(--selected); text-decoration-style:solid; }
+#workbench .net-detail-field h3 small { display:inline; font-size:11px; color:var(--muted); font-weight:400; }
+.net-field-browse-row { display:grid; grid-template-columns:minmax(45px,.6fr) minmax(65px,1fr) auto; padding:3px 0; align-items:center; gap:6px; }
+.net-field-browse-row code, .net-field-browse-nav code { overflow-wrap:anywhere; }
+.net-field-browser { padding:6px 0; }
+.net-record-list { min-width: 0; max-height: 67vh; overflow: auto; scrollbar-gutter: stable; }
+.net-columns, #workbench .net-row { display: grid; grid-template-columns: 43px minmax(0,1fr) 34px 44px; align-items: baseline; gap: 7px; }
+.net-columns { position: sticky; z-index: 1; top: 0; font-weight: 550; font-size: 11px; color: var(--muted); background: var(--net-well); border-bottom: 1px solid var(--line); padding: 5px 8px; }
+.net-columns > :nth-last-child(-n+2) { text-align: end; }
+#workbench .net-row { width: 100%; color: var(--ink); padding: 7px 8px; border: 0; border-bottom: 1px solid var(--line); text-align: start; background: transparent; }
+#workbench .net-row:hover { background: var(--hover); }
+#workbench .net-row[aria-selected=true] { background: var(--selected); box-shadow: inset 2px 0 var(--accent); }
+#workbench .net-row:focus-visible { outline-offset: -2px; }
+.net-method, .net-status, .net-ms, .net-resource strong { font: 12px/1.45 var(--mono); }
+.net-method { font-size: 10px; font-weight: 630; }
+.net-resource strong { font-size: 13px; }
+.net-resource { min-width: 0; }
+.net-resource strong, .net-resource small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-resource small { font-size: 11px; }
+#workbench .net-resource .net-has-hit { color: var(--accent); }
+.net-ms, .net-row .net-status { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.net-ms { color: var(--muted); font-size: 11px; }
+.net-ms meter { display: block; width: 100%; height: 3px; margin-top: 4px; appearance: none; }
+.net-ms meter::-webkit-meter-bar { background: var(--line); border-radius: 0; height: 2px; border: 0; }
+.net-ms meter::-webkit-meter-optimum-value { background: var(--muted); }
+.net-status { font-weight: 600; }
+.net-status[data-tone=success] { color: var(--good); }
+.net-status[data-tone=warning] { color: var(--warning); }
+.net-status[data-tone=error] { color: var(--bad); }
+/* Several light themes supply these colours for large test icons. Mix in
+   editor text for the smaller status codes and filter labels. */
+body.vscode-light .net-view {
+    --good: color-mix(in srgb, var(--vscode-testing-iconPassed,#236e51) 38%, var(--ink));
+    --bad: color-mix(in srgb, var(--vscode-errorForeground,#ac3026) 48%, var(--ink));
+    --warning: color-mix(in srgb, var(--vscode-editorWarning-foreground,#80530b) 50%, var(--ink));
+}
+.net-detail { min-width: 0; border-inline-start: 1px solid var(--line); }
+.net-back-list { display: none; }
+.net-detail-head { display: block; padding: 12px 14px; }
+.net-detail-meta { gap: 4px 10px; margin-top: 8px; font-size: 11px; color: var(--muted); }
+#workbench .net-detail h2 { font: 600 16px/1.45 var(--mono); overflow-wrap: anywhere; }
+.net-detail h2 .net-verb { display: inline-block; font-size: 11px; letter-spacing: .03em; color: var(--accent); vertical-align: middle; }
+.net-host { color: var(--muted); overflow-wrap: anywhere; font-size: 12px; }
+#workbench .net-provenance { margin-top: 5px; overflow-wrap: anywhere; }
+#workbench .net-view .net-rule-link { border: 0; min-height: 22px; padding: 0 3px; text-decoration: underline; color: var(--vscode-textLink-foreground,var(--accent)); font-family: var(--mono); }
+.net-transport-diff { border-top: 1px solid var(--line); padding-top: 8px; }
+.net-transport-diff summary { color: var(--muted); font-size: 12px; }
+.net-transport-diff[open] summary { margin-bottom: 8px; }
+.net-detail-head .net-actions { margin-top: 9px; }
+.net-detail-tabs { padding-inline: 7px; border-block: 1px solid var(--line); background: var(--net-well); }
+.net-detail-content { padding: 14px; overflow: auto; max-height: min(62vh,900px); }
+.net-detail-field + .net-detail-field, .net-differences > section + section { margin-top: 13px; }
+#workbench .net-detail-field h3, #workbench .net-differences h3 { font-size: 12px; margin-bottom: 5px; }
+.net-view pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--net-mono-size)/1.55 var(--mono); }
+.net-field-value, .net-diff-value { background: var(--net-well); padding: 7px 9px; border-radius: 3px; }
+.net-json-key { color: var(--vscode-debugTokenExpression-name,#a3c8d9); }
+.net-json-string { color: var(--vscode-debugTokenExpression-string,#cbb89e); }
+.net-json-number, .net-json-literal { color: var(--vscode-debugTokenExpression-number,#acc4ac); }
+body.vscode-light .net-json-key { color: color-mix(in srgb, var(--vscode-debugTokenExpression-name,#365d7e) 64%, var(--ink)); }
+body.vscode-light .net-json-string { color: color-mix(in srgb, var(--vscode-debugTokenExpression-string,#81512a) 74%, var(--ink)); }
+body.vscode-light :is(.net-json-number,.net-json-literal) { color: color-mix(in srgb, var(--vscode-debugTokenExpression-number,#426444) 58%, var(--ink)); }
+.net-view mark { color: var(--vscode-editor-foreground,var(--ink)); background: var(--vscode-editor-findMatchHighlightBackground,#996d28); outline: 1px solid var(--vscode-editor-findMatchBorder,var(--warning)); }
+.net-unavailable, .net-footnote, .net-diff-note { color: var(--muted); font-size: 12px; }
+#workbench .net-diff-note { margin-bottom: 9px; }
+.net-compare-field { margin-bottom: 7px; }
+.net-diff-pair { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 3px; }
+.net-diff-value small { display: block; margin-bottom: 4px; font-size: 11px; }
+.net-diff-value.before { border-inline-start: 2px solid var(--bad); }
+.net-diff-value.after { border-inline-start: 2px solid var(--good); }
+.net-timings { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; }
+.net-timings dd { font-family: var(--mono); }
+.net-empty { padding: 22px 15px; border-block: 1px solid var(--line); }
+#workbench .net-empty h3 { font-size: 15px; margin-bottom: 5px; }
+.net-empty p { color: var(--muted); }
+.net-view #net-draft { width: 100%; font-family: var(--mono); }
+.net-editor label { display: grid; gap: 4px; margin: 6px 0; }
+.net-editor fieldset { min-width: 0; border: 1px solid var(--line); margin: 10px 0; padding: 8px 14px; }
+.net-editor .ne-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.net-editor .ne-row label:has([type=checkbox]) { display: inline-flex; align-items: center; }
+.net-editor textarea { font-family: var(--mono); width: 100%; }
+.net-editor .ne-step { padding: 8px 0; border-top: 1px solid var(--line); }
+@container network (max-width: 664px) {
+    #network-panel-requests:has(.net-grid[data-reading=true]) > .net-traffic-head { display: none; }
+    .net-grid { grid-template-columns: minmax(0,1fr); }
+    .net-record-list { max-height: 70vh; }
+    .net-grid[data-reading=false] .net-detail, .net-grid[data-reading=true] .net-record-list { display: none; }
+    .net-detail { border-inline-start: 0; }
+    #workbench .net-back-list { display: inline-flex; margin: 6px 0 0; min-height: 27px; padding-inline: 6px; border: 0; color: var(--vscode-textLink-foreground,var(--accent)); }
+    .net-detail-head { padding-top: 6px; }
+}
+@container network (max-width: 420px) {
+    .net-heading { gap: 5px; }
+    #workbench .net-heading h1 { font-size: 23px; }
+    .net-url-filter { flex-basis: 100%; }
+    .net-picker { flex: 1 1 64px; }
+    .net-find-input { flex-basis: 100%; }
+    .net-diff-pair { grid-template-columns: minmax(0,1fr); }
+    .net-detail-head, .net-detail-content { padding: 9px; }
+    .net-columns, #workbench .net-row { gap: 4px; }
+}
+@media (forced-colors: active) {
+    #workbench .net-row[aria-selected=true], #workbench .net-view button[aria-pressed=true] { outline: 1px solid Highlight; outline-offset: -1px; }
+    .net-view mark { color: HighlightText; background: Highlight; }
+}
