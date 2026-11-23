@@ -2,6 +2,8 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { createHash } = require("node:crypto");
+const { pythonPath } = require("./projectRuntime");
 
 const providerId = "harmonyAgent.phoneTools";
 const windows = process.platform === "win32";
@@ -50,24 +52,38 @@ async function cliInterpreter(command) {
     }
 }
 
-async function getMcpLaunch(workbench) {
-    const agent = workbench.agent;
+async function getMcpLaunch(workbench, { forProvider = false } = {}) {
+    const manager = workbench.projectRuntime;
+    await manager?.ready(false, true);
+    if (forProvider && manager?.current.kind === "pending") return;
+    const runtime = manager?.configuration;
+    const hdcPath = runtime?.hdc || workbench.agent.hdcPath;
+    const args = ["-m", "harmony_agent.mcp", "--state-dir", workbench.stateDir];
+    if (hdcPath) args.push("--hdc", hdcPath);
+    if (runtime) {
+        if (!forProvider) await manager.verifyPython(runtime);
+        return { command: runtime.python, args, env: { PYTHONPATH: pythonPath(runtime) }, hdcPath };
+    }
     const chosen = workbench.config.get("mcpPythonPath");
-    const command = chosen ? await findExecutable(chosen) : await cliInterpreter(agent.executable);
+    const command = chosen ? await findExecutable(chosen) : await cliInterpreter(workbench.agent.executable);
     if (!command) {
         const message = /^zh\b/i.test(workbench.language)
             ? "请将 harmonyAgent.mcpPythonPath 设为已安装 harmony-automation-agent 的 Python 解释器路径。"
             : "Set harmonyAgent.mcpPythonPath to the Python interpreter with harmony-automation-agent installed.";
         throw Object.assign(new Error(message), { code: "MCP_PYTHON_REQUIRED" });
     }
-    const args = ["-m", "harmony_agent.mcp", "--state-dir", workbench.stateDir];
-    if (agent.hdcPath) args.push("--hdc", agent.hdcPath);
-    return { command, args };
+    return { command, args, hdcPath };
 }
 
 function registerCopilotMcp(vscode, context, workbench) {
     if (!vscode.lm?.registerMcpServerDefinitionProvider) return;
     const changes = new vscode.EventEmitter();
+    const manager = workbench.projectRuntime;
+    const definition = ({ command, args, env }) => {
+        const version = env && createHash("sha256").update(JSON.stringify([command, args, env])).digest("hex");
+        return new vscode.McpStdioServerDefinition("Harmony Agent", command, args, env, version);
+    };
+    if (manager) context.subscriptions.push(manager.onDidChange(() => changes.fire()));
     context.subscriptions.push(changes, vscode.workspace.onDidChangeConfiguration(event => {
         if (["cliPath", "mcpPythonPath", "hdcPath"].some(key => event.affectsConfiguration("harmonyAgent." + key))) {
             changes.fire();
@@ -75,8 +91,13 @@ function registerCopilotMcp(vscode, context, workbench) {
     }), vscode.lm.registerMcpServerDefinitionProvider(providerId, {
         onDidChangeMcpServerDefinitions: changes.event,
         async provideMcpServerDefinitions() {
-            const { command, args } = await getMcpLaunch(workbench);
-            return [new vscode.McpStdioServerDefinition("Harmony Agent", command, args)];
+            if (vscode.workspace.isTrusted === false) return [];
+            const launch = await getMcpLaunch(workbench, { forProvider: true });
+            return launch ? [definition(launch)] : [];
+        },
+        async resolveMcpServerDefinition(server, token) {
+            if (token?.isCancellationRequested || vscode.workspace.isTrusted === false) return;
+            return manager ? definition(await getMcpLaunch(workbench)) : server;
         },
     }));
 }

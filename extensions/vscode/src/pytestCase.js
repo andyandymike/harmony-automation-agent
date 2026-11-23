@@ -9,6 +9,7 @@ const { workflowWithScenario } = require("./workflowFile");
 const { validateScenario } = require("./network");
 const { finishPytest } = require("./pytestReport");
 const { journalPath } = require("./runProgress");
+const { pythonPath } = require("./projectRuntime");
 
 const templatePath = path.join(__dirname, "templates", "pytest_case.py");
 
@@ -84,6 +85,9 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
     if (vscode.workspace.isTrusted === false) throw new Error(zh ? "请先在 VS Code 中信任此工作区，再运行项目测试。" : "Trust this workspace in VS Code before running its tests.");
     const device = bench.state.device || process.env.HARMONY_DEVICE;
     if (!device) throw new Error(zh ? "请在工作台选择手机，或在终端设置 HARMONY_DEVICE 后运行用例。" : "Select a device in the workbench, or set HARMONY_DEVICE and run the test in a terminal.");
+    await bench.projectRuntime?.ready();
+    const runtime = bench.projectRuntime?.configuration;
+    if (runtime) await bench.projectRuntime.verifyPython(runtime);
     const script = vscode.Uri.file(path.join(entry.folder, entry.filename));
     const invocation = randomUUID();
     const evidenceRoot = path.resolve(process.env.HARMONY_ARTIFACT_DIR || path.join(bench.storage.fsPath, "pytest-artifacts"));
@@ -91,8 +95,8 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
     const plan = bench.state.plan;
     const env = {HARMONY_DEVICE:device, HARMONY_ARTIFACT_DIR:directory,
         HARMONY_PYTEST_RESULT:path.join(directory, "pytest.json"), HARMONY_PYTEST_TARGET:path.join(entry.folder, entry.filename),
-        HARMONY_PYTEST_WORKFLOW_OVERRIDE:workflowOverride || "",
-        PYTHONPATH:[path.dirname(templatePath), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter)};
+        HARMONY_PYTEST_WORKFLOW_OVERRIDE:workflowOverride || "", HARMONY_PYTEST_PROJECT_PYTHON:runtime?.python || "",
+        PYTHONPATH:pythonPath(runtime, path.dirname(templatePath))};
     if (workflowOverride && !path.isAbsolute(workflowOverride)) throw new Error("Expected an absolute candidate workflow path");
     let candidate;
     if (workflowOverride) {
@@ -100,8 +104,10 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
         candidate = source?.format === "harmony-agent.workflow-scenario" ? source.workflow : source;
         if (readiness(candidate)) throw new Error("A candidate must contain a runnable workflow.");
     }
-    if (bench.config.get("cliPath")) env.HARMONY_AGENT_CLI = bench.config.get("cliPath");
-    if (bench.config.get("hdcPath")) env.HARMONY_HDC = bench.config.get("hdcPath");
+    const cli = runtime?.cli || bench.config.get("cliPath");
+    const hdc = runtime?.hdc || bench.config.get("hdcPath");
+    if (cli) env.HARMONY_AGENT_CLI = cli;
+    if (hdc) env.HARMONY_HDC = hdc;
     if (entry.requiresRuleGroup && !process.env.HARMONY_RULE_GROUP_FIXTURE) {
         const fixture = await vscode.window.showInputBox({ title: zh ? "准备规则组的 pytest fixture" : "Pytest fixture that prepares the rule group",
             prompt: zh ? "输入项目已注册的 fixture 名称。它负责启动网关并配置设备路由。" : "Enter the registered fixture that prepares the gateway and device route.",
@@ -110,9 +116,9 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
         if (!fixture) return;
         env.HARMONY_RULE_GROUP_FIXTURE = fixture;
     }
-    let python = process.env.HARMONY_PYTEST_PYTHON || "python";
+    let python = runtime?.python || process.env.HARMONY_PYTEST_PYTHON || "python";
     const pythonExtension = vscode.extensions?.getExtension("ms-python.python");
-    if (pythonExtension && !process.env.HARMONY_PYTEST_PYTHON) {
+    if (!runtime && pythonExtension && !process.env.HARMONY_PYTEST_PYTHON) {
         const api = await pythonExtension.activate();
         const active = api.environments?.getActiveEnvironmentPath(script);
         if (active) python = (await api.environments.resolveEnvironment(active))?.executable?.uri?.fsPath || python;

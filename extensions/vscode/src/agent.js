@@ -17,13 +17,17 @@ class AgentError extends Error {
 }
 
 class AgentClient {
-    constructor({ executable, hdcPath, stateDir }) {
+    constructor({ executable, prefix = [], env, verify, hdcPath, stateDir }) {
         this.executable = executable;
+        this.prefix = prefix;
+        this.env = env;
+        this.verify = verify;
         this.hdcPath = hdcPath;
         this.stateDir = stateDir;
     }
 
     async call(command, input = {}) {
+        await this.verify?.();
         const requests = path.join(this.stateDir, "requests");
         await fs.mkdir(requests, { recursive: true });
         const request = path.join(requests, randomUUID() + ".json");
@@ -31,16 +35,19 @@ class AgentClient {
             encoding: "utf8",
             flag: "wx",
         });
-        const args = ["--state-dir", this.stateDir, "--request", request, "--json"];
+        const args = [...this.prefix, "--state-dir", this.stateDir, "--request", request, "--json"];
         if (this.hdcPath) args.push("--hdc", this.hdcPath);
         try {
             let stdout;
             try {
                 ({ stdout } = await runExecutable(this.executable, args, {
-                    encoding: "utf8", windowsHide: true, maxBuffer: 32 * 1024 * 1024,
+                    encoding: "utf8", windowsHide: true, maxBuffer: 32 * 1024 * 1024, env: this.env,
                 }));
             } catch (error) {
-                if (!error.stdout) throw error;
+                if (!error.stdout) {
+                    if (this.prefix.length) throw new Error(error.stderr?.trim() || error.message);
+                    throw error;
+                }
                 stdout = error.stdout;
             }
             let envelope;

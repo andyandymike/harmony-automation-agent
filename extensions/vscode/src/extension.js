@@ -6,6 +6,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const { setTimeout: delay } = require("node:timers/promises");
 const vscode = require("vscode");
 const { AgentClient } = require("./agent");
+const { ProjectRuntime, projectHdc, pythonPath } = require("./projectRuntime");
 const { pageView, recordedPlan, moveListItem, runView, withAuthoredTargets, compareRuns, deviceRecordingFormat } = require("./model");
 const { summarizePlan } = require("./planSummary");
 const { startRecorder, replayGesture, validateGesture } = require("./deviceRecorder");
@@ -77,6 +78,22 @@ class Workbench {
         this.networks = new NetworkController(this, vscode);
         this.flowDebugger = new FlowDebugger(this, vscode);
         this.recordingView = this.state.mode;
+        this.projectRuntime = new ProjectRuntime(vscode, context, () => this.language, () =>
+            this.runtimeOperation || this.state.recording || this.networks.activeCapture || this.closingRuntime);
+        context.subscriptions.push(this.projectRuntime.onDidChange((next, previous) => {
+            this.state.device = undefined;
+            this.state.devices = [];
+            this.state.page = this.state.liveImage = undefined;
+            this.state.actions = [];
+            if (this.state.error === previous.error || previous.runtime || next.runtime) this.state.error = "";
+            this.livePanel?.runtimeChanged();
+            void this.elements.sync();
+            if (this.networks.mapping) {
+                this.networks.retireMapping();
+                this.networks.changed();
+            }
+            this.publish();
+        }));
     }
 
     get config() {
@@ -93,9 +110,12 @@ class Workbench {
     }
 
     get agent() {
+        const runtime = this.projectRuntime.configuration;
         return new AgentClient({
-            executable: this.config.get("cliPath") || process.env.HARMONY_AGENT_CLI || "harmony-agent",
-            hdcPath: this.config.get("hdcPath"),
+            executable: runtime?.python || this.config.get("cliPath") || process.env.HARMONY_AGENT_CLI || "harmony-agent",
+            ...(runtime && { prefix: [runtime.cli], env: { ...process.env, PYTHONPATH: pythonPath(runtime) },
+                verify: () => this.projectRuntime.verifyPython(runtime) }),
+            hdcPath: runtime?.hdc || this.config.get("hdcPath"),
             stateDir: this.stateDir,
         });
     }
@@ -118,7 +138,9 @@ class Workbench {
     prepareFlowScenario(planRef,scenario,id,savedHits) { return this.networks.prepareFlow(planRef,scenario,id,savedHits); }
 
     sessionFor(device) {
-        const id = createHash("sha256").update(this.workspaceStateDir + "\0" + device).digest("hex").slice(0, 24);
+        const hash = createHash("sha256").update(this.workspaceStateDir + "\0" + device);
+        if (this.projectRuntime.current.runtime) hash.update("\0" + JSON.stringify(this.projectRuntime.current.runtime));
+        const id = hash.digest("hex").slice(0, 24);
         return "vscode-" + id;
     }
 
@@ -154,7 +176,8 @@ class Workbench {
                             await this.setPlan(vscode.Uri.parse(this.state.cases[0].uri));
                         try { await this.listDevices(); }
                         catch (error) {
-                            if (!["network","exploration"].includes(this.state.mode) && !recordingViews.has(this.state.mode)) throw error;
+                            if (this.projectRuntime.current.kind !== "settings" ||
+                                (!["network","exploration"].includes(this.state.mode) && !recordingViews.has(this.state.mode))) throw error;
                         }
                     });
                 }
@@ -204,6 +227,8 @@ class Workbench {
                 this.cancelAI();
             } else if (message.type === "aiProvider") {
                 await this.setAIProvider(message.provider);
+            } else if (message.type === "projectRuntime") {
+                await this.chooseProjectRuntime();
             } else if (message.type === "settings" || message.type === "aiSettings") {
                 const query = message.type === "aiSettings" ? "@id:harmonyAgent.aiProvider" : "harmonyAgent";
                 await vscode.commands.executeCommand("workbench.action.openSettings", query);
@@ -237,8 +262,12 @@ class Workbench {
                 if (this.networks.activeCapture) await this.networks.finishNative();
                 if (this.state.recording) await this.stopRecording();
             };
+            const closeLock = this.closingRuntime = Symbol();
             this.closingLive = closing().catch(error => { this.state.error = this.errorMessage(error); })
-                .finally(() => this.publish());
+                .finally(() => {
+                    if (this.closingRuntime === closeLock) this.closingRuntime = undefined;
+                    this.publish();
+                });
         });
         webview.html = `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -259,6 +288,14 @@ class Workbench {
         } catch (error) {
             void vscode.window.showErrorMessage(this.errorMessage(error));
         }
+    }
+
+    async chooseProjectRuntime() {
+        try {
+            if (await this.projectRuntime.choose() && this.panel && !this.state.busy && !this.state.recording && !this.networks.activeCapture)
+                await this.perform(() => this.listDevices());
+        }
+        catch (error) { void vscode.window.showErrorMessage(this.errorMessage(error)); }
     }
 
     async openTask() {
@@ -381,12 +418,14 @@ class Workbench {
     }
 
     publish() {
+        if (this.projectRuntime.apply()) return;
         if (recordingViews.has(this.state.mode)) this.recordingView = this.state.mode;
         if (!this.panel) return;
         const text = this.text;
         const baseline = this.baseline();
         void this.panel.webview.postMessage({
-            state: {...this.state, testView:this.recordingView,
+            state: {...this.state, testView:this.recordingView, runtimeName: this.projectRuntime.current.name,
+                runtimeError: this.projectRuntime.current.error,
                 ...(this.state.tool !== "network" && {network:undefined,networkDraft:undefined}),
                 nativeCaptureActive:Boolean(this.networks.activeCapture)},
             text,
@@ -414,7 +453,12 @@ class Workbench {
         this.state.error = "";
         this.publish();
         // A newly reopened editor may still be releasing the previous display and recorder.
-        const sync = async () => { await action(); await this.elements.sync(); };
+        const sync = async () => {
+            await this.projectRuntime.ready(Boolean(this.panel), true);
+            this.runtimeOperation = true;
+            await action();
+            await this.elements.sync();
+        };
         const operation = Promise.resolve(this.closingLive).then(sync);
         this.pendingAction = operation;
         try {
@@ -423,6 +467,7 @@ class Workbench {
             this.state.error = this.errorMessage(error);
             return this.state.error;
         } finally {
+            this.runtimeOperation = false;
             this.pendingAction = undefined;
             this.state.busy = false;
             this.publish();
@@ -548,11 +593,11 @@ class Workbench {
         if (this.state.draft && (!this.state.recording || this.state.draft.location !== "preview")) return this.text.liveRecording;
         return this.perform(async () => {
             const agent = this.agent;
-            let session = sessions.get(device);
+            let session = sessions.get(device)?.id;
             if (!session) {
                 session = "vscode-display-" + randomUUID();
                 await agent.call("attach", { session, device });
-                sessions.set(device, session);
+                sessions.set(device, { id: session, agent });
             }
             await agent.call("claim", { session });
             try {
@@ -560,7 +605,7 @@ class Workbench {
                 this.state.page = this.state.liveImage = undefined;
                 if (this.state.tool === "inspect") this.publish();
                 const started = Date.now();
-                await replayGesture({ device, hdcPath: this.config.get("hdcPath"), isCurrent }, input);
+                await replayGesture({ device, hdcPath: agent.hdcPath, isCurrent }, input);
                 this.networks.mark(input.kind,started,Date.now());
                 if (this.state.recording) {
                     const step = { command: "deviceGesture", input };
@@ -746,7 +791,7 @@ class Workbench {
         this.state.liveImage = undefined;
         const capture = this.capture = {};
         capture.ready = startRecorder({
-            device: this.state.device, hdcPath: this.config.get("hdcPath"), stateDir: this.stateDir,
+            device: this.state.device, hdcPath: projectHdc(this), stateDir: this.stateDir,
             onStep: step => {
                 draft.steps.push(step);
                 this.publish();
@@ -1179,7 +1224,7 @@ class Workbench {
         const run = this.state.run;
         run.goalStatus = "not_requested";
         const controller = this.nativeReplay = new AbortController();
-        const target = { device: this.state.device, hdcPath: this.config.get("hdcPath") };
+        const target = { device: this.state.device, hdcPath: projectHdc(this) };
         const session = this.session;
         try {
             if (plan.version !== 1 || !Array.isArray(plan.steps) || !plan.steps.length ||
@@ -1354,9 +1399,11 @@ let activeWorkbench;
 function activate(context) {
     const workbench = activeWorkbench = new Workbench(context);
     registerCopilotMcp(vscode, context, workbench);
+    workbench.projectRuntime.start();
     registerWorkbenchLauncher(vscode, workbench);
     context.subscriptions.push(
         vscode.commands.registerCommand("harmonyAgent.openWorkbench", () => workbench.open()),
+        vscode.commands.registerCommand("harmonyAgent.selectProjectRuntime", () => workbench.chooseProjectRuntime()),
         ...[...workspaceTools].map(([tab,tool]) =>
             vscode.commands.registerCommand(tool.command, () => workbench.openTool(tab))),
         vscode.commands.registerCommand("harmonyAgent.openLiveDevice", () => workbench.openLiveDevice()),
@@ -1372,7 +1419,10 @@ function activate(context) {
         }),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration("harmonyAgent.language") || event.affectsConfiguration("harmonyAgent.aiProvider")) workbench.publish();
-            if (event.affectsConfiguration("harmonyAgent.language") && workbench.state.plan) void workbench.refreshPlanSummary();
+            if (event.affectsConfiguration("harmonyAgent.language")) {
+                void workbench.projectRuntime.refresh();
+                if (workbench.state.plan) void workbench.refreshPlanSummary();
+            }
         }),
         vscode.workspace.onDidChangeTextDocument(event => workbench.planChanged(event.document.uri)),
     );

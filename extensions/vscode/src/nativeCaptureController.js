@@ -1,9 +1,10 @@
 "use strict";
 const {randomUUID}=require("node:crypto");
 const {captureDevice,supportsManual,timedSeconds,maxTimedSeconds,focusedApp,isCaptureApp}=require("./deviceNetwork");
+const {projectHdc}=require("./projectRuntime");
 
 async function discoverTargets(host,device,choose) {
-    const active=await focusedApp(device,host.bench.config.get("hdcPath"));
+    const active=await focusedApp(device,projectHdc(host.bench));
     if(active.bundle && !choose)return {foreground:active.bundle,candidates:[active.bundle]};
     if(active.system && !choose)return {candidates:[]};
     const agent=host.bench.agent,session="vscode-net-"+randomUUID();
@@ -26,8 +27,8 @@ async function runNative(host,job,{probe=supportsManual,capture=captureDevice,ta
     const previous=host.captureInfo;
     const info=host.captureInfo={id,device,status:"starting"};
     host.changed();
-    const hdcPath=bench.config.get("hdcPath");
     try {
+        const hdcPath=projectHdc(bench);
         const {foreground,candidates}=await targets(host,device,choose);
         job.close.signal.throwIfAborted();
         if(!candidates.length)throw new Error(w("Open the target app on the selected phone.","请先在所选手机上打开目标应用。"));

@@ -8,9 +8,9 @@ const { getMcpLaunch } = require("./aiIntegration");
 const { deviceRecordingFormat } = require("./model");
 const { readWorkflow } = require("./workflowFile");
 
-function launchWorker(interpreter, request, onEvent) {
+function launchWorker(interpreter, request, onEvent, env) {
     const child = spawn(interpreter, ["-u", path.join(__dirname, "flowDebugWorker.py")], {
-        stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: env && { ...process.env, ...env },
     });
     let result, failure, details = "";
     child.stderr.setEncoding("utf8").on("data", data => { details = (details + data).slice(-4000); });
@@ -92,7 +92,7 @@ class FlowDebugger {
         if (plan.format === deviceRecordingFormat || !plan.steps?.length) {
             throw new Error(/^zh/i.test(b.language) ? "单步调试支持按控件执行的流程。" : "Step debugging requires a control-based workflow.");
         }
-        const { command } = await getMcpLaunch(b);
+        const { command, env, hdcPath } = await getMcpLaunch(b);
         const breakpoints = (message.breakpoints || []).filter(i => Number.isInteger(i) && i >= 0 && i < plan.steps.length);
         const entry = { id: randomUUID(), plan: planRef, time: new Date().toISOString(), status: "running" };
         const job = this.job = { id: entry.id };
@@ -106,7 +106,7 @@ class FlowDebugger {
             if (job.cancelled || !b.panel) { entry.status = "cancelled"; return; }
             await b.prepareFlowScenario?.(planRef,scenario,entry.id);
             if (job.cancelled || !b.panel) { entry.status = "cancelled"; return; }
-            const request = { session: b.session, stateDir: b.stateDir, hdcPath: b.agent.hdcPath,
+            const request = { session: b.session, stateDir: b.stateDir, hdcPath,
                 runId: entry.id, device: state.device, plan, breakpoints };
             view.status = "running";
             b.publish();
@@ -121,7 +121,7 @@ class FlowDebugger {
                     view.last = event.path;
                 }
                 b.publish();
-            });
+            }, env);
             const result = await job.worker.done;
             entry.status = result.status;
             entry.cleanup = "detached";

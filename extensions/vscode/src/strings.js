@@ -31,6 +31,7 @@ const entries = {
     taskDone: ["Finished", "已结束"],
     taskError: ["Could not finish", "未能完成"],
     taskProvider: ["AI provider", "AI 来源"],
+    selectProjectRuntime: ["Select Project Runtime…", "选择项目运行时…"],
     taskReview: ["Review as a workflow", "查看并保存为流程"],
     explainStep: ["Explain this step", "解释这一步"],
     suggestCheck: ["Suggest a check", "建议结果检查"],

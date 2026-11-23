@@ -6,7 +6,7 @@
 
 ## 安装
 
-使用桌面版 VS Code 1.101 或更新版本，并打开受信任的工作区。连接手机时，在同一台电脑上运行 VS Code、Python 3.10+ 和官方 HDC。扩展版本为 `0.20.12`，使用同一仓库的 Python 运行时。交互式流程调试需要运行时 `0.1.0a10` 或更新版本。
+使用桌面版 VS Code 1.101 或更新版本，并打开受信任的工作区。连接手机时，在同一台电脑上运行 VS Code、Python 3.10+ 和官方 HDC。扩展版本为 `0.20.13`，使用同一仓库的 Python 运行时。交互式流程调试需要运行时 `0.1.0a10` 或更新版本。
 
 从源码安装时，克隆[项目仓库](https://github.com/andyandymike/harmony-automation-agent)，安装 Node.js 22+，在 Windows 上从仓库根目录运行以下命令。
 
@@ -15,12 +15,32 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.12.vsix
+code --install-extension ./harmony-agent-workbench-0.20.13.vsix
 ```
 
 macOS 和 Linux 上使用 `.venv/bin/python`，并用 `cd extensions/vscode` 进入扩展目录。已有 wheel 和 VSIX 时，在选定的 Python 环境运行 `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl`，再通过 **扩展 → 从 VSIX 安装…** 装入 VSIX。开发或打包扩展时才需要 Node.js。
 
 在 VS Code 用户设置中，将 `harmonyAgent.cliPath` 设为仓库虚拟环境中 CLI 的绝对路径。Windows 用 `.venv/Scripts/harmony-agent.exe`，macOS 和 Linux 用 `.venv/bin/harmony-agent`。HDC 不在 PATH 中时填写 `harmonyAgent.hdcPath`。工作台默认跟随 VS Code 的显示语言，也可以将 `harmonyAgent.language` 设为 `en` 或 `zh-CN`。
+
+### 项目运行时
+
+本地项目可在工作区根目录放置 `.harmony-agent/runtime.json`，由初始化脚本填写本机路径。相对路径以包含 `.harmony-agent` 的工作区文件夹为基准。`cli` 是可用 `python <cli>` 启动的 Python 入口脚本。
+
+```json
+{
+  "version": 1,
+  "python": ".venv/Scripts/python.exe",
+  "cli": ".harmony-agent/launch.py",
+  "src": "src",
+  "hdc": "tools/hdc.exe"
+}
+```
+
+入口脚本可导入并调用 `harmony_agent.cli` 的 `main()`。macOS 或 Linux 上可改用 `.venv/bin/python` 和本机 HDC 的路径。`src` 放在子进程 `PYTHONPATH` 的最前面。
+
+在受信任的工作区打开工作台并确认使用。多根工作区中有多个候选时，先选择项目。选择仅保存在当前工作区。可在工作台设置菜单或命令面板运行 **Harmony Agent: 选择项目运行时…** 更换项目。没有配置文件时沿用 VS Code 设置和 PATH 发现。已选文件失效或被删除时，工作台会显示原因。可通过同一命令主动切回 VS Code 设置。
+
+CLI、Copilot MCP、流程调试、手机预览、网络工具、pytest 和复制到 Codex 的 MCP 配置共用这套运行时。配置重新保存后会校验，进行中的运行或采集结束后生效。HDC 路径改变后，可刷新设备。已粘贴到 Codex 的 MCP 配置可重新复制以获取改动。
 
 ## 打开工作台
 
@@ -89,7 +109,7 @@ $env:HARMONY_ARTIFACT_DIR = "$PWD/artifacts"
 python -m pytest -v . --junitxml=results.xml
 ```
 
-在用例页点 **运行用例**，pytest 会使用选中的设备及 VS Code Python 扩展的活动解释器。缺少活动解释器时使用 `python`，也可用 `HARMONY_PYTEST_PYTHON` 指定。`HARMONY_AGENT_CLI`、`HARMONY_HDC` 可指定工具路径。每次运行有独立的证据目录。CLI 状态默认保存在这个目录下，也可通过 `HARMONY_STATE_DIR` 指定位置。
+在用例页点 **运行用例**，pytest 会使用选中的设备。启用项目运行时时，需要在项目指定的解释器中安装 `pytest`。使用 VS Code 设置时，默认使用 Python 扩展的活动解释器或 `python`，也可用 `HARMONY_PYTEST_PYTHON` 指定。`HARMONY_AGENT_CLI`、`HARMONY_HDC` 可指定工具路径。每次运行有独立的证据目录。CLI 状态默认保存在这个目录下，也可通过 `HARMONY_STATE_DIR` 指定位置。
 
 运行结束后在插件内查看报告，或从运行记录重新打开。**查看测试阶段** 显示收集错误以及测试准备、执行、清理的结果和错误详情。步骤时间线显示实际执行的控件动作和断言，可以查看通过与失败时保存的页面。即使设备上的最终断言通过，pytest 清理失败仍会记录为用例失败。0.16.0 生成的用例可直接在此运行。
 

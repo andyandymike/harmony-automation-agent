@@ -2,7 +2,7 @@
   "name": "harmony-agent-workbench",
   "displayName": "Harmony Agent",
   "description": "%extension.description%",
-  "version": "0.20.12",
+  "version": "0.20.13",
   "publisher": "harmony-automation-agent",
   "license": "MIT",
   "repository": {
@@ -44,6 +44,7 @@
       { "command": "harmonyAgent.openAIChat", "category": "Harmony Agent", "title": "%command.aiChat%" },
       { "command": "harmonyAgent.openLiveDevice", "category": "Harmony Agent", "title": "%command.live%" },
       { "command": "harmonyAgent.openWorkbench", "category": "Harmony Agent", "title": "%command.open%" },
+      { "command": "harmonyAgent.selectProjectRuntime", "category": "Harmony Agent", "title": "%command.selectProjectRuntime%" },
       { "command": "harmonyAgent.inspect", "category": "Harmony Agent", "title": "%command.inspect%" },
       { "command": "harmonyAgent.recordings", "category": "Harmony Agent", "title": "%command.recordings%" },
       { "command": "harmonyAgent.exploration", "category": "Harmony Agent", "title": "%command.exploration%" },

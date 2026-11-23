@@ -62,23 +62,37 @@ def pytest_keyboard_interrupt(excinfo):
 
 def pytest_collection_modifyitems(session, config, items):
     candidate = os.environ.get("HARMONY_PYTEST_WORKFLOW_OVERRIDE")
-    if not candidate:
+    python = os.environ.get("HARMONY_PYTEST_PROJECT_PYTHON")
+    if not (candidate or python):
         return
     target = Path(os.environ["HARMONY_PYTEST_TARGET"]).resolve()
-    matches = [item for item in items if Path(item.path).resolve() == target]
-    valid = (len(matches) == 1 and len(items) == 1 and matches[0].name == "test_workflow"
-             and isinstance(matches[0], pytest.Function) and matches[0].function.__name__ == "test_workflow")
+    matches = [item for item in items if isinstance(item, pytest.Function) and Path(item.path).resolve() == target
+               and item.function.__name__ == "test_workflow"]
+    valid = bool(matches) and (not candidate or (len(items) == 1 and matches[0].name == "test_workflow"))
     if valid:
         module = matches[0].module
         with target.open(encoding="utf-8-sig") as source:
             valid = source.readline().rstrip() == "# Harmony Agent Workbench pytest case v1"
         source_path = getattr(module, "WORKFLOW", None)
         valid = valid and isinstance(source_path, Path) and source_path.resolve() == target.with_name("workflow.json")
+        if python:
+            valid = valid and callable(getattr(module, "call_cli", None))
     if not valid:
-        reason = "Candidate verification requires exactly one generated Harmony workflow test."
+        reason = ("Candidate verification requires exactly one generated Harmony workflow test." if candidate
+                  else "The project runtime needs the generated Harmony workflow test's CLI function.")
         _record("collection", target.name, "failed", reason)
         raise pytest.UsageError(reason)
-    module.WORKFLOW = Path(candidate).resolve(strict=True)
+    if candidate:
+        module.WORKFLOW = Path(candidate).resolve(strict=True)
+    if python:
+        # Existing generated tests pass a single executable followed by the CLI flags.
+        cli = os.environ["HARMONY_AGENT_CLI"]
+        call_cli = module.call_cli
+
+        def call_project_cli(options, command, *args):
+            return call_cli([python, cli, *options[1:]], command, *args)
+
+        module.call_cli = call_project_cli
 
 
 def pytest_sessionfinish(session, exitstatus):

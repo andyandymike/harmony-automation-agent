@@ -1,4 +1,5 @@
 {
+  "command.selectProjectRuntime": "选择项目运行时…",
   "command.aiChat": "在外部 AI 聊天中继续…",
   "config.aiProvider": "工作台内执行 AI 任务使用的模型来源。",
   "config.codexPath": "可选，填写已登录的 Codex CLI 可执行文件路径。",

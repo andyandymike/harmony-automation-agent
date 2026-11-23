@@ -1,4 +1,6 @@
 "use strict";
+
+const {projectHdc}=require("./projectRuntime");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const {randomUUID} = require("node:crypto");
@@ -203,7 +205,7 @@ class NetworkController {
         if(this.mapping?.device===device) return;
         await this.cleanMappings(devices,device);
         let next;
-        try {next=await this.connectPhone(device,this.bench.config.get("hdcPath"),snap.baseUrl);}
+        try {next=await this.connectPhone(device,projectHdc(this.bench),snap.baseUrl);}
         catch(error){
             if(error.ownedMapping)this.retiredMappings.set(device,error.ownedMapping);
             this.changed();

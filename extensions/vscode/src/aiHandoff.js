@@ -61,9 +61,10 @@ async function askAI(vscode, workbench, surface) {
     ], { title: t.aiButton, placeHolder: t.aiHost });
     if (!host) return;
     if (host.id === "config") {
-        const { command, args } = await getMcpLaunch(workbench);
+        const { command, args, env } = await getMcpLaunch(workbench);
         const config = ["[mcp_servers.harmony]", "command = " + JSON.stringify(command),
-            "args = " + JSON.stringify(args)].join("\n");
+            "args = " + JSON.stringify(args), ...(env ? ["", "[mcp_servers.harmony.env]",
+                "PYTHONPATH = " + JSON.stringify(env.PYTHONPATH)] : [])].join("\n");
         await vscode.env.clipboard.writeText(config);
         void vscode.window.showInformationMessage(t.aiConfigCopied);
         return;

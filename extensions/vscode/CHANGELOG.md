@@ -1,5 +1,10 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.13
+
+- Share a trusted workspace's Python, CLI, source directory and HDC across the workbench, pytest and MCP using `.harmony-agent/runtime.json`.
+- Revalidate saved configuration changes and keep the current runtime until active work finishes.
+
 ## 0.20.12
 
 - Duplicate a test case from the library or remove its entry with Undo. Eligible case folders can also be moved to Trash after confirmation.

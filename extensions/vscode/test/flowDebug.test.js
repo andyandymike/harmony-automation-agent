@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const path = require("node:path");
 const { FlowDebugger } = require("../src/flowDebug");
 
 test("only the current, paused native step can consume the continue or single-step control", async () => {
@@ -20,4 +21,29 @@ test("only the current, paused native step can consume the continue or single-st
     debug.stop();
     assert.equal(state.flowDebug.status,"stopping");
     assert.deepEqual(writes.at(-1),{action:"stop"});
+});
+
+test("a debug worker starts with the selected Python, source path and HDC", async () => {
+    const runtime = { python: "project/python", src: "project/src", cli: "project/launch.py", hdc: "project/hdc" };
+    const plan = { version: "1", steps: [{ command: "back", input: {} }] };
+    const planRef = { uri: "file:///workflow.json", name: "workflow" };
+    const state = { plan: planRef, device: "offline-device", devices: ["offline-device"], runs: [] };
+    const bench = { state, panel: {}, session: "debug-session", language: "en", stateDir: "evidence",
+        publish() {}, async persistRuns() {}, async openReport() {},
+        projectRuntime: { configuration: runtime, async ready() {}, async verifyPython(config) { assert.equal(config,runtime); } },
+        get agent() { throw new Error("Unexpected global agent lookup"); },
+    };
+    const vscode = { Uri: { parse: value => value }, workspace: { async openTextDocument() {
+        return { getText: () => JSON.stringify(plan) };
+    } } };
+    let started;
+    const debug = new FlowDebugger(bench, vscode, (python, request, _event, env) => {
+        started = { python, request, env };
+        return { done: Promise.resolve({ status: "passed" }) };
+    });
+    await debug.start({ breakpoints: [0] });
+    assert.equal(started.python, runtime.python);
+    assert.equal(started.request.hdcPath, runtime.hdc);
+    assert.deepEqual(started.request.breakpoints, [0]);
+    assert.equal(started.env.PYTHONPATH.split(path.delimiter)[0], runtime.src);
 });

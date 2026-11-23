@@ -247,6 +247,7 @@ function topBar() {
         <span>Harmony <strong>Agent</strong></span></div>${devicePicker()}<div class="station-utilities">
         <details class="station-settings"><summary class="station-tool" title="${h(t.stationSettings)}" aria-label="${h(t.stationSettings)}">
         ${artIcon("settings")}</summary><div class="station-menu">
+        ${button(t.selectProjectRuntime + (model.runtimeName ? " · " + model.runtimeName : ""), "projectRuntime")}
         ${button(t.stationAiSettings, "aiSettings")}${button(t.loadSettings, "settings")}</div></details></div></div>`;
 }
 
@@ -708,7 +709,7 @@ function render() {
     const run = surface==="case" ? selectedCaseRun() : undefined;
     const reportOwnsError = run && model.error && (!run.steps || model.error===run.error ||
         model.error===run.steps[run.selected]?.error);
-    const error = reportOwnsError ? "" : model.error || "";
+    const error = model.runtimeError || (reportOwnsError ? "" : model.error || "");
     if (feedback.textContent !== error) feedback.textContent = error;
     feedback.hidden = !error;
     let panel = "";

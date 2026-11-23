@@ -2,6 +2,7 @@
 
 const { openLiveDisplay } = require("./liveDisplay");
 const { validateGesture } = require("./deviceRecorder");
+const { projectHdc } = require("./projectRuntime");
 
 class LiveDevicePanel {
     constructor(workbench, panel) {
@@ -10,6 +11,7 @@ class LiveDevicePanel {
         this.epoch = 0;
         this.screenRevision = Symbol();
         this.sessions = new Map();
+        this.retiredSessions = [];
     }
 
     focus() {
@@ -63,6 +65,13 @@ class LiveDevicePanel {
                 console.warn("Harmony Agent display cleanup", error);
             });
         }
+    }
+
+    runtimeChanged() {
+        this.retiredSessions.push(...this.sessions.values());
+        this.sessions.clear();
+        this.retire();
+        this.error = undefined;
     }
 
     async receive(message) {
@@ -172,7 +181,7 @@ class LiveDevicePanel {
                 feed.opening = (async () => {
                     await closing;
                     if (this.feed === feed) return openLiveDisplay({
-                        device: feed.device, hdcPath: this.workbench.config.get("hdcPath"), prefetch: true,
+                        device: feed.device, hdcPath: projectHdc(this.workbench), prefetch: true,
                     });
                 })();
             }
@@ -230,8 +239,8 @@ class LiveDevicePanel {
         this.retire();
         await Promise.all([this.input, this.closing]);
         const bench = this.workbench;
-        for (const session of this.sessions.values()) {
-            try { await bench.agent.call("detach", { session }); }
+        for (const { id, agent } of [...this.retiredSessions, ...this.sessions.values()]) {
+            try { await agent.call("detach", { session: id }); }
             catch (error) {
                 bench.state.error = bench.errorMessage(error);
                 bench.publish();

@@ -1,4 +1,5 @@
 {
+  "command.selectProjectRuntime": "Select Project Runtime…",
   "command.aiChat": "Continue in External AI Chat…",
   "config.aiProvider": "Model provider for tasks inside the workbench.",
   "config.codexPath": "Optional path to the signed-in Codex CLI executable.",

@@ -74,6 +74,58 @@ test("the workbench runs a process task in the case folder and returns the pytes
 const python = process.env.HARMONY_TEST_PYTHON || "python";
 const pytestAvailable = spawnSync(python, ["-c", "import pytest"], {windowsHide: true}).status === 0;
 
+test("the selected project Python runs an existing generated test through the selected CLI script", {
+    skip: !pytestAvailable && "Set HARMONY_TEST_PYTHON to a Python interpreter with pytest",
+}, async t => {
+    const root = await temporary(t);
+    const entry = await writeCase(root, "project case", plan);
+    const entryPath = path.join(entry.folder, entry.filename);
+    const original = await fs.readFile(entryPath, "utf8");
+    const runtime = {
+        python: spawnSync(python, ["-c", "import sys; print(sys.executable)"], {encoding:"utf8",windowsHide:true}).stdout.trim(),
+        src: path.join(root, "runtime source"), cli: path.join(root, "project launch.py"), hdc: path.join(root, "test hdc"),
+    };
+    await fs.mkdir(runtime.src);
+    await fs.writeFile(path.join(runtime.src, "harmony_runtime_test_marker.py"), "READY = True\n");
+    await fs.writeFile(runtime.cli, [
+        "from harmony_runtime_test_marker import READY", "import json, os, sys",
+        "assert READY and sys.argv[sys.argv.index('--hdc') + 1] == os.environ['HARMONY_HDC']",
+        "assert sys.executable == os.environ['HARMONY_PYTEST_PROJECT_PYTHON']",
+        "print(json.dumps({'success':True,'data':{'status':'completed','goalVerification':{'status':'passed','assertions':[{'status':'passed'}]}}}))",
+    ].join("\n"));
+    let onEnd, execution;
+    const vscode = {
+        workspace: { getWorkspaceFolder: () => undefined, isTrusted: true },
+        extensions: { getExtension: () => ({ activate() { throw new Error("Unexpected Python extension lookup"); } }) },
+        Uri: { file: name => ({ toString: () => name }) }, TaskScope: { Global: 1 }, TaskGroup: { Test: 2 }, TaskRevealKind: { Never: 3 },
+        Task: class { constructor(definition, _scope, _name, _source, execution) { Object.assign(this, { definition, execution }); } },
+        ProcessExecution: class { constructor(file, args, options) { Object.assign(this, { file, args, options }); } },
+        tasks: {
+            onDidEndTaskProcess(fn) { onEnd = fn; return { dispose() {} }; },
+            onDidEndTask() { return { dispose() {} }; },
+            async executeTask(task) {
+                execution = task.execution;
+                const result = spawnSync(execution.file, execution.args, {
+                    cwd: execution.options.cwd, encoding: "utf8", windowsHide: true, timeout: 20000,
+                    env: { ...process.env, ...execution.options.env, PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1", PYTEST_ADDOPTS: "" },
+                });
+                assert.equal(result.status, 0, result.stdout + result.stderr);
+                onEnd({ execution: { task }, exitCode: result.status });
+            },
+        },
+    };
+    const bench = { state: { device: "fixture-phone", plan: { uri: "file:///fixture", name: "fixture" } }, storage: { fsPath: root },
+        config: { get() { throw new Error("Unexpected settings lookup"); } }, async detach() {},
+        projectRuntime: { configuration: runtime, async ready() {}, async verifyPython(value) { assert.equal(value,runtime); } },
+    };
+    const result = await startPytest(vscode, bench, entry);
+    assert.equal(result?.code, 0, result?.entry.pytest.launchError);
+    assert.equal(result.entry.status, "passed");
+    assert.equal(execution.file, runtime.python);
+    assert.equal(execution.options.env.PYTHONPATH.split(path.delimiter)[0], runtime.src);
+    assert.equal(await fs.readFile(entryPath, "utf8"), original);
+});
+
 test("real pytest collects and checks generated tests with an offline CLI and explicit rule-group fixture", {
     skip: !pytestAvailable && "Set HARMONY_TEST_PYTHON to a Python interpreter with pytest",
 }, async t => {
