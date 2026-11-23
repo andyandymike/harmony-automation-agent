@@ -6,7 +6,7 @@ Operate a connected HarmonyOS phone, inspect the controls on its current screen,
 
 ## Install
 
-Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.14` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
+Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.18` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
 
 To build from source, clone the [project repository](https://github.com/andyandymike/harmony-automation-agent), install Node.js 22+, and run the following from its root on Windows.
 
@@ -15,7 +15,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.14.vsix
+code --install-extension ./harmony-agent-workbench-0.20.18.vsix
 ```
 
 On macOS and Linux, use `.venv/bin/python` and `cd extensions/vscode`. If you already have the wheel and VSIX, use `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl` in your chosen environment and install the VSIX with **Extensions → Install from VSIX…**. Node.js is only needed to develop or build the extension.
@@ -44,7 +44,7 @@ The selected runtime supplies the CLI, Copilot MCP, workflow debugger, device pr
 
 ## Open the workbench
 
-Choose the **Harmony Agent** phone icon in the Activity Bar to open the workbench. The phone preview stays on the left as you switch between **Tests**, **Elements**, **Network**, and **AI exploration**. You can review a saved workflow or import a HAR offline. To use a phone, connect it by USB and allow HDC debugging. The workbench selects a single connected phone automatically. With several phones, choose one at the top.
+Choose **Harmony Agent** in the bottom-left status bar to open the workbench in an editor tab. The current sidebar stays in place. The Command Palette also offers **Harmony Agent: Open Workbench**. The phone preview stays on the left as you switch between **Tests**, **Elements**, **Network**, and **AI exploration**. You can review a saved workflow or import a HAR offline. To use a phone, connect it by USB and allow HDC debugging. The workbench selects a single connected phone automatically. With several phones, choose one at the top.
 
 | What you want to do | Where to go |
 |---|---|
@@ -59,7 +59,7 @@ Checked workflows show the result of the check. Coordinate recordings show the p
 
 In **Elements**, use **Pick element** above the left screen to select a control in the snapshot. Its parents, properties and editable locator appear on the right. Refresh the snapshot to test the locator on a new frame. Pin a property to track changes, or add an action or assertion to a workflow draft. Switch to **Live phone** to send touches from the preview.
 
-Open a control-based workflow and expand **Run settings & debugging → Breakpoints & step debugging**. While paused you can probe a locator, step into the next operation, continue, or stop. The runner retains variables, branches and loop state. From a step's evidence tools or an exploration report, **Export problem clip…** saves steps and evidence as offline HTML. The **Harmony Agent: Open Exported Evidence…** command opens it in VS Code.
+Open a control-based workflow and expand **Run settings & debugging → Breakpoints & step debugging**. While paused you can probe a locator, step into the next operation, continue, or stop. The runner retains variables, branches and loop state. Choose **Export run evidence…** from a step's evidence tools or **Export exploration evidence…** from an exploration report to save offline HTML. The **Harmony Agent: Open Exported Evidence…** command opens it in VS Code.
 
 Open the **Network** tab. Use **Requests** to record native HTTP from a debug app, connect ArkWeb or import a HAR. Filter by method, host or status, search retained headers and bodies, compare exchanges, or edit and resend a request through the local test gateway. In **Mock & rewrite**, organize rewrite rules and response sequences into rule groups. Preview a rule against captured requests, then inspect its effect on new gateway traffic. [Network guide](NETWORK.md)
 
@@ -86,7 +86,7 @@ Above the phone preview, choose **Input location** and **Save as**, then select 
 
 To send text, first focus the input field in the phone preview, then type or paste into **Keyboard** and send it. **Recent apps** uses the phone's gesture navigation. Pinch requires a device with multi-finger touch injection.
 
-Select **Finish recording** and review the steps. For screen coordinates, remove any unsupported gestures and replay with the same screen size, orientation and layout. Select **Save recording…** to write a JSON file or **Save as test case** to review the steps in Given, When and Then form.
+Select **Finish recording** and review the steps. For screen coordinates, remove any unsupported gestures and replay with the same screen size, orientation and layout. Select **Save recording…** to write a JSON file or **Save as test case** to review the BDD steps in execution order.
 
 ## Work with test cases
 
@@ -94,11 +94,15 @@ Open **Tests** to find cases saved from a recording or AI exploration. **Open fi
 
 Select **Save as test case** while reviewing a recording, or select a reproducible route or finding in an exploration report. Review the actions and expected result before saving. Share the entire new case directory to keep the steps and their origin together. A recording with no final assertion can be saved for replay. Coordinate gestures replay using the recorded device layout.
 
-Choose **Workbench** or **pytest** in the runner selector, then select **Run test case**. The report shows the recorded step status, expectations, actual values and saved frames. For a failed locator, select **Ask AI to repair locator** to inspect a candidate. Put the phone on the starting screen and run the proposed change on a copy. After the original final assertions pass, choose **Apply verified change** to update the case. Both runs remain in the history.
+Each supported BDD role appears beside the step it describes. An assertion can follow a prerequisite directly, and another prerequisite can appear later in the case. Right-click a step and choose **Insert a check after…** to add a check at that point. Select **Organize with AI** to suggest names, groups, and roles, then review before saving. The case metadata travels with `workflow.json`.
+
+Right-click a step to duplicate, delete, reorder, or replace its locator. For a replacement, open the relevant phone page, select **Read current page**, and search for the control.
+
+Choose **Workbench** or **pytest** in the runner selector, then select **Run**. The report shows recorded step status, expected and actual values, and saved frames. **Failure review** identifies the first problem or the failed pytest phase. **Diagnose failure with AI** uses saved evidence to suggest whether to keep the case, verify a locator on a copy, or review the steps and expected result. For a confirmed locator change, open **View failing step** and choose **Find a replacement locator with AI**. Run the suggested change on a copy. When the copy passes the original final assertions, **Apply verified change** updates the case. Both runs remain in the history.
 
 ## Add a recording to pytest
 
-After recording by control, choose **Save as test case** and review the Given, When and Then steps. Control-based cases with a starting condition and final assertion generate a pytest test. You can also choose **Generate pytest case** from an existing workflow. Choose a project folder and a new case name. Commit the editable `workflow.json` alongside its `test_*.py`. Coordinate gesture cases replay in the workbench.
+After recording by control, choose **Save as test case** and review the steps in execution order. The generated pytest runner requires a starting condition and a final assertion. You can also choose **Generate pytest case** from an existing workflow. Choose a project folder and a new case name. Commit the editable `workflow.json` alongside its `test_*.py`. Coordinate gesture cases replay in the workbench.
 
 Run the following PowerShell commands from the case folder. Collection works offline. Execution needs pytest in your chosen Python environment, a Harmony Agent CLI executable, and the named device connected and at the expected starting screen.
 

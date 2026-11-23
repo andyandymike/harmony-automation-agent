@@ -4,6 +4,7 @@ module.exports = {
     EXPLORATION_IN_USE: ["This exploration is active in another window.", "其他窗口正在操作这次探索。"],
     xExplore: ["AI exploration", "AI 探索测试"],
     xNew: ["New exploration", "新建探索"],
+    xMode: ["Exploration mode", "探索方式"],
     xFree: ["Explore from here", "从当前页探索"],
     xGuided: ["Explore a flow", "沿流程探索"],
     xFocus: ["What should the assistant focus on? (optional)", "希望重点测哪里？（可选）"],

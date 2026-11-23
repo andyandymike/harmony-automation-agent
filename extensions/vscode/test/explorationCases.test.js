@@ -5,11 +5,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
-const {pathToFileURL} = require("node:url");
+const {pathToFileURL,fileURLToPath} = require("node:url");
 const {explorationCandidate,caseRoutes} = require("../src/explorationCases");
 const {CaseAuthoring,caseDefinitions} = require("../src/caseAuthoring");
 const {sourceDigest} = require("../src/caseRepair");
 const {writeCaseMetadata} = require("../src/caseLibrary");
+const {restorePresentation} = require("../src/casePresentation");
 const {findCase} = require("../src/pytestCase");
 const {messagesFor} = require("../src/strings");
 const loadMedia = require("../test-support/loadWebview");
@@ -72,7 +73,7 @@ async function host(t) {
     const directory=await fs.mkdtemp(path.join(os.tmpdir(),"ha-case-author-"));
     t.after(()=>fs.rm(directory,{recursive:true,force:true}));
     const calls=[], inputs=[], picks=[], folders=[];
-    const vscode={Uri:{file:uri},workspace:{workspaceFolders:[{uri:uri(directory)}]},
+    const vscode={Uri:{file:uri,parse:value=>uri(fileURLToPath(value))},workspace:{workspaceFolders:[{uri:uri(directory)}]},
         window:{showOpenDialog:async()=>folders.shift(),showInputBox:async()=>inputs.shift(),
             showQuickPick:async rows=>rows[picks.shift()]}};
     const b={language:"zh",state:{},networks:{},stateDir:directory,
@@ -90,7 +91,7 @@ test("free exploration is reviewable with BDD, users can supply boundary checks,
     const id=b.state.caseReview.id;
     const {caseReviewView}=await loadMedia("caseAuthoring");
     const render=()=>caseReviewView(b.state,b.language);
-    assert.deepEqual([...render().matchAll(/<h3>(Given|When|Then)<\/h3>/g)].map(match=>match[1]),["Given","When","Then"]);
+    assert.deepEqual([...render().matchAll(/data-bdd-role="(\w+)"/g)].map(match=>match[1]),["Given","When","When"]);
     assert.match(render(),/保存用例草稿/);
     assert.match(render(),/预期结果需要确认/);
     await author.save({id}); // cancel the directory dialog
@@ -124,7 +125,7 @@ test("a failed replay uses its frozen workflow, and a gesture report keeps only 
     await fs.mkdir(base,{recursive:true});
     await fs.writeFile(path.join(base,"plan.json"),JSON.stringify({version:"1",steps:[press("Original")],
         preconditions:[condition("Home")],goals:[condition("Success")]}));
-    b.planForRun=()=>({name:"Order",uri:"file:///edited.json"});
+    b.planForRun=()=>({name:"Order",uri:uri(path.join(directory,"edited.json")).toString()});
     b.state.run={entry:{id:runId,plan:b.planForRun()},steps:[{}],goalStatus:"failed"};
     await author.open({fromRun:true});
     assert.equal(b.state.caseReview.origin.outcome,"checkFailed");
@@ -142,6 +143,118 @@ test("a failed replay uses its frozen workflow, and a gesture report keeps only 
     assert.equal(saved.steps.length,1);
     assert.equal(saved.steps[0].delayMs,450);
     assert.equal(await findCase(b.selected),undefined);
+});
+
+test("AI organizes nested BDD steps without changing the pytest workflow or sending entered and expected values", async t=>{
+    const {directory,b,author,folders}=await host(t);
+    const plan = {version:"1",preconditions:[condition("Cart")],steps:[
+        {if:condition("Guest"),then:[{command:"fill",input:{target:{id:"customer",text:"Customer name"},text:"entered-value"}}]},
+        press("Confirm order"),
+    ],goals:[{selector:{id:"receipt"},property:"text",equals:"customer-order-value"}]};
+    const proposal = [{path:"steps[0]",name:"Handle guest checkout",group:"Prepare order"},
+        {path:"steps[0].then[0]",name:"Enter the customer name",role:"Given"},
+        {path:"steps[1]",name:"Submit the order",group:"Place order",input:{target:{id:"invented"}}}];
+    b.language="en";
+    b.publish=()=>{};
+    b.modelAsk=async()=>async prompt=>{
+        assert.match(prompt,/Customer name/);
+        assert.match(prompt,/receipt/);
+        assert.doesNotMatch(prompt,/entered-value|customer-order-value/);
+        return JSON.stringify({steps:proposal});
+    };
+    author.begin({name:"Guest checkout",plan,source:"recording"});
+    const id=b.state.caseReview.id;
+    await author.organize({id,revision:0});
+    const {caseReviewView}=await loadMedia("caseAuthoring");
+    const view=caseReviewView(b.state,"en");
+    assert.match(view,/<h3 class="case-step-group">Prepare order<\/h3>/);
+    assert.match(view,/Enter the customer name/);
+    assert.match(view,/Tap Confirm order/);
+    assert.deepEqual(author.candidate.plan,plan);
+    b.modelAsk=async()=>async()=>JSON.stringify({steps:[...proposal].reverse()});
+    await author.organize({id,revision:1});
+    assert.ok(b.state.caseReview.organization.error);
+    assert.equal(b.state.caseReview.bdd.steps.find(row=>row.path==="steps[1]").name,"Submit the order");
+    b.modelAsk=async()=>async()=>JSON.stringify({steps:proposal.map(step=>step.path==="steps[1]" ? {...step,role:"Then"} : step)});
+    await author.organize({id,revision:1});
+    assert.ok(b.state.caseReview.organization.error);
+    assert.equal(b.state.caseReview.bdd.steps.find(row=>row.path==="steps[1]").role,"When");
+
+    folders.push([uri(directory)]);
+    await author.save({id,name:"Guest checkout"});
+    const saved=JSON.parse(await fs.readFile(b.selected.fsPath,"utf8"));
+    assert.deepEqual(saved,plan);
+    assert.ok(await findCase(b.selected));
+    const {presentation}=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
+    assert.equal(restorePresentation(saved,presentation).get(saved.steps[1]).name,"Submit the order");
+    assert.equal(restorePresentation(saved,presentation).get(saved.steps[0].then[0]).role,"Given");
+    saved.steps.reverse();
+    assert.equal(restorePresentation(saved,presentation).get(saved.steps[0]),undefined);
+});
+
+test("named steps can use observed compatible locators, be duplicated and restored after deletion", async t=>{
+    const {directory,b,author,folders}=await host(t);
+    const plan={version:"1",steps:[press("old"),{command:"back",input:{}}]};
+    b.state.device="phone";
+    b.state.devices=["phone"];
+    b.text={};
+    b.observe=async(current,full)=>{
+        assert.equal(current(),true);
+        assert.equal(full,true);
+        b.state.page={complete:true,nodes:[
+            {label:"Pay now",id:"pay",pressable:true,visible:true,selector:{id:"pay"},attributes:{id:"pay"}},
+            {label:"Amount",id:"amount",pressable:false,editable:true,selector:{id:"amount"},attributes:{id:"amount"}},
+        ]};
+    };
+    author.begin({name:"Checkout steps",plan,source:"workflow"});
+    const id=b.state.caseReview.id, step="steps[0]";
+    const current=()=>({id,revision:b.state.caseReview.revision});
+    await author.edit({...current(),area:"stepName",path:step,name:"Submit payment",group:"Checkout"});
+    await author.loadTargets({...current(),area:"step",path:step,live:true});
+    assert.deepEqual(b.state.caseReview.stepTargets.matches,{count:0,complete:true});
+    assert.deepEqual(b.state.caseReview.stepTargets.choices.map(choice=>choice.label),["Pay now"]);
+    await author.edit({...current(),area:"step",path:step,target:"0"});
+    assert.deepEqual(author.candidate.plan.steps[0].input.target,{id:"pay"});
+    await author.changeStep({...current(),action:"duplicate",path:step});
+    await author.changeStep({...current(),action:"remove",path:step});
+    assert.equal(b.state.caseReview.bdd.steps.length,2);
+    assert.equal(b.state.caseReview.undoRemove,true);
+    await author.changeStep({...current(),action:"undoRemove"});
+    await author.moveStep({...current(),from:"steps[2]",to:0});
+    assert.deepEqual(b.state.caseReview.bdd.steps.map(row=>row.name),[undefined,"Submit payment","Submit payment"]);
+    folders.push([uri(directory)]);
+    await author.save({id,name:"Checkout steps"});
+    const saved=JSON.parse(await fs.readFile(b.selected.fsPath,"utf8"));
+    const {presentation}=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
+    assert.deepEqual([...restorePresentation(saved,presentation).values()].map(entry=>entry.group),["Checkout","Checkout"]);
+});
+
+test("a check inserted after a Then runs at that position and can describe the next Given", async t=>{
+    const {directory,b,author,folders}=await host(t);
+    const result={assert:condition("receipt")}, next=press("Details");
+    const plan={version:"1",preconditions:[condition("cart")],steps:[result,next],goals:[condition("details")]};
+    b.state.device="phone";
+    b.state.devices=["phone"];
+    b.observe=async()=>{b.state.page={complete:true,nodes:[
+        {label:"Order details",id:"order-details",pressable:false,selector:{id:"order-details"},attributes:{id:"order-details"}},
+    ]};};
+    author.begin({name:"Order verification",plan,source:"workflow"});
+    const id=b.state.caseReview.id;
+    await author.loadTargets({id,revision:0,area:"stepCheck",path:"steps[0]",add:true,live:true});
+    assert.equal(b.state.caseReview.stepTargets.choices[0].label,"Order details");
+    await author.edit({id,revision:0,area:"stepCheck",path:"steps[0]",add:true,target:"0",role:"Given",property:"visible",expected:"true"});
+    assert.equal(author.candidate.presentationChanged,true);
+    assert.deepEqual(b.state.caseReview.bdd.steps.map(step=>step.role),["Given","Then","Given","When","Then"]);
+    assert.deepEqual(author.candidate.plan.steps,[result,{assert:condition("order-details")},next]);
+    await author.edit({id,revision:1,area:"stepCheck",path:"steps[1]",target:"keep",role:"Given",property:"enabled",expected:"true"});
+    folders.push([uri(directory)]);
+    await author.save({id,name:"Order verification"});
+    const saved=JSON.parse(await fs.readFile(b.selected.fsPath,"utf8"));
+    assert.deepEqual(saved.steps,[result,{assert:{...condition("order-details"),property:"enabled"}},next]);
+    assert.deepEqual({preconditions:saved.preconditions,goals:saved.goals},{preconditions:plan.preconditions,goals:plan.goals});
+    assert.ok(await findCase(b.selected));
+    const {presentation}=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
+    assert.equal(restorePresentation(saved,presentation).get(saved.steps[1]).role,"Given");
 });
 
 test("a saved exploration draft can acquire checks, retain its case ID and become a runnable pytest case in its own folder", async t => {
@@ -223,6 +336,7 @@ test("dragging saved BDD steps moves a whole step inside its branch and writes o
 test("copying a portable case saves an independent case identity and preserves the source workflow",async t=>{
     const {directory,b,author,folders,inputs,picks}=await host(t);
     author.begin(explorationCandidate(free(),{findingId:"review"}));
+    await author.edit({id:b.state.caseReview.id,revision:0,area:"stepName",path:"steps[0]",name:"Browse products",group:"Catalog"});
     folders.push([uri(directory)]);inputs.push("Source");
     await author.save({id:b.state.caseReview.id});
     const original=b.selected;
@@ -241,5 +355,7 @@ test("copying a portable case saves an independent case identity and preserves t
     assert.equal(await fs.readFile(original.fsPath,"utf8"),contents);
     const copy=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
     assert.notEqual(copy.id,marker.id);
+    assert.equal(copy.presentation.steps["steps[0]"].name,"Browse products");
+    assert.deepEqual(copy.presentation,marker.presentation);
     assert.deepEqual(JSON.parse(await fs.readFile(b.selected.fsPath,"utf8")),JSON.parse(contents));
 });

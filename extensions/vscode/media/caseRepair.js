@@ -9,8 +9,8 @@ export function repairView(model, language, button) {
     const trial = state?.trial === entry.id;
     if (!original && !trial) {
         if (entry.repairOf) return control(w("Open original failure","查看原失败报告"),"report",entry.repairOf);
-        if (!step?.locatorFailure || !entry.sourceDigest) return "";
-        return control(w("Ask AI to repair locator","用 AI 修复定位器"),"repairSuggest",entry.id);
+        if (!step?.locatorFailure || !entry.sourceDigest || !(step.before || step.after)) return "";
+        return control(w("Find a replacement locator with AI","用 AI 寻找替代定位器"),"repairSuggest",entry.id);
     }
     const change = `<dl><dt>${w("Original locator","原定位器")}</dt><dd><code>${html(JSON.stringify(state.old))}</code></dd>
         <dt>${w("Suggested locator","建议定位器")}</dt><dd><code>${html(JSON.stringify(state.proposed))}</code> · ${html(state.label)}</dd></dl>`;

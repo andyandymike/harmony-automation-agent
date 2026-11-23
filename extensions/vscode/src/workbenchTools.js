@@ -12,22 +12,14 @@ function selectedWorkspaceTab(state) {
 }
 
 function registerWorkbenchLauncher(vscode, workbench) {
-    // The Activity Bar needs a view to contribute its icon. The editor owns the tool tabs.
-    const view = vscode.window.createTreeView("harmonyAgent.launcher", {
-        treeDataProvider: {getChildren: () => [], getTreeItem: item => item},
-    });
-    function launch() {
-        if (!view.visible) return;
-        workbench.open();
-        void vscode.commands.executeCommand("workbench.action.closeSidebar").then(undefined, error => {
-            console.warn("Harmony Agent sidebar cleanup", error);
-        });
-    }
-    const reveal = view.onDidChangeVisibility(({visible}) => {
-        if (visible) launch();
-    });
-    workbench.context.subscriptions.push(view, reveal);
-    if (view.visible) launch();
+    const launcher = vscode.window.createStatusBarItem("harmonyAgent.workbenchLauncher", vscode.StatusBarAlignment.Left);
+    launcher.name = "Harmony Agent Workbench";
+    launcher.text = "$(device-mobile) Harmony Agent";
+    launcher.tooltip = workbench.text.openWorkbench;
+    launcher.command = "harmonyAgent.openWorkbench";
+    workbench.context.subscriptions.push(launcher);
+    launcher.show();
+    return launcher;
 }
 
 module.exports = { workspaceTools, selectedWorkspaceTab, registerWorkbenchLauncher };

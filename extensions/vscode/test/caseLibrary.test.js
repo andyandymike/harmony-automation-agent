@@ -106,7 +106,7 @@ test("removing a case from the library persists without changing files, and a sh
     assert.equal(await reopened.managedFolder(file),undefined);
 });
 
-test("Given When Then follows guards, branching and bounded repetition and conceals filled values", async () => {
+test("BDD follows execution order through guards, branching and bounded repetition and conceals filled values", async () => {
     const nested = {version: "2", preconditions: [check], steps: [
         {command: "fill", before: [check], input: {target: {id: "password"}, text: "secret-input",
             expect: {selector: {id: "password"}, equals: "secret-expectation"}}},
@@ -114,14 +114,17 @@ test("Given When Then follows guards, branching and bounded repetition and conce
             else: [{repeat: {limit: 2, until: check, steps: [{assert: {selector: {id: "note"}, equals: "<b>paid</b>"}}]}}]}],
         goals: [{selector: {id: "total"}, equals: {var: "total"}}]};
     const bdd = createBdd(nested, "zh-CN", {name: "示例规则"});
-    assert.deepEqual(bdd.given, ["使用规则组 示例规则", "cart 可见"]);
-    assert.deepEqual(bdd.when[0].before, ["cart 可见"]);
-    assert.match(bdd.when[0].after, /••••/);
-    assert.equal(bdd.when[1].branches[1].steps[0].branches[0].steps[0].path, "steps[1].else[0].repeat.steps[0]");
-    assert.deepEqual(bdd.then, ["total 显示 $total"]);
+    const [setup, start, fill, condition, goal] = bdd.steps;
+    assert.deepEqual([setup.text,start.text],["使用规则组 示例规则", "cart 可见"]);
+    assert.deepEqual(fill.before,["cart 可见"]);
+    assert.match(fill.after,/••••/);
+    assert.equal(condition.branches[1].steps[0].branches[0].steps[0].path,"steps[1].else[0].repeat.steps[0]");
+    assert.equal(goal.text,"total 显示 $total");
     assert.doesNotMatch(JSON.stringify(bdd), /secret-(input|expectation)/);
     const {caseBddView, caseLibraryView} = await loadWebview("caseLibrary");
     const markup = caseBddView(bdd, "zh-CN");
+    assert.deepEqual([...markup.matchAll(/data-bdd-role="(\w+)"/g)].slice(0,6).map(match=>match[1]),
+        ["Given","Given","Given","When","Then","When"]);
     assert.match(markup, /<details id="case-branch-steps\[1\]"><summary>如果 cart 可见/);
     assert.match(markup, /最多重复 2 次/);
     assert.match(markup, /&lt;b&gt;paid&lt;\/b&gt;/);
@@ -135,6 +138,20 @@ test("Given When Then follows guards, branching and bounded repetition and conce
     assert.match(ui, /data-type="caseOpen" data-id="file:\/\/\/x.json"/);
     const gestures = createBdd({format: "harmony-agent.device-recording", steps: [
         {command: "deviceGesture", input: {kind: "swipe", x: 0, y: 5, toX: 5, toY: 8}}]});
-    assert.match(caseBddView(gestures, "en"), /Swipe \(0, 5\) → \(5, 8\)/);
-    assert.match(caseBddView(gestures, "en"), /No final assertion recorded/);
+    assert.match(caseBddView(gestures, "en",{coordinates:true}), /Swipe \(0, 5\) → \(5, 8\)/);
+    assert.match(caseBddView({when:[{text:"Legacy gesture",path:"steps[0]"}]}, "en",{coordinates:true}), /Legacy gesture/);
+});
+
+test("BDD allows Given followed by Then and Then followed by Given with no action rows", async () => {
+    const plan = {version:"1",preconditions:[check],steps:[
+        {assert:{...check,selector:{id:"receipt"}}},
+        {assert:{...check,selector:{id:"next-page"}}},
+        {assert:{...check,selector:{id:"empty-list"}}},
+    ]};
+    const bdd = createBdd(plan,"en",undefined,new Map([[plan.steps[1],{role:"Given"}]]));
+    const {caseBddView} = await loadWebview("caseLibrary");
+    const markup = caseBddView(bdd,"en",{reorder:true});
+    assert.deepEqual([...markup.matchAll(/data-bdd-role="(\w+)"/g)].map(match=>match[1]),["Given","Then","Given","Then"]);
+    assert.deepEqual([...markup.matchAll(/data-order-index="(\d+)"/g)].map(match=>match[1]),["0","1","2"]);
+    assert.doesNotMatch(markup, /No final assertion recorded|case-bdd-clause/);
 });

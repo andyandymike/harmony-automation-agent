@@ -15,7 +15,6 @@
   "command.openEvidence": "打开已导出的证据…",
   "command.askAI": "用 AI 操作手机",
   "mcp.phoneTools": "Harmony Agent 手机工具",
-  "view.workbench": "工作台",
   "config.cliPath": "已安装的 harmony-agent 可执行文件路径。留空时使用 HARMONY_AGENT_CLI 或 PATH 中的可执行文件。",
   "config.hdcPath": "可选的本机 HDC 可执行文件路径。留空时由 Harmony Agent 查找。",
   "config.mcpPythonPath": "供 MCP 服务使用的 Python 解释器，需已安装 harmony-automation-agent。留空时使用工作台 CLI 所在的 Python 环境。",

@@ -93,14 +93,16 @@ function setupView(model,t) {
     const boundGroup = guided && model.explorationFlow?.ruleGroupName;
     const group = model.explorationRuleGroup;
     return `<section class="x-explore x-setup"><h1>${h(t.xExplore)}</h1>
-        <div class="x-modes" role="group" aria-label="${h(t.xExplore)}">
-            ${[["free",t.xFree],["flow",t.xGuided]].map(([key,name])=>`<button type="button" data-x="mode" data-id="${key}" ${active(setup.mode===key)}${off(busy)}>${h(name)}</button>`).join("")}</div>
+        <fieldset class="x-modes"><legend>${h(t.xMode)}</legend>
+            ${[["free",t.xFree],["flow",t.xGuided]].map(([key,name])=>`<label class="x-mode"><input type="radio"
+                name="x-mode" id="x-mode-${key}" value="${key}" data-x="mode" data-id="${key}" ${setup.mode===key ? "checked" : ""}${off(busy)}>
+                <span>${h(name)}</span></label>`).join("")}</fieldset>
         <p class="x-guide">${h(guided ? t.xGuidedHint : t.xSetupHint)}</p>
         <form id="x-setup-form">${guided ? flowControls(model,t) : ""}
             <label>${h(t.xFocus)}<textarea id="x-focus" rows="2" placeholder="${h(t.xFocusExample)}"${off(busy)}>${h(setup.focus)}</textarea></label>
             ${boundGroup ? `<p>${h(t.netRuleGroup)} · ${h(boundGroup)}</p>` : group ? `<label class="x-rule-group"><input type="checkbox" id="x-rule-group"
                 data-group="${h(group.id)}" data-version="${h(group.version)}" ${setup.group?.id === group.id && setup.group.version === group.version ? "checked" : ""}${off(busy)}>
-                ${h(t.xUseGroup)} · ${h(group.name)}</label>` : ""}
+                <span>${h(t.xUseGroup)} · ${h(group.name)}</span></label>` : ""}
             <details id="x-limits"><summary>${h(t.xLimits)}</summary><div class="x-budgets">
                 <label>${h(t.xInputs)}<input class="vscode-textfield" id="x-max-actions" type="number" min="1" max="100" step="1" required value="${h(setup.maxActions)}"${off(busy)}></label>
                 <label>${h(t.xMinutes)}<input class="vscode-textfield" id="x-max-minutes" type="number" min="1" max="30" step="1" required value="${h(setup.maxMinutes)}"${off(busy)}></label></div></details>

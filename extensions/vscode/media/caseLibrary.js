@@ -86,34 +86,49 @@ export function caseLibraryView(model, language) {
             selected:model.testView==="run"?model.run?.entry.id:undefined,disabled:locked,showName:true}) : ""}</nav>`;
 }
 
-export function caseBddView(bdd, language, {renderRow, groupEnd, coordinates=false, branchId="case-branch", showHeading=true, reorder=false} = {}) {
+export function caseStepLabel(text, step, title) {
+    if (!step?.name) return title || html(text);
+    return `<span class="case-step-title">${title || `<strong>${html(step.name)}</strong>`}
+        ${step.name === text ? "" : `<small>${html(text)}</small>`}</span>`;
+}
+
+export function caseBddView(bdd, language, {renderRow, renderAfterStep, stepActions, tools, boundaryEditor, coordinates=false,
+    branchId="case-branch", showHeading=true, reorder=false} = {}) {
     if (!bdd) return "";
     const w = words(language);
-    const list = values => `<ul>${values.map(value => "<li>" + html(value) + "</li>").join("")}</ul>`;
-    const row = (text,area,index,path) => renderRow?.(text,{area,index,path}) || html(text);
-    const conditions = (values,area,offset = 0) => `<ul>${values.map((text,index)=>`<li>${row(text,area,index-offset,
-        index >= offset ? (area === "start" ? "preconditions" : "goals") + "[" + (index-offset) + "]" : undefined)}</li>`).join("")}</ul>`;
-    function steps(values) {
-        const sortable = reorder && values.length>1;
-        const orderKey = sortable ? values[0].path.replace(/\[\d+\]$/,"") : "";
-        return `<ol class="case-bdd-steps"${sortable?' data-order-kind="case" data-order-key="'+html(orderKey)+'"':""}>${values.map((step,index) => {
-            const body = step.branches ? `<details id="${branchId}-${html(step.path)}"><summary${sortable?" data-order-hit":""}>${html(step.text)}</summary>${step.branches.map(branch =>
-                `<div class="case-branch"><strong>${html(branch.label)}</strong>${steps(branch.steps)}</div>`).join("")}</details>` :
-                `${step.before ? `<small>${w("Before", "操作前检查")}</small>${list(step.before)}` : ""}
-                ${row(step.text,"step",undefined,step.path)}${step.after ? `<div class="case-step-check"><small>${w("Then verify", "操作后验证")}</small> ${html(step.after)}</div>` : ""}`;
-            return sortable ? `<li class="case-sort-step" data-item-actions data-order-index="${index}" data-step-path="${html(step.path)}" data-order-label="${html(step.text)}">
-                ${orderGrip(w)}<div class="case-sort-content">${body}</div>
-                ${itemMenu(w("Step actions","步骤操作"),orderActions(w,index,values.length))}</li>` : `<li>${body}</li>`;
-        }).join("")}</ol>`;
+    const authored = step=>!step.area || step.area==="step";
+    const row = step => renderRow?.(step.text,{area:step.area || "step",index:step.index,path:step.path,step}) || caseStepLabel(step.text,step);
+    const line = (role, content, attached = false) => `<div class="case-bdd-line${attached ? " case-attached-check" : ""}"
+        ${role ? `data-bdd-role="${html(role)}"><span class="case-bdd-role">${html(role)}</span>` : ">"}<div class="case-bdd-text">${content}</div></div>`;
+    function steps(values, root = false) {
+        const executable = values.filter(authored);
+        const sortable = reorder && executable.length>1;
+        const orderKey = sortable ? executable[0].path.replace(/\[\d+\]$/,"") : "";
+        const items = values.map((step,index) => {
+            if (!authored(step)) return `<li class="case-step-entry"><div class="case-sort-content">${line(step.role,row(step))}</div></li>`;
+            const title = step.branches ? `<details id="${branchId}-${html(step.path)}"><summary${sortable?" data-order-hit":""}>${caseStepLabel(step.text,step)}</summary>
+                ${step.branches.map(branch=>`<div class="case-branch"><strong>${html(branch.label)}</strong>${steps(branch.steps)}</div>`).join("")}</details>` : row(step);
+            const body = (step.before || []).map(text=>line("Given",html(text),true)).join("") +
+                line(coordinates ? undefined : step.role,title) +
+                (step.after ? line("Then",html(step.after),true) : "") + (renderAfterStep?.(step) || "");
+            const position = step.index ?? index;
+            const menu = (stepActions?.(step) || "") + (sortable ? orderActions(w,position,executable.length) : "");
+            const group = step.group && step.group !== values[index-1]?.group ? `<h3 class="case-step-group">${html(step.group)}</h3>` : "";
+            const order = sortable ? ` data-order-index="${position}" data-step-path="${html(step.path)}" data-order-label="${html(step.name || step.text)}"` : "";
+            return `<li class="case-step-entry" data-case-step="${html(step.path)}"${menu ? " data-item-actions" : ""}${order}>
+                ${group}${sortable ? orderGrip(w) : ""}<div class="case-sort-content">${body}</div>
+                ${itemMenu(w("Step actions","步骤操作"),menu)}</li>`;
+        });
+        if (root && !coordinates && boundaryEditor) {
+            const start = boundaryEditor("start"), end = boundaryEditor("goal");
+            if (start) items.splice(values.findLastIndex(step=>step.area==="start" || step.area==="setup")+1,0,
+                `<li class="case-bdd-boundary-editor">${start}</li>`);
+            if (end) items.push(`<li class="case-bdd-boundary-editor">${end}</li>`);
+        }
+        return `<ol class="case-bdd-steps"${sortable ? ' data-order-kind="case" data-order-key="'+html(orderKey)+'"' : ""}>${items.join("")}</ol>`;
     }
-    const group = (name, area, contents) => `<section class="case-bdd-clause"><h3>${html(name)}</h3><div>${contents}${groupEnd?.(area) || ""}</div></section>`;
-    const empty = label => `<p class="case-missing">${html(label)}</p>`;
-    const actions = bdd.when.length ? steps(bdd.when) : empty(w("No steps recorded", "尚未记录操作"));
-    const heading = showHeading ? `<h2>${coordinates ? w("Recorded actions","录制步骤") : w("Case steps","用例步骤")}</h2>` : "";
-    if (coordinates) return `<section class="case-bdd case-coordinate-steps">${heading}${actions}</section>`;
-    return `<section class="case-bdd">${heading}
-        ${group("Given", "start", bdd.given.length ? conditions(bdd.given,"start",bdd.ruleSetup ? 1 : 0) : empty(w("No starting condition recorded", "尚未记录起始条件")))}
-        ${group("When", "step", actions)}
-        ${group("Then", "goal", bdd.then.length ? conditions(bdd.then,"goal") : empty(w("No final assertion recorded", "尚未记录最终断言")))}
-        </section>`;
+    const values = bdd.steps || bdd.when; // Older saved gesture reports used the "when" array.
+    const heading = showHeading ? `<header class="case-steps-head"><h2>${coordinates ? w("Recorded actions","录制步骤") : w("Case steps","用例步骤")}</h2>${tools || ""}</header>` : "";
+    const timeline = values?.length ? steps(values,true) : `<p class="muted">${w("No steps recorded","尚未记录步骤")}</p>`;
+    return `<section class="case-bdd">${heading}${timeline}</section>`;
 }

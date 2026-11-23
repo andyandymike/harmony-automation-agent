@@ -15,7 +15,6 @@
   "command.openEvidence": "Open Exported Evidence…",
   "command.askAI": "Run a Phone Task with AI",
   "mcp.phoneTools": "Harmony Agent phone tools",
-  "view.workbench": "Workbench",
   "config.cliPath": "Path to the installed harmony-agent executable. Leave blank to use HARMONY_AGENT_CLI or the executable on PATH.",
   "config.hdcPath": "Optional path to the local HDC executable. Leave blank to let Harmony Agent discover it.",
   "config.mcpPythonPath": "Python interpreter with harmony-automation-agent installed for the MCP server. Leave blank to use the Python environment of the Workbench CLI.",

@@ -1,17 +1,18 @@
 import { vscode } from "./bridge.js";
 import { pytestWorkflow } from "./pytestCase.js";
 import { recordingWorkspace } from "./recordingWorkspace.js";
-import { caseBddView, caseLibraryView, caseRunHistory, caseRunStatus, caseRunTime, isCaseRun } from "./caseLibrary.js";
-import { caseReviewView, caseEditorClick, caseEditorInput, caseEditorSubmit } from "./caseAuthoring.js";
+import { caseBddView, caseStepLabel, caseLibraryView, caseRunHistory, caseRunStatus, caseRunTime, isCaseRun } from "./caseLibrary.js";
+import { caseReviewView, caseStepActions, caseEditorClick, caseEditorInput, caseEditorSubmit } from "./caseAuthoring.js";
 import { pytestPhases } from "./pytestReport.js";
 import { repairView } from "./caseRepair.js";
+import { failureView } from "./caseFailure.js";
 import { networkView, networkClick, networkInput, networkOrder, requestMenuItems, requestFieldMenuItems, ruleGroupMenuItems } from "./networkView.js";
 import { trafficKeydown } from "./networkTraffic.js";
 import { tabKeydown, tabList } from "./ui/tabs.js";
 import { actionButton } from "./ui/controls.js";
 import { bindItemMenus, closeItemMenu, itemMenu, menuItems } from "./ui/itemActions.js";
 import { bindListOrder, orderGrip, orderActions } from "./ui/listOrder.js";
-import { workflowDebugView, flowDebugClick, problemExportButton } from "./flowDebug.js";
+import { workflowDebugView, flowDebugClick, evidenceExport } from "./flowDebug.js";
 import { bindElements, updateElements, selectElement, rebindElement, elementControls, elementsFooter, elementClick, elementInput, elementMenuItems } from "./elements.js";
 import { explorationView, exploreClick, exploreInput, exploreChange, exploreToggle } from "./exploration.js";
 
@@ -353,27 +354,36 @@ function checksForm(draft) {
         </details>${draft.end?.length ? inlineAI("check", t.stationAiCheck, model.aiResults?.check) : ""}</div>`;
 }
 
-function inlineAI(kind, label, result) {
-    const active = result?.status === "running" || result?.status === "stopping";
-    const stop = `<button class="button" type="button" data-type="cancelAI" ${disabled(result?.status === "stopping")}>${h(t.stopTask)}</button>`;
-    const check = result?.check;
+const aiWorking = result => ["running","stopping"].includes(result?.status);
+
+function aiStop(result) {
+    return aiWorking(result) ? actionButton(t.stopTask,{attrs:{"data-type":"cancelAI"},disabled:result.status==="stopping"}) : "";
+}
+
+function aiOutput(result,key) {
+    if (!result) return "";
     const waiting = result?.waitingForModel === "retry" ? t.modelRetry :
         result?.waitingForModel && t.modelReviewing.replace("{provider}", result.provider === "codex" ? "Codex" : "GitHub Copilot");
-    const chosen = check && selection.goal === check.ref && selection.property === check.property &&
-        (check.property === "text" ? selection.expected === check.expected : selection.visible === check.expected);
-    const key = kind === "diagnosis" && model.run.entry.id + "/" + model.run.selected;
     const reads = result?.evidence || [];
-    return `<section class="inline-ai">${key ? `<label for="ai-diagnosis-goal">${h(t.aiDiagnosisGoal)}</label>
-        <input id="ai-diagnosis-goal" data-diagnosis="${h(key)}" value="${h(diagnosisGoals.get(key) ?? result?.goal ?? "")}"
-        placeholder="${h(t.aiDiagnosisExample)}" maxlength="1200" ${disabled(active)}>` : ""}<div class="toolbar">
-        ${button(label, kind === "check" ? "suggestCheck" : "explainStep")}${active ? stop : ""}</div>
-        ${active ? `<p role="status">${h(result.status === "stopping" ? t.taskStopping : waiting || result.steps.at(-1) || t.taskThinking)}</p>` : ""}
+    return `${aiWorking(result) ? `<p role="status">${h(result.status === "stopping" ? t.taskStopping : waiting || result.steps.at(-1) || t.taskThinking)}</p>` : ""}
         ${result?.status === "cancelled" ? `<p>${h(t.taskCancelled)}</p>` : ""}
         ${result?.answer ? `<p class="ai-answer" role="status">${h(result.answer)}</p>` : ""}
         ${reads.length ? `<details id="diagnosis-evidence-${h(key)}"><summary>${h(t.aiEvidenceRead)} · ${reads.length}</summary>
             ${reads.map(r=>`<p class="ai-answer">${h(r.text)}</p>${(r.records || []).map(row=>
                 button(t.aiOpenRecord+" · "+row.method+" "+row.route+" · "+row.status,"networkEvidenceRecord",{attrs:{"data-id":row.id}})).join("")}`).join("")}
-            ${reads.some(r=>r.kind==="http") ? `<small>${h(t.aiEvidenceScope)}</small>` : ""}</details>` : ""}
+            ${reads.some(r=>r.kind==="http") ? `<small>${h(t.aiEvidenceScope)}</small>` : ""}</details>` : ""}`;
+}
+
+function inlineAI(kind, label, result) {
+    const check = result?.check;
+    const chosen = check && selection.goal === check.ref && selection.property === check.property &&
+        (check.property === "text" ? selection.expected === check.expected : selection.visible === check.expected);
+    const key = kind === "diagnosis" && model.run.entry.id + "/" + model.run.selected;
+    return `<section class="inline-ai">${key ? `<label for="ai-diagnosis-goal">${h(t.aiDiagnosisGoal)}</label>
+        <input id="ai-diagnosis-goal" data-diagnosis="${h(key)}" value="${h(diagnosisGoals.get(key) ?? result?.goal ?? "")}"
+        placeholder="${h(t.aiDiagnosisExample)}" maxlength="1200" ${disabled(aiWorking(result))}>` : ""}<div class="toolbar">
+        ${button(label, kind === "check" ? "suggestCheck" : "explainStep")}${aiStop(result)}</div>
+        ${aiOutput(result,key)}
         ${check ? `<p><strong>${h(check.label)}</strong> · ${h(check.property)} = <code>${h(JSON.stringify(check.expected))}</code></p>
         ${button(chosen ? t.checkUsed : t.applyCheck, "applyCheck", { off: chosen })}` : ""}</section>`;
 }
@@ -425,21 +435,26 @@ function caseRunSummary(run, locked = false) {
             ${runs.length>1 ? caseRunHistory(runs,language,{id:"case-run-history",label:word("Case history","用例历史"),selected:run?.entry.id,disabled:model.busy||locked}) : ""}</div></section>`;
 }
 
-function caseEditValue(text,area,{index,path,add}={}) {
-    return actionButton(text,{quiet:true,className:area==="name"?"case-value case-title":"case-value",
+function caseEditValue(text,area,{index,path,add,defaultName,stepLabel}={}) {
+    const className = area==="name" ? "case-value case-title" : stepLabel ? "case-value case-step-name" : "case-value";
+    return actionButton(text,{quiet:true,className,
         disabled:model.busy,attrs:{"data-type":"caseReview","data-case-area":area,"data-case-index":index,
-            "data-case-path":path,"data-case-add":add,"data-order-hit":area==="step"?"":undefined}});
+            "data-case-path":path,"data-case-add":add,"data-step-default":defaultName,"data-order-hit":stepLabel?"":undefined}});
 }
 
 function definitionBdd(run, coordinates) {
     const defs = model.caseDefinitions;
-    return caseBddView(model.caseBdd,language,{coordinates,reorder:Boolean(defs && !model.busy),renderRow:runRows(run,(text,context)=>{
-        const {area,path,index}=context;
-        const editable = area==="step" ? defs?.steps[path] : defs?.[area]?.[index];
-        return editable ? caseEditValue(text,area,context) : h(text);
-    }),groupEnd:area=>{
-        if (!defs || area==="step" || coordinates) return "";
-        const title = area==="start" ? word("Add condition","添加条件") : word("Add assertion","添加断言");
+    const tools = defs && actionButton(word("Organize with AI","用 AI 整理步骤"),{quiet:true,disabled:model.busy,
+        attrs:{"data-type":"caseReview","data-case-area":"organize"}});
+    const stepActions = defs && !model.busy ? step=>caseStepActions(step,defs.steps[step.path],caseEditValue,word) : undefined;
+    return caseBddView(model.caseBdd,language,{coordinates,tools,stepActions,reorder:Boolean(defs && !model.busy),renderRow:runRows(run,(text,context)=>{
+        const {area,path,index,step}=context;
+        if (area==="step") return caseStepLabel(text,step,defs?.steps[path] && caseEditValue(step.name || text,"stepName",
+            {path,defaultName:text,stepLabel:true}));
+        return defs?.[area]?.[index] ? caseEditValue(text,area,context) : h(text);
+    }),boundaryEditor:area=>{
+        if (!defs || coordinates) return "";
+        const title = area==="start" ? word("Add starting condition","添加起始条件") : word("Add final assertion","添加最终断言");
         return `<div class="case-add-check">${caseEditValue("+ "+title,area,{index:defs[area].length,add:true})}</div>`;
     }});
 }
@@ -488,11 +503,17 @@ function caseWorkspace() {
         `<details id="case-run-settings" class="case-run-settings" ${model.flowDebug?.planUri===model.plan.uri ? "open" : ""}>
             <summary>${word("Run settings & debugging","运行配置与调试")}</summary>
             ${pytestWorkflow(model,language,button,h)}${workflowDebugView(model,language,t)}</details>` : "";
+    const review = run && model.failureReview;
+    const failedStep = run?.steps?.[review?.index];
+    const failureKey = run?.entry.id + "/failure";
+    const ai = model.aiResults?.diagnosis?.key === failureKey ? model.aiResults.diagnosis : undefined;
     return `<section class="plan-sheet case-detail-sheet"><header class="case-detail-head">
         <div class="case-heading"><h1>${model.caseDefinitions ? caseEditValue(title,"name") : h(title)}</h1>
             ${headingNote ? `<small>${h(headingNote)}</small>` : ""}</div>
         <div class="case-header-actions">${runnerSelect}${runButton}${save}${menu}</div></header>
         ${caseRunSummary(run)}
+        ${failureView(review,run?.entry.id,language,{stepTitle:failedStep && stepTitle(failedStep),ai,
+            aiOutput:aiOutput(ai,failureKey),stop:aiStop(ai),disabled:model.busy})}
         ${model.planSummary?.scenarioName?`<p class="case-review-note">${h(t.netRuleGroup)} · ${h(model.planSummary.scenarioName)}</p>`:""}
         ${definition}${run ? caseReportBody(run,joined) : ""}${settings}</section>`;
 }
@@ -573,7 +594,7 @@ function caseStepAction(run, step, index, inline) {
             "aria-label":label+" · "+word("Step evidence","步骤证据"),"aria-expanded":showCaseEvidence(run,index,inline)}});
 }
 
-function runRows(run, draw = text=>h(text)) {
+function runRows(run, draw = (text,{step})=>caseStepLabel(text,step)) {
     if (!run?.steps) return draw;
     const receipts = new Map();
     run.steps.forEach((step,index)=>{
@@ -596,11 +617,11 @@ function caseStepEvidence(run,index) {
     const step = run.steps[index];
     const key = run.entry.id + "/" + index;
     const result = model.aiResults?.diagnosis;
-    const diagnosis = inlineAI("diagnosis", t.stationAiExplain, result?.key === key ? result : undefined);
+    const diagnosis = model.failureReview?.index === index ? "" : inlineAI("diagnosis", t.stationAiExplain, result?.key === key ? result : undefined);
     return `<div class="case-step-evidence" id="run-evidence">${evidence(run,step)}${errorDetails(run.frameError)}
         ${repairView(model,language,button)}${comparison(run)}
         <details id="case-evidence-tools"><summary>${word("More evidence tools","更多证据工具")}</summary>
-            <div class="toolbar">${button(t.netStep,"networkStep")}${problemExportButton(model,language,"run")}</div>${diagnosis}
+            <div class="toolbar">${button(t.netStep,"networkStep")}${evidenceExport(model,language,"run")}</div>${diagnosis}
         </details></div>`;
 }
 
@@ -723,7 +744,7 @@ function render() {
     if (surface === "inspect") panel = inspector();
     if (surface === "network") panel = networkView(model,language);
     if (surface.startsWith("exploration")) panel = explorationView(model,t,
-        step => problemExportButton(model,language,"exploration",step),language);
+        step => evidenceExport(model,language,"exploration",step),language);
     if (surface === "case-review") panel = caseReviewView(model,language);
     const confirm = selected === "recordings" && selection.confirmDiscard && model.draft ? `<div class="confirm-discard" role="group" aria-label="${h(t.discardAsk)}">
         <strong>${h(t.discardAsk)}</strong>${button(t.keep, "keepDraft", { primary: true })}${button(t.discard, "discardRecord")}</div>` : "";
@@ -733,7 +754,7 @@ function render() {
     if (html !== contentSignature) {
         closeItemMenu();
         cancelOrderDrag();
-        const scrolls = ["node-list", "record-controls", "live-step-log", "net-record-list", "net-detail-body", "case-files"]
+        const scrolls = ["node-list", "record-controls", "live-step-log", "net-record-list", "net-detail-body", "case-files", "bdd-target-results"]
             .map(id => document.getElementById(id)).filter(Boolean)
             .map(el => ({id: el.id, top: el.scrollTop, left: el.scrollLeft, key: el.dataset.scrollKey}));
         const oldLog = document.getElementById("live-step-log");
@@ -838,7 +859,8 @@ window.addEventListener("message", event => {
     render();
     if (closedCaseEditor && caseEditOrigin) {
         let origin = root.querySelector(caseEditOrigin);
-        if (origin?.closest("[data-item-menu]")) origin=origin.closest(".case-library-row")?.querySelector(".case-file");
+        if (origin?.closest("[data-item-menu]")) origin=origin.closest(".case-library-row")?.querySelector(".case-file") ||
+            origin.closest("[data-case-step]")?.querySelector(":scope > [data-item-menu-trigger]");
         if (origin?.disabled && model.busy) pendingFocus={key:caseEditOrigin};
         else origin?.focus({preventScroll:true});
         caseEditOrigin=undefined;
@@ -848,7 +870,8 @@ window.addEventListener("message", event => {
         requestedCaseEdit = undefined;
         if (model.caseReview) {
             const editor = [...root.querySelectorAll("[data-bdd][data-area]")].find(el=>el.dataset.area===area &&
-                (area==="name" || (area==="step" ? el.dataset.path===path : el.dataset.index===index && (el.dataset.bdd==="add")===add)));
+                (["name","organize"].includes(area) || ((path ? el.dataset.path===path : el.dataset.index===index) &&
+                    (el.dataset.bdd==="add")===add)));
             editor?.click();
         } else caseEditOrigin=undefined;
     }
@@ -875,12 +898,20 @@ function handleClick(event) {
         render();
         return;
     }
-    if (type==="caseStep") {
-        const run = selectedCaseRun(), receipt = Number(index), inline = control.dataset.inline==="true";
+    if (type==="caseStep" || type==="showFailureStep") {
+        const run = selectedCaseRun(), receipt = Number(index), jump = type==="showFailureStep";
         if (!run?.steps?.[receipt]) return;
-        const open = !showCaseEvidence(run,receipt,inline);
+        const row = `[data-type="caseStep"][data-index="${receipt}"]`;
+        const inline = jump ? Boolean(root.querySelector(row+'[data-inline="true"]')) : control.dataset.inline==="true";
+        const open = jump || !showCaseEvidence(run,receipt,inline);
         caseEvidence = open ? {id:run.entry.id,index:receipt,inline} : undefined;
         render();
+        if (jump) {
+            const target = root.querySelector(row+`[data-inline="${inline}"]`);
+            for (let parent=target?.closest("details"); parent; parent=parent.parentElement.closest("details")) parent.open=true;
+            target?.focus({preventScroll:true});
+            target?.scrollIntoView({block:"center"});
+        }
         if (open && run.selected!==receipt) vscode.postMessage({type:"step",index:receipt});
         return;
     }
@@ -888,6 +919,12 @@ function handleClick(event) {
         const {caseArea,caseIndex,casePath,caseAdd}=control.dataset;
         requestedCaseEdit={area:caseArea,index:caseIndex,path:casePath,add:caseAdd==="true"};
         caseEditOrigin=focusKey(control);
+    }
+    if (type==="caseStepAction") {
+        const review = model.caseReview;
+        sendWorkbench({type,id:review?.id,revision:review?.revision,uri:model.plan?.uri,digest:model.planDigest,
+            action:control.dataset.stepAction,path:control.dataset.casePath});
+        return;
     }
     if (["caseOpen","openPlan","run","caseRun","report"].includes(type)) {
         caseEvidence=undefined;
@@ -1070,6 +1107,10 @@ root.addEventListener("input", event => {
 
 function changeField(event) {
     if (caseEditorInput(event.target,render)) return;
+    if (event.target.dataset.x === "mode" && event.target.checked) {
+        exploreClick(event.target,model,sendWorkbench,render);
+        return;
+    }
     if (event.target.id === "case-runner") {
         caseRunners.set(model.plan.uri,event.target.value);
         render();

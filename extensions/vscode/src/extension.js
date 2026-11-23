@@ -25,11 +25,13 @@ const { ElementsController } = require("./elementsController");
 const { NetworkController } = require("./networkController");
 const { readWorkflow } = require("./workflowFile");
 const { readiness, safeCaseName, writeCase, findCase, startPytest } = require("./pytestCase");
-const { CaseLibrary, createBdd } = require("./caseLibrary");
+const { CaseLibrary, createBdd, readCaseMetadata } = require("./caseLibrary");
+const { restorePresentation } = require("./casePresentation");
 const { CaseAuthoring, caseDefinitions, canEditCase } = require("./caseAuthoring");
 const { loadPytestRun } = require("./pytestReport");
 const { journalPath, watchRunJournal } = require("./runProgress");
 const { CaseRepair, sourceDigest } = require("./caseRepair");
+const { reviewCaseFailure } = require("./caseFailure");
 const { workspaceTools, selectedWorkspaceTab, registerWorkbenchLauncher } = require("./workbenchTools");
 const { FlowDebugger } = require("./flowDebug");
 const { exportProblemClip, openProblemClip } = require("./problemExport");
@@ -48,7 +50,7 @@ const toolMessages = new Map([
     ["openRecordingWorkspace", "recordings"], ["inspect", "inspect"], ["inspectDevice", "inspect"], ["networkOpen", "network"],
 ]);
 const localCaseActions = new Set(["openPlan", "editPlan", "caseOpen", "caseReview", "caseDuplicate", "caseRemove", "caseRestore",
-    "caseCancel", "caseMoveStep", "openPytest"]);
+    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest"]);
 
 class Workbench {
     constructor(context) {
@@ -213,6 +215,11 @@ class Workbench {
                 this.openTask();
             } else if (message.type === "explainExchange" && typeof message.id === "string" && this.state.tool === "network") {
                 await this.runAI("exchange",undefined,false,message.id);
+            } else if (message.type === "diagnoseFailure") {
+                const run = this.state.run;
+                const failure = reviewCaseFailure(run);
+                if (failure && this.state.tool === "recordings" && this.state.mode === "run" && run.entry.id === message.id)
+                    await this.runAI("diagnosis", this.text.aiFailureTask, false, undefined, failure);
             } else if (message.type === "explainStep" || message.type === "suggestCheck") {
                 if (message.type === "suggestCheck") await this.runAI("check");
                 else if (!message.id || (message.id === this.state.run?.entry?.id && message.index === this.state.run.selected)) {
@@ -229,8 +236,14 @@ class Workbench {
                 await vscode.commands.executeCommand("workbench.action.openSettings", query);
             } else if (message.type === "view") {
                 await this.revealView(message.view);
+            } else if (message.type === "caseOrganize") {
+                await this.caseAuthoring.organize(message);
+            } else if (message.type === "caseOrganizeCancel") {
+                if (message.id) this.caseAuthoring.stopOrganizing(message.id);
+                this.publish();
             } else {
-                await this.perform(() => this.dispatch(message), { runtime: !localCaseActions.has(message.type) || Boolean(message.fromRun) });
+                await this.perform(() => this.dispatch(message), {runtime:!localCaseActions.has(message.type) || Boolean(message.fromRun) ||
+                    (message.type === "caseTargets" && message.live === true)});
             }
         });
         panel.onDidChangeViewState(() => {
@@ -245,6 +258,7 @@ class Workbench {
             this.planWatch?.dispose();
             this.planWatch = this.watchedUri = undefined;
             this.cancelAI();
+            this.caseAuthoring.stopOrganizing();
             this.caseRepair.controller?.abort();
             this.explorations.cancel("pause");
             this.flowDebugger.stop();
@@ -321,14 +335,14 @@ class Workbench {
         return createCopilotAsk(vscode, {signal, language:this.language});
     }
 
-    runAI(kind, goal, readOnly = false, exchangeId) {
+    runAI(kind, goal, readOnly = false, exchangeId, failure) {
         if (this.aiJob || this.state.busy) return;
         const { device, draft, recording, run } = this.state;
         if (kind === "phone" && (!device || draft || !goal?.trim())) return;
         if ((kind === "diagnosis" && !run?.entry) || (kind === "check" && (recording || draft?.stepFormat !== "controls"))) return;
         const controller = new AbortController();
         const job = this.aiJob = { kind, controller };
-        const key = kind === "exchange" ? exchangeId : kind === "diagnosis" ? run.entry.id + "/" + run.selected : device;
+        const key = kind === "exchange" ? exchangeId : kind === "diagnosis" ? run.entry.id + "/" + (failure ? "failure" : run.selected) : device;
         const result = this.state.aiResults[kind] = { key, goal, provider: this.aiProvider, status: "running", steps: [] };
         if (kind === "phone") {
             this.aiDraft = undefined;
@@ -348,14 +362,19 @@ class Workbench {
                         result.waitingForModel = false;
                     }
                 };
-                const onEvent = ({ type, text, receipt }) => {
+                const onEvent = ({ type, text, receipt, recommendation }) => {
                     if (signal.aborted) return;
                     if (type === "step") result.steps.push(text);
                     if (type === "evidence") (result.evidence ||= []).push({...receipt,text});
-                    if (type === "answer") result.answer = text;
+                    if (type === "answer") {
+                        result.answer = text;
+                        if (recommendation) result.recommendation = recommendation;
+                    }
                     this.publish();
                 };
-                const options = { agent: kind === "diagnosis" ? this.reportAgent(run.entry) : this.agent, ask, signal, onEvent, language: this.language,
+                const agent = kind === "diagnosis" ? {call:(...args)=>this.reportAgent(run.entry).call(...args)} :
+                    kind === "phone" ? this.agent : undefined;
+                const options = { agent, ask, signal, onEvent, language: this.language,
                     readRequests:(window,filter) => localRequests(this.networks,window,filter) };
                 if (kind === "phone") {
                     const outcome = await runPhoneTask({ ...options, device, goal, allowActions: !readOnly,
@@ -365,7 +384,7 @@ class Workbench {
                     result.canSave = Boolean(this.aiDraft);
                     if (outcome?.status === "blocked") result.status = "blocked";
                 } else if (kind === "diagnosis") {
-                    await explainRun({ ...options, run, goal: goal || this.text.aiReportTask });
+                    await explainRun({ ...options, run, failure, goal: goal || this.text.aiReportTask });
                 } else if (kind === "exchange") {
                     await explainExchange({...options,controller:this.networks,id:exchangeId});
                 } else {
@@ -422,6 +441,7 @@ class Workbench {
         void this.panel.webview.postMessage({
             state: {...this.state, testView:this.recordingView, runtimeName: this.projectRuntime.current.name,
                 runtimeError: this.projectRuntime.current.error,
+                failureReview: reviewCaseFailure(this.state.run),
                 ...(this.state.tool !== "network" && {network:undefined,networkDraft:undefined}),
                 nativeCaptureActive:Boolean(this.networks.activeCapture)},
             text,
@@ -475,7 +495,7 @@ class Workbench {
 
     async dispatch(message) {
         if (this.state.tool === "recordings" && this.state.caseReview &&
-            !["caseBoundary","caseSave","caseCancel","caseEdit","caseMoveStep","caseTargets","device"].includes(message.type)) return;
+            !["caseBoundary","caseSave","caseCancel","caseEdit","caseMoveStep","caseStepAction","caseTargets","device"].includes(message.type)) return;
         switch (message.type) {
             case "caseReview":
                 if (message.id && !message.fromRun && !this.state.draft) await this.openCase(message.id);
@@ -497,6 +517,7 @@ class Workbench {
             case "caseBoundary": await this.caseAuthoring.addBoundary(message); break;
             case "caseEdit": await this.caseAuthoring.edit(message); break;
             case "caseMoveStep": if (this.state.tool==="recordings") await this.caseAuthoring.moveStep(message); break;
+            case "caseStepAction": if (this.state.tool==="recordings") await this.caseAuthoring.changeStep(message); break;
             case "caseTargets": await this.caseAuthoring.loadTargets(message); break;
             case "caseCancel": this.caseAuthoring.cancel(); break;
             case "caseOpen": await this.openCase(message.id); break;
@@ -1052,6 +1073,7 @@ class Workbench {
         if (entry.requiresRuleGroup && !file.scenario) throw new Error(/^zh/i.test(this.language) ?
             "请在 workflow.json 中恢复此用例需要的规则组快照。" : "Restore this case's required rule group snapshot in workflow.json.");
         const digest = sourceDigest(document.getText());
+        const metadata = await readCaseMetadata(document.uri);
         let active, result;
         try {
             result = await startPytest(vscode, this, {...entry, requiresRuleGroup: entry.requiresRuleGroup || Boolean(file.scenario)}, {
@@ -1060,7 +1082,7 @@ class Workbench {
                     active = run;
                     Object.assign(run,{sourceDigest:digest,caseId:this.state.activeCase?.id});
                     if (options.repairOf) run.repairOf = options.repairOf;
-                    return this.showRunning(run,candidate || file.plan,file.scenario,locate);
+                    return this.showRunning(run,candidate || file.plan,file.scenario,locate,metadata?.presentation);
                 },
             });
         } catch (error) {
@@ -1131,8 +1153,10 @@ class Workbench {
                 summary = summarizePlan(file.plan);
                 if (summary) {
                     digest = sourceDigest(contents);
-                    bdd = createBdd(file.plan, this.language, file.scenario || this.networks.bindings[plan.uri]);
-                    if (activeCase && await canEditCase(uri,activeCase)) definitions = caseDefinitions(file.plan);
+                    const meta = activeCase && await readCaseMetadata(uri);
+                    const presentation = restorePresentation(file.plan,meta?.presentation);
+                    bdd = createBdd(file.plan, this.language, file.scenario || this.networks.bindings[plan.uri], presentation);
+                    if (activeCase && await canEditCase(uri,activeCase)) definitions = caseDefinitions(file.plan,presentation);
                 }
                 if(summary && file.scenario) summary.scenarioName=String(file.scenario.name || this.text.netUntitledGroup);
             } catch {
@@ -1174,7 +1198,10 @@ class Workbench {
     }
 
     planChanged(uri) {
-        if (this.panel?.visible && this.state.plan?.uri === uri.toString()) {
+        const plan = this.state.plan?.uri;
+        const metadata = uri.scheme === "file" && uri.fsPath.endsWith(".harmony-case.json") &&
+            vscode.Uri.file(uri.fsPath.slice(0,-".harmony-case.json".length)).toString() === plan;
+        if (this.panel?.visible && (plan === uri.toString() || metadata)) {
             void this.refreshPlanSummary();
         }
     }
@@ -1198,9 +1225,9 @@ class Workbench {
         await this.context.workspaceState.update("runs", this.state.runs);
     }
 
-    showRunning(entry, plan, group, locate) {
+    showRunning(entry, plan, group, locate, presentationData) {
         this.state.mode = "run";
-        const run = this.state.run = {entry,steps:[],selected:0,bdd:createBdd(plan,this.language,group)};
+        const run = this.state.run = {entry,steps:[],selected:0,bdd:createBdd(plan,this.language,group,restorePresentation(plan,presentationData))};
         this.publish();
         if (!locate) return;
         return watchRunJournal(locate, record=>{
@@ -1221,6 +1248,7 @@ class Workbench {
         const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(selected.uri));
         const contents = document.getText();
         const {plan,scenario} = readWorkflow(trial?.contents || contents);
+        const metadata = await readCaseMetadata(document.uri);
         const entry = { id: randomUUID(), plan: selected, status: "running", time: new Date().toISOString(),
             sourceDigest: sourceDigest(contents), caseId: this.state.cases.find(row => row.uri === selected.uri)?.id };
         if (trial) entry.repairOf = trial.repairOf;
@@ -1237,7 +1265,7 @@ class Workbench {
         const locate = entry.source === "device" ? undefined :
             ()=>({id:entry.id,file:journalPath(this.stateDir,entry.id)});
         const group = scenario || this.networks.bindings[selected.uri];
-        const stopProgress = this.showRunning(entry,plan,group,locate);
+        const stopProgress = this.showRunning(entry,plan,group,locate,metadata?.presentation);
         if (entry.source === "device") {
             await this.replayDevicePlan(entry, plan);
             return;
@@ -1264,7 +1292,8 @@ class Workbench {
             }
         } catch (error) {
             entry.status = ["INVALID_PLAN","INVALID_ARGUMENT","INVALID_REQUEST"].includes(error.code) ? "rejected" : "unknown";
-            this.state.run.error = this.errorMessage(error);
+            entry.failureCode = this.state.run.errorCode = error.code;
+            entry.failureMessage = this.state.run.error = this.errorMessage(error);
             await this.persistRuns();
             throw error;
         } finally {
@@ -1372,7 +1401,9 @@ class Workbench {
         this.state.mode = "run";
         this.state.run = { entry };
         if (entry.source === "pytest") {
-            const report = await loadPytestRun(entry,this.language);
+            const uri = this.planForEntry(entry)?.uri;
+            const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
+            const report = await loadPytestRun(entry,this.language,metadata?.presentation);
             this.state.run = {...report, entry};
             if (report.steps?.length) await this.inspectStep(report.selected ?? 0);
             return;
@@ -1383,7 +1414,13 @@ class Workbench {
                 selected: Math.max(report.steps.length - 1, 0) };
             return;
         }
-        const record = await this.agent.call("report", { run_id: id, full: true });
+        let record;
+        try { record = await this.agent.call("report", { run_id: id, full: true }); }
+        catch (error) {
+            if (!entry.failureMessage) throw error;
+            this.state.run = {entry,steps:[],status:entry.status,error:entry.failureMessage,errorCode:entry.failureCode};
+            return;
+        }
         await this.setRun(entry, record);
     }
 
@@ -1396,8 +1433,11 @@ class Workbench {
         }
         const view = withAuthoredTargets(runView(record), plan);
         if (!group && plan) group = await this.networks.scenarioForRun(entry.id);
+        const uri = this.planForEntry(entry)?.uri;
+        const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
+        const presentation = restorePresentation(plan,metadata?.presentation);
         entry.status = view.status;
-        this.state.run = { entry, ...view, bdd:createBdd(plan,this.language,group), cleanup: entry.cleanup || view.cleanup };
+        this.state.run = { entry, ...view, bdd:createBdd(plan,this.language,group,presentation), cleanup: entry.cleanup || view.cleanup };
         await this.persistRuns();
         await this.inspectStep(view.selected);
     }
@@ -1454,9 +1494,9 @@ function activate(context) {
     const workbench = activeWorkbench = new Workbench(context);
     registerCopilotMcp(vscode, context, workbench);
     workbench.projectRuntime.start();
-    registerWorkbenchLauncher(vscode, workbench);
+    context.subscriptions.push(vscode.commands.registerCommand("harmonyAgent.openWorkbench", () => workbench.open()));
+    const launcher = registerWorkbenchLauncher(vscode,workbench);
     context.subscriptions.push(
-        vscode.commands.registerCommand("harmonyAgent.openWorkbench", () => workbench.open()),
         vscode.commands.registerCommand("harmonyAgent.selectProjectRuntime", () => workbench.chooseProjectRuntime()),
         ...[...workspaceTools].map(([tab,tool]) =>
             vscode.commands.registerCommand(tool.command, () => workbench.openTool(tab))),
@@ -1474,6 +1514,7 @@ function activate(context) {
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration("harmonyAgent.language") || event.affectsConfiguration("harmonyAgent.aiProvider")) workbench.publish();
             if (event.affectsConfiguration("harmonyAgent.language")) {
+                launcher.tooltip = workbench.text.openWorkbench;
                 void workbench.projectRuntime.refresh();
                 if (workbench.state.plan) void workbench.refreshPlanSummary();
             }

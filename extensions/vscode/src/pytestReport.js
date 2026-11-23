@@ -5,6 +5,7 @@ const path = require("node:path");
 const {isDeepStrictEqual} = require("node:util");
 const {runView, withAuthoredTargets} = require("./model");
 const {createBdd} = require("./caseBdd");
+const {restorePresentation} = require("./casePresentation");
 
 const deviceRunName = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
@@ -60,10 +61,10 @@ async function finishPytest({directory, invocation, plan, device, time, code, sh
     return {code:exitCode, entry};
 }
 
-async function loadPytestRun(entry, language) {
+async function loadPytestRun(entry, language, presentationData) {
     const info = entry.pytest;
     const session = await readJson(path.join(info.directory, "pytest.json"));
-    let record, cleanup, executedPlan;
+    let record, cleanup, executedPlan, executionError;
     let fullEvidence = false;
     if (info.deviceRun) {
         const folder = path.join(info.directory, info.deviceRun);
@@ -77,6 +78,7 @@ async function loadPytestRun(entry, language) {
         }
         fullEvidence = Array.isArray(record?.receipts);
         const execution = await readJson(path.join(folder, "execution.json"));
+        executionError = execution?.error;
         const finalCleanup = await readJson(path.join(folder, "cleanup.json"));
         if (finalCleanup?.success && finalCleanup.data?.detached) cleanup = "detached";
         else if (finalCleanup?.success === false) cleanup = "failed";
@@ -87,9 +89,11 @@ async function loadPytestRun(entry, language) {
     }
     const source = await readJson(info.workflowSource || path.join(info.directory,"workflow-source.json"));
     const wrapped = source?.format === "harmony-agent.workflow-scenario";
-    const bdd = createBdd(executedPlan || (wrapped ? source.workflow : source),language,wrapped ? source.scenario : undefined);
+    const plan = executedPlan || (wrapped ? source.workflow : source);
+    const bdd = createBdd(plan,language,wrapped ? source.scenario : undefined,restorePresentation(plan,presentationData));
     return {
         ...(record ? withAuthoredTargets(runView(record), executedPlan) : {steps:[], selected:0}),
+        ...(executionError && !record?.result?.error && !record?.error && {error:executionError.message,errorCode:executionError.code}),
         status:entry.status, entry, bdd, ...(cleanup && {cleanup}),
         pytest: {code:info.code, phases:session?.phases || [], elapsedMs:session?.elapsedMs,
             launchError:info.launchError, recorded:Boolean(session), fullEvidence, executionCount:info.executionCount}

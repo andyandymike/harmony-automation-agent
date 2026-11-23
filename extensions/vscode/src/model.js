@@ -94,6 +94,7 @@ function runView(record) {
     const assertions = result.goalVerification?.assertions || [];
     const steps = (record.receipts || result.steps || []).map(step => {
         const detail = step.result || step.error?.details || {};
+        const errorCode = step.error?.code;
         const condition = ["precondition", "goal", "assert"].includes(step.kind);
         const assertion = condition ? detail : detail.assertion;
         const target = assertion?.selector ?? detail.action?.target ?? detail.selector;
@@ -118,8 +119,10 @@ function runView(record) {
             expected: assertion?.expected,
             actual: assertion?.actual,
             error: step.error?.message,
-            ...((["TARGET_NOT_FOUND","AMBIGUOUS_TARGET","TARGET_AMBIGUOUS"].includes(step.error?.code) ||
-                (condition && assertion?.status !== "passed" && Number.isInteger(assertion?.matches) && assertion.matches !== 1))
+            ...(errorCode && {errorCode}),
+            ...((["TARGET_NOT_FOUND","AMBIGUOUS_TARGET","TARGET_AMBIGUOUS"].includes(errorCode) ||
+                ((!errorCode || errorCode === "ASSERTION_TIMEOUT") && condition && assertion?.status !== "passed" &&
+                    Number.isInteger(assertion?.matches) && assertion.matches !== 1))
                 && {locatorFailure:true}),
         };
     });
@@ -131,6 +134,7 @@ function runView(record) {
         cleanup: result.sessionCleanup?.status ?? record.workflowReceipt?.sessionCleanup?.status,
         goalStatus: result.goalVerification?.status,
         error: result.error?.message,
+        ...(result.error?.code && {errorCode:result.error.code}),
         steps,
         selected: firstException >= 0 ? firstException : Math.max(steps.length - 1, 0),
         lastFrame: result.observation?.frameId || assertions.at(-1)?.frameId,

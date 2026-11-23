@@ -1,6 +1,7 @@
 "use strict";
 
 const {targetLabel, deviceRecordingFormat} = require("./model");
+const {stepRoles} = require("./casePresentation");
 
 const secret = /pass(?:word|code)|secret|token|密码|口令|验证码/i;
 const properties = {visible: ["visible", "可见", "不可见"], enabled: ["enabled", "可用", "不可用"],
@@ -67,7 +68,7 @@ function commandText(command, input, w) {
     }
 }
 
-function createBdd(plan, language = "en", ruleGroup) {
+function createBdd(plan, language = "en", ruleGroup, presentation) {
     if (!Array.isArray(plan?.steps)) return;
     const index = /^zh/i.test(language) ? 1 : 0;
     const w = (...pair) => pair[index];
@@ -78,8 +79,10 @@ function createBdd(plan, language = "en", ruleGroup) {
         return steps.map((step, i) => {
             const location = path + "[" + i + "]";
             const input = step?.input || {};
-            const row = {path: location};
+            const display = presentation?.get(step);
+            const row = {area:"step", index:i, path:location, ...(display?.name && {name:display.name}), ...(display?.group && {group:display.group})};
             if (coordinate) return {...row, text: gesture(input, w)};
+            row.role = display?.role || stepRoles(step)[0];
             if (step?.if) {
                 const branches = [{label: w("If true", "满足时"), steps: rows(step.then, location + ".then", depth + 1)}];
                 if (step.else?.length) branches.push({label: w("Otherwise", "否则"), steps: rows(step.else, location + ".else", depth + 1)});
@@ -100,9 +103,10 @@ function createBdd(plan, language = "en", ruleGroup) {
                 ...(input.expect && {after: expectation(input.expect, w)})};
         });
     }
-    const given = checks(plan.preconditions);
-    if (ruleGroup?.name) given.unshift(w("Use rule group ", "使用规则组 ") + ruleGroup.name);
-    return {given, when: rows(plan.steps), then: checks(plan.goals), ...(ruleGroup?.name && {ruleSetup:true})};
+    const boundaries = (list, area, path, role) => checks(list).map((text,index)=>({text,area,index,path:path+"["+index+"]",role}));
+    const setup = ruleGroup?.name ? [{area:"setup",role:"Given",text:w("Use rule group ","使用规则组 ")+ruleGroup.name}] : [];
+    return {steps:[...setup, ...boundaries(plan.preconditions,"start","preconditions","Given"),
+        ...rows(plan.steps), ...boundaries(plan.goals,"goal","goals","Then")]};
 }
 
 module.exports = {createBdd};

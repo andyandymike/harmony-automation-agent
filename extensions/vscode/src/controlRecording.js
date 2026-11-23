@@ -38,7 +38,8 @@ function scrollDirection({x,y,toX,toY}) {
 
 function boundaryControls(page) {
     return (page?.nodes || []).filter(node=>node.visible !== false && node.selector)
-        .map(({ref,id,type,label,editable,text,visible,selector})=>({ref,id,type,label,editable,text,visible,selector}));
+        .map(({ref,id,type,label,editable,text,visible,selector,bundle,pressable,scrollable})=>
+            ({ref,id,type,label,editable,text,visible,selector,bundle,pressable,scrollable}));
 }
 
 module.exports = {controlCommands,controlTarget,scrollDirection,boundaryControls};

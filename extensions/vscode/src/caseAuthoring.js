@@ -3,14 +3,17 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const {randomUUID} = require("node:crypto");
-const {createBdd} = require("./caseLibrary");
+const {isDeepStrictEqual} = require("node:util");
+const {createBdd, readCaseMetadata} = require("./caseLibrary");
+const {maxSteps, title, stepRoles, roleOverride, stepEntries, restorePresentation, storePresentation, entriesForOrganization,
+    organizationPrompt, parseOrganization} = require("./casePresentation");
+const {stepLocator, canonicalLocator, describeLocator, observationsForStep, manualLocator} = require("./caseLocators");
 const {deviceRecordingFormat, moveListItem} = require("./model");
 const {sourceDigest} = require("./caseRepair");
 const {readiness, safeCaseName, writeCase, findCase, templatePath, testFilename} = require("./pytestCase");
 const {readWorkflow, workflowWithScenario} = require("./workflowFile");
 
 const booleanProperties = ["visible", "enabled", "checked", "selected", "focused"];
-const targetCommands = new Set(["press", "fill", "scroll", "wait"]);
 const sensitiveControl = /pass(?:word|code)|secret|token|密码|口令|验证码/i;
 
 function editableCheck(check) {
@@ -22,24 +25,6 @@ function editableCheck(check) {
     return {property, expected:protectedValue ? "" : String(expected), protectedValue};
 }
 
-function editableSteps(steps, path = "steps", items = {}, depth = 0) {
-    if (!Array.isArray(steps) || depth > 8) return items;
-    steps.forEach((step, index) => {
-        const key = path + "[" + index + "]";
-        if (targetCommands.has(step?.command) && step?.input?.target) {
-            const simpleFill = step.command === "fill" && typeof step.input.text === "string";
-            // A stored input value can be sensitive, even when the selector has no hint.
-            items[key] = {locator:true, ...(simpleFill && {replaceText:true})};
-        }
-        if (step?.if) {
-            editableSteps(step.then,key+".then",items,depth+1);
-            editableSteps(step.else,key+".else",items,depth+1);
-        }
-        if (step?.repeat) editableSteps(step.repeat.steps,key+".repeat.steps",items,depth+1);
-    });
-    return items;
-}
-
 function stepLocation(plan, path) {
     const parts = /^(steps\[\d+\])(?:(?:\.then|\.else|\.repeat\.steps)\[\d+\])*$/u;
     if (typeof path !== "string" || path.length > 200 || !parts.test(path)) return;
@@ -49,9 +34,21 @@ function stepLocation(plan, path) {
     return {list,index};
 }
 
-function caseDefinitions(plan) {
+function caseDefinitions(plan, presentation) {
     const conditions = key => Array.isArray(plan[key]) ? plan[key].map(editableCheck) : [];
-    return {start:conditions("preconditions"),goal:conditions("goals"),steps:editableSteps(plan.steps)};
+    const entries = [...stepEntries(plan.steps)];
+    const controls = plan.format !== deviceRecordingFormat;
+    const steps = Object.fromEntries(entries.map(({path,step,siblings})=>{
+        const locator = stepLocator(step);
+        const roles = controls ? stepRoles(step) : [];
+        const display = presentation?.get(step);
+        const check = editableCheck(step.assert);
+        const replaceText = step.command === "fill" && typeof step.input?.text === "string";
+        return [path,{...display, roles, role:display?.role || roles[0], removable:siblings>1 || /\.else\[\d+\]$/.test(path),
+            insertCheck:controls && entries.length<maxSteps && !step.stop && !step.yield,
+            ...(locator && {locator:describeLocator(locator.owner[locator.field])}), ...(check && {check}), ...(replaceText && {replaceText:true})}];
+    }));
+    return {start:conditions("preconditions"),goal:conditions("goals"),steps};
 }
 
 async function canEditCase(uri, entry) {
@@ -102,6 +99,7 @@ class CaseAuthoring {
             const source = draft.originAI ? "exploration" : "recording";
             const name = draft.originAI ? this.words("AI exploration","AI 探索") : this.words("Recording","录制用例");
             this.begin({source, origin:{outcome:"observed"}, plan, name,
+                observedLabels:Object.fromEntries(draft.steps.map((step,i)=>[`steps[${i}]`,step.label])),
                 recording:draft, nodes:side=>side==="start"?draft.start:draft.end});
             return;
         }
@@ -112,12 +110,13 @@ class CaseAuthoring {
         const doc = await this.vscode.workspace.openTextDocument(uri);
         const original = doc.getText();
         const {plan,scenario} = readWorkflow(original);
+        const metadata = await readCaseMetadata(uri);
         const existing = bench.state.activeCase?.uri === selected.uri ? bench.state.activeCase : undefined;
         const portable = await canEditCase(uri,existing);
         const copy = message.copy === true;
         const name = copy ? selected.name.slice(0,60).trim()+this.words(" copy"," 副本") : selected.name;
         this.begin({source:existing?.source==="imported" ? "workflow" : existing?.source || "workflow",
-            origin:existing?.origin,name,plan,group:scenario || bench.networks.bindings?.[selected.uri],
+            origin:existing?.origin,name,plan,group:scenario || bench.networks.bindings?.[selected.uri],presentationData:metadata?.presentation,
             ...(portable && !copy && {edit:{uri,original}})});
     }
 
@@ -151,6 +150,7 @@ class CaseAuthoring {
             }
         }
         if (entry.source!=="pytest") candidate.group = await b.networks.scenarioForRun?.(entry.id);
+        if (entry.plan.uri) candidate.presentationData = (await readCaseMetadata(this.vscode.Uri.parse(entry.plan.uri)))?.presentation;
         this.begin(candidate);
     }
 
@@ -158,7 +158,10 @@ class CaseAuthoring {
         if (!candidate.plan?.steps?.length || !Array.isArray(candidate.plan.steps) || readiness(candidate.plan)==="invalid")
             throw new Error(this.words("No executable steps are available.", "还没有可执行的步骤。"));
         const state = this.bench.state;
-        this.candidate = {...candidate, plan:structuredClone(candidate.plan), group:candidate.group && structuredClone(candidate.group),
+        const plan = structuredClone(candidate.plan);
+        this.candidate = {...candidate, plan, presentation:restorePresentation(plan,candidate.presentationData),
+            observedLabels:new Map(Array.from(stepEntries(plan.steps),({path,step})=>[step,candidate.observedLabels?.[path]])),
+            group:candidate.group && structuredClone(candidate.group),
             id:randomUUID(), revision:0, targets:{}, originalName:candidate.name, name:candidate.edit ? candidate.name : suggestedName(candidate.name),
             previousTool:state.tool};
         state.tool = "recordings";
@@ -169,24 +172,35 @@ class CaseAuthoring {
         const c = this.candidate, plan = c.plan;
         const targets = Object.fromEntries(Object.entries(c.targets).map(([key, values])=>[key,
             values.map(({label},index)=>({label,key:String(index)}))]));
+        const picker = c.stepTargets;
+        const stepTargets = picker && (!picker.device || picker.device === this.bench.state.device) ? {
+            path:picker.path, insert:picker.insert, matches:picker.matches, live:Boolean(picker.device),
+            choices:picker.choices.map(({label,source,detail,selector},index)=>({label,source,detail,key:String(index),locator:describeLocator(selector)})),
+        } : undefined;
         this.bench.state.caseReview = {id:c.id,revision:c.revision,name:c.name,source:c.source,origin:c.origin,groupName:c.group?.name,
-            issue:readiness(plan),bdd:createBdd(plan,this.bench.language,c.group),added:c.added,timingUnknown:c.timingUnknown,edit:Boolean(c.edit),
-            dirty:Boolean(c.added || c.reordered || c.name !== c.originalName || c.uri), pendingSave:Boolean(c.uri),
-            definitions:caseDefinitions(plan),targets};
+            issue:readiness(plan),bdd:createBdd(plan,this.bench.language,c.group,c.presentation),added:c.added,timingUnknown:c.timingUnknown,edit:Boolean(c.edit),
+            dirty:Boolean(c.added || c.reordered || c.presentationChanged || c.name !== c.originalName || c.uri), pendingSave:Boolean(c.uri),
+            definitions:caseDefinitions(plan,c.presentation),targets,stepTargets,organization:c.organization,
+            undoRemove:Boolean(c.removedStep)};
     }
 
     cancel(stay = false) {
         const c = this.candidate;
+        c?.organizationJob?.abort();
         this.candidate = undefined;
         this.bench.state.caseReview = undefined;
         if (!stay && c?.previousTool && this.bench.state.tool === "recordings") this.bench.state.tool = c.previousTool;
     }
 
-    async loadTargets({id, area}) {
+    async loadTargets({id, revision, area, path, live, add}) {
         const c = this.candidate;
-        if (!c || c.id !== id || !["start","goal","step"].includes(area) || c.targets[area] || c.uri) return;
-        const snapshots = area === "step" ? await Promise.all([c.nodes?.("start"),c.nodes?.("goal")]) : [await c.nodes?.(area)];
-        const captured = snapshots.flatMap(nodes=>nodes || []);
+        if (!c || c.id !== id || c.uri || (revision !== undefined && c.revision !== revision)) return;
+        if (area === "step" || area === "stepCheck") {
+            if (c.revision === revision) await this.loadStepTargets(c,path,live === true,area==="stepCheck" && add===true);
+            return;
+        }
+        if (!["start","goal"].includes(area) || c.targets[area]) return;
+        const captured = await c.nodes?.(area) || [];
         const current = this.bench.state.page?.nodes || [];
         const targets = new Map();
         for (const node of [...captured, ...current]) {
@@ -202,6 +216,37 @@ class CaseAuthoring {
         this.update();
     }
 
+    async loadStepTargets(c, path, live, insert) {
+        const location = stepLocation(c.plan,path);
+        const step = location?.list?.[location.index];
+        const anchor = stepLocator(step);
+        const locator = insert ? undefined : anchor;
+        if (!step || (!locator && !insert) || (insert && c.plan.format===deviceRecordingFormat)) return;
+        const bench = this.bench;
+        const revision = c.revision;
+        const current = () => this.candidate === c && c.revision === revision;
+        const sources = [];
+        let device;
+        if (live) {
+            device = bench.state.device;
+            if (!device || !bench.state.devices.includes(device)) throw new Error(bench.text.selectDevice);
+            const read = () => bench.observe(() => current() && bench.state.device === device,true);
+            if (bench.livePanel) await bench.livePanel.withDeviceOperation(read);
+            else await read();
+            if (!current() || bench.state.device !== device) return;
+            const page = bench.state.page;
+            if (page) sources.push({nodes:page.nodes, source:"live", complete:page.complete && !page.truncated});
+        }
+        if (c.nodes) {
+            c.recordedNodes ??= Promise.all([c.nodes("start"),c.nodes("goal")]);
+            for (const nodes of await c.recordedNodes) if (nodes?.length) sources.push({nodes,source:"recorded"});
+        }
+        if (!current() || (device && bench.state.device !== device)) return;
+        const bundle = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
+        c.stepTargets = {path,insert,device,...observationsForStep(locator,sources,bundle)};
+        this.update();
+    }
+
     target(c, area, message, current) {
         const value = message.target;
         if (value === "keep" && current) return current;
@@ -214,24 +259,90 @@ class CaseAuthoring {
         return {...(bundleName && {bundleName}),id};
     }
 
-    async edit({id, revision, area, path, index, property, expected, name, replaceText, text, saveName, ...target}) {
+    stepTarget(c, path, message, current, {insert=false, scope}={}) {
+        const picker = c.stepTargets;
+        const selected = picker?.path===path && picker.insert===insert && (!picker.device || picker.device===this.bench.state.device) &&
+            /^\d+$/.test(message.target || "") && picker.choices[Number(message.target)];
+        const selector = message.target === "keep" ? current :
+            message.target === "manual" ? manualLocator(message.locatorField,message.controlId,scope) : selected?.selector;
+        if (!selector) throw new Error(this.words("Choose a control from the page, or enter an exact locator.","请选中页面上的控件，或输入准确的定位条件。"));
+        return {selector:structuredClone(selector),label:selected?.label};
+    }
+
+    expectedValue(property, expected, prior, keepProtected) {
+        if (property === "text" && typeof expected === "string" && expected.length <= 4096)
+            return keepProtected && expected === "" ? prior.equals : expected;
+        if (booleanProperties.includes(property) && ["true","false"].includes(expected)) return expected === "true";
+        throw new Error(this.words("Enter an expected value for this check.","请输入此检查的预期值。"));
+    }
+
+    editStepCheck(c, location, step, path, {add, property, expected, role, ...target}) {
+        const insert = add === true;
+        const prior = insert ? undefined : step.assert;
+        const check = editableCheck(prior);
+        if (c.plan.format === deviceRecordingFormat || (!insert && !check) ||
+            (insert && (step.stop || step.yield || [...stepEntries(c.plan.steps)].length>=maxSteps))) return false;
+        if (!["Given","Then"].includes(role)) return false;
+        const anchor = stepLocator(step);
+        const scope = canonicalLocator(anchor?.owner[anchor.field])?.bundleName || c.bundle;
+        const {selector,label} = this.stepTarget(c,path,target,prior?.selector,{insert,scope});
+        const equals = this.expectedValue(property,expected,prior,check?.protectedValue && target.target==="keep");
+        const assertion = {...prior,selector,property,equals};
+        const edited = insert ? {assert:assertion} : step;
+        if (insert) {
+            location.list.splice(location.index+1,0,edited);
+            c.removedStep = undefined;
+        } else edited.assert = assertion;
+        const display = c.presentation.get(step);
+        const name = insert ? "" : display?.name || "";
+        const group = display?.group || "";
+        const override = roleOverride(stepRoles(edited),role);
+        if (name || group || override) c.presentation.set(edited,{name,group,...(override && {role:override})});
+        else c.presentation.delete(edited);
+        c.presentationChanged ||= override !== (insert ? undefined : display?.role);
+        if (label || target.target!=="keep") c.observedLabels.set(edited,label);
+        c.stepTargets = undefined;
+        c.added = true;
+        return true;
+    }
+
+    async edit({id, revision, area, path, index, property, expected, name, role, add, text, saveName, ...target}) {
         const c = this.candidate;
         if (!c || c.id !== id || c.revision !== revision || c.uri) return;
         if (area === "name") {
             const value = typeof name === "string" ? name.trim() : "";
             if (!safeCaseName(value)) throw new Error(this.words("Enter a valid case name of up to 70 characters.","请输入不超过 70 个字符的有效用例名称。"));
             c.name = value;
-        } else if (area === "step" && c.plan.format !== deviceRecordingFormat) {
+        } else if (["step","stepName","stepText","stepCheck"].includes(area)) {
             const location = stepLocation(c.plan,path);
             const step = location?.list?.[location.index];
-            if (!targetCommands.has(step?.command) || !step.input?.target) return;
-            const selector = this.target(c,area,target,step.input.target);
-            if (replaceText) {
-                if (step.command !== "fill" || typeof step.input.text !== "string" || typeof text !== "string" || text.length > 4096) return;
+            if (!step) return;
+            if (area === "stepName") {
+                const label = title(name), group = title(target.group);
+                if ((name && !label) || (target.group && !group)) throw new Error(this.words("Enter a short title on one line.","请输入简短的单行标题。"));
+                const previous = c.presentation.get(step);
+                const roles = c.plan.format===deviceRecordingFormat ? [] : stepRoles(step);
+                if (role && !roles.includes(role)) return;
+                const override = role ? roleOverride(roles,role) : previous?.role;
+                if (label || group || override) c.presentation.set(step,{name:label,group,...(override && {role:override})});
+                else c.presentation.delete(step);
+                c.presentationChanged ||= label !== (previous?.name || "") || group !== (previous?.group || "") || override !== previous?.role;
+            } else if (area === "stepCheck") {
+                if (!this.editStepCheck(c,location,step,path,{add,property,expected,role,...target})) return;
+            } else if (area === "stepText") {
+                if (step.command !== "fill" || typeof step.input?.text !== "string" || typeof text !== "string" || text.length > 4096) return;
                 step.input.text = text;
+                c.added = true;
+            } else {
+                const locator = stepLocator(step);
+                if (!locator) return;
+                const scope = canonicalLocator(locator.owner[locator.field])?.bundleName || c.bundle;
+                const {selector,label} = this.stepTarget(c,path,target,undefined,{scope});
+                locator.owner[locator.field] = selector;
+                c.observedLabels.set(step,label);
+                c.stepTargets = undefined;
+                c.added = true;
             }
-            step.input.target = selector;
-            c.added = true;
         } else if (["start","goal"].includes(area) && c.plan.format !== deviceRecordingFormat) {
             const key = area === "start" ? "preconditions" : "goals";
             const checks = c.plan[key] || [];
@@ -240,27 +351,36 @@ class CaseAuthoring {
             const previous = editableCheck(prior);
             if (prior && !previous) return;
             const selector = this.target(c,area,target,prior?.selector);
-            let value;
-            if (property === "text" && typeof expected === "string" && expected.length <= 4096) {
-                const keepValue = previous?.protectedValue && target.target === "keep" && expected === "";
-                value = keepValue ? prior.equals : expected;
-            } else if (booleanProperties.includes(property) && ["true","false"].includes(expected)) {
-                value = expected === "true";
-            }
-            if (value === undefined) throw new Error(this.words("Enter an expected value for this check.","请输入此检查的预期值。"));
-            checks[index] = {...prior,selector,property,equals:value};
+            const equals = this.expectedValue(property,expected,prior,previous?.protectedValue && target.target==="keep");
+            checks[index] = {...prior,selector,property,equals};
             c.plan[key] = checks;
             c.added = true;
         } else return;
         c.revision++;
         this.update();
-        if (area === "name" && saveName && c.edit && !c.added && !c.reordered) {
+        if (area === "name" && saveName && c.edit && !c.added && !c.reordered && !c.presentationChanged) {
             if (c.name === c.originalName) this.cancel(true);
             else await this.save({id,name:c.name});
         }
     }
 
     async moveStep({id, revision, uri, digest, from, to}) {
+        const starting = !this.candidate;
+        const c = await this.stepDraft({id,revision,uri,digest});
+        if (!c) return;
+        const location = stepLocation(c.plan,from);
+        if (!location || !moveListItem(location.list,location.index,to)) {
+            if (starting) this.cancel(true);
+            return;
+        }
+        c.removedStep = undefined;
+        c.stepTargets = undefined;
+        c.reordered = true;
+        c.revision++;
+        this.update();
+    }
+
+    async stepDraft({id,revision,uri,digest}) {
         const state = this.bench.state;
         const starting = !this.candidate;
         if (starting) {
@@ -268,18 +388,101 @@ class CaseAuthoring {
             await this.open({});
             if (!this.candidate?.edit || sourceDigest(this.candidate.edit.original)!==digest) {
                 this.cancel(true);
-                throw new Error(this.words("The case changed. Reopen it before changing the step order.","用例已更新，请重新打开后再调整步骤顺序。"));
+                throw new Error(this.words("The case changed. Reopen it before editing steps.","用例已更新，请重新打开后再编辑步骤。"));
             }
         }
         const c = this.candidate;
-        if (!c || c.uri || (!starting && (c.id!==id || c.revision!==revision))) return;
-        const location = stepLocation(c.plan,from);
-        if (!location || !moveListItem(location.list,location.index,to)) {
-            if (starting) this.cancel(true);
-            return;
+        if (c && !c.uri && (starting || c.id===id && c.revision===revision)) return c;
+    }
+
+    async changeStep(message) {
+        const {action,path} = message;
+        if (!["undoRemove","duplicate","remove"].includes(action)) return;
+        const c = await this.stepDraft(message);
+        if (!c) return;
+        if (action === "undoRemove") {
+            if (!c.removedStep) return;
+            const {list,index,step} = c.removedStep;
+            list.splice(index,0,step);
+            c.removedStep = undefined;
+        } else {
+            const location = stepLocation(c.plan,path);
+            const step = location?.list?.[location.index];
+            if (!step) return;
+            const {list,index} = location;
+            if (action === "remove") {
+                if (list.length === 1 && !/\.else\[\d+\]$/.test(path)) return;
+                list.splice(index,1);
+                c.removedStep = {list,index,step};
+            } else {
+                if (c.plan.format !== deviceRecordingFormat &&
+                    [...stepEntries(c.plan.steps)].length + [...stepEntries([step])].length > maxSteps)
+                    throw new Error(this.words("The workflow has reached its step limit.","已达到流程的步骤上限。"));
+                const copy = structuredClone(step);
+                list.splice(index+1,0,copy);
+                const originals = [...stepEntries([step])], copies = [...stepEntries([copy])];
+                originals.forEach(({step:original},i)=>{
+                    const display = c.presentation.get(original);
+                    if (display) c.presentation.set(copies[i].step,display);
+                    c.observedLabels.set(copies[i].step,c.observedLabels.get(original));
+                });
+                c.removedStep = undefined;
+            }
         }
+        c.stepTargets = undefined;
         c.reordered = true;
         c.revision++;
+        this.update();
+    }
+
+    async organize({id,revision}) {
+        const c = this.candidate, b = this.bench;
+        if (!c || c.id !== id || c.revision !== revision || c.organizationJob || c.uri || b.state.busy) return;
+        const steps = [...stepEntries(c.plan.steps)];
+        if (!steps.length || steps.length > maxSteps) {
+            c.organization = {error:this.words("AI can organize up to 200 steps at a time.","AI 一次可以整理最多 200 个步骤。")};
+            this.update();
+            b.publish();
+            return;
+        }
+        const job = c.organizationJob = new AbortController();
+        const signal = AbortSignal.any([job.signal,AbortSignal.timeout(90_000)]);
+        c.organization = {working:true};
+        this.update();
+        b.publish();
+        try {
+            const rows = entriesForOrganization(c.plan,c.observedLabels);
+            const ask = await b.modelAsk(signal);
+            const answer = await ask(organizationPrompt(c.plan,rows,b.language),signal);
+            signal.throwIfAborted();
+            if (this.candidate !== c || c.organizationJob !== job) return;
+            if (c.revision !== revision || c.uri) {
+                c.organization = {error:this.words("Steps changed during organization. Run it again to use the latest version.",
+                    "整理期间步骤有变动，可重新整理最新版本。")};
+                return;
+            }
+            const proposed = parseOrganization(answer,rows);
+            c.presentation = new Map(steps.map(({step},i)=>[step,proposed[i]]));
+            c.presentationChanged = true;
+            c.organization = {ready:true};
+            c.revision++;
+        } catch (error) {
+            if (!job.signal.aborted) c.organization = {error:error.code && b.text[error.code] || this.words(
+                "AI could not organize the steps. Check the provider or try again.","AI 整理未完成，可检查 AI 提供方或重试。")};
+        } finally {
+            if (this.candidate === c && c.organizationJob === job) {
+                c.organizationJob = undefined;
+                this.update();
+                b.publish();
+            }
+        }
+    }
+
+    stopOrganizing(id) {
+        const c = this.candidate;
+        if (!c?.organizationJob || (id && c.id !== id)) return;
+        c.organizationJob.abort();
+        c.organizationJob = c.organization = undefined;
         this.update();
     }
 
@@ -325,10 +528,15 @@ class CaseAuthoring {
     async save({id, name: formName}) {
         const c = this.candidate, b = this.bench, v = this.vscode;
         if (!c || c.id !== id) return;
+        this.stopOrganizing(id);
         const w = (en,zh)=>this.words(en,zh);
+        const presentation = storePresentation(c.plan,c.presentation);
         // If indexing or opening fails after the files were created, retry that step on the same directory.
         if (c.edit && !c.uri) {
-            if (!c.added && !c.reordered && c.name === c.originalName) return;
+            if (!c.added && !c.reordered && !c.presentationChanged && c.name === c.originalName) return;
+            if ((c.presentationChanged || c.presentationData && (c.added || c.reordered)) &&
+                !isDeepStrictEqual((await readCaseMetadata(c.edit.uri))?.presentation,c.presentationData))
+                throw new Error(w("The case step titles changed on disk. Reopen the case before saving.","磁盘上的步骤名称有改动，请重新打开用例后再保存。"));
             if (c.added || c.reordered) await this.updateDraft(c);
             c.uri = c.edit.uri;
             c.savedName = c.name;
@@ -354,8 +562,13 @@ class CaseAuthoring {
             c.savedName = name;
         }
         this.update();
-        if (c.edit && c.savedName !== c.originalName) await b.caseLibrary.rename(c.uri,c.savedName);
-        await b.caseLibrary.add(c.uri,{name:c.savedName,source:c.source,origin:c.origin});
+        if (c.edit && !c.savedMetadata) {
+            const changes = {...(c.savedName !== c.originalName && {name:c.savedName}),
+                ...((c.presentationChanged || c.presentationData && (c.added || c.reordered)) && {presentation})};
+            if (Object.keys(changes).length) await b.caseLibrary.updateMetadata(c.uri,changes,c.presentationData);
+            c.savedMetadata = true;
+        }
+        await b.caseLibrary.add(c.uri,{name:c.savedName,source:c.source,origin:c.origin,presentation});
         await b.refreshCases();
         await b.setPlan(c.uri);
         if (c.recording && b.state.draft === c.recording) b.state.draft = undefined;

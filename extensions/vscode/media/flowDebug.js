@@ -35,7 +35,7 @@ export function workflowDebugView(model,language,t) {
         ${action("start",w("Start debugging","开始调试"),off(model.busy || !model.devices.includes(model.device)))}</details>`;
 }
 
-export function problemExportButton(model,language,source,stepId) {
+export function evidenceExport(model,language,source,stepId) {
     const report=source==="exploration"?model.exploration:model.run;
     const count=report?.steps?.length || 0;
     if (!count) return "";
@@ -43,12 +43,12 @@ export function problemExportButton(model,language,source,stepId) {
     const picked=source==="run" ? report.selected ?? 0 : report.steps.findIndex(x=>x.id===stepId);
     const index=picked>=0 ? picked : 0;
     return `<details class="problem-clip" data-clip-source="${source}" data-clip-id="${escape(report.id || report.entry.id)}">
-        <summary>${w("Export problem clip…","导出问题片段…")}</summary>
+        <summary>${source==="exploration" ? w("Export exploration evidence…","导出探索证据…") : w("Export run evidence…","导出运行证据…")}</summary>
         <label>${w("First step","起始步骤")}<input data-clip-from type="number" min="1" max="${count}" value="${Math.max(1,index)}"></label>
         <label>${w("Last step","结束步骤")}<input data-clip-to type="number" min="1" max="${count}" value="${Math.min(count,index+2)}"></label>
         <label><input type="checkbox" data-clip-plan>${w("Include the recorded workflow","附上当时执行的流程")}</label>
         <label><input type="checkbox" data-clip-network>${w("Include recorded network & logs","附上已有的同期网络和日志")}</label>
-        ${action("export",w("Save offline clip…","保存离线片段…"),off(model.busy))}</details>`;
+        ${action("export",w("Save HTML evidence…","保存为 HTML…"),off(model.busy))}</details>`;
 }
 
 export function flowDebugClick(control,model,send) {

@@ -1,6 +1,7 @@
 "use strict";
 
 const entries = {
+    openWorkbench: ["Open Harmony Agent Workbench","打开 Harmony Agent 工作台"],
     netTitle: ["Network", "网络调试"],
     netRuleGroup: ["Rule group", "规则组"],
     netUntitledGroup: ["Untitled rule group", "未命名规则组"],
@@ -50,6 +51,7 @@ const entries = {
     aiConfigCopied: ["Copied the project MCP configuration for .codex/config.toml.", "已复制项目 MCP 配置，可用于 .codex/config.toml。"],
     aiTask: ["What would you like the AI to do?", "你想让 AI 做什么？"],
     aiReportTask: ["Explain the selected run and what its evidence verifies.", "解释这次运行的结果，并指出现有证据验证了什么。"],
+    aiFailureTask: ["Diagnose the failure and decide whether the case should change.", "判断失败原因和是否需要修改用例。"],
     aiPlanTask: ["Review this workflow and suggest a result check.", "检查这份流程，并建议一个可以验证结果的断言。"],
     aiDraftTask: ["Review these recorded actions and suggest what the test should verify.", "查看已录制的操作，建议这个测试应该验证什么。"],
     aiPageTask: ["Read the selected phone’s current page and list the controls I can test.", "读取选中手机的当前页面，列出可测试的控件。"],

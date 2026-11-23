@@ -162,7 +162,7 @@ function renderProblemClip(clip,language) {
         :root{color-scheme:light dark}body{font:15px/1.55 system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1.5rem}
         h1,h2,h3{line-height:1.3}h2{border-top:1px solid #8888;padding-top:1rem}article{padding:.3rem 1rem;border-left:3px solid #648eaa;margin:1rem 0}
         small{opacity:.8}summary{cursor:pointer;padding:.3rem 0}pre,code{white-space:pre-wrap;overflow-wrap:anywhere}img{max-width:100%;max-height:60vh}
-        </style></head><body><small>Harmony Agent · ${word("Problem clip","问题片段")}</small><h1>${h(clip.title)}</h1><p>${h(clip.recordedAt)}</p>
+        </style></head><body><small>Harmony Agent · ${clip.source==="exploration" ? word("Exploration evidence","探索证据") : word("Run evidence","运行证据")}</small><h1>${h(clip.title)}</h1><p>${h(clip.recordedAt)}</p>
         ${clip.findings?.length ? block(word("Findings","发现"),clip.findings) : ""}${groups}
         ${block(word("Recorded workflow","当时执行的流程"),clip.plan)}${block(word("Recorded route","实际路线"),clip.route || clip.gestures)}
         ${block(word("Regression material · recorded rule group (redacted)","回归材料 · 当时使用的 规则组（已脱敏）"),clip.mockScenario)}
@@ -183,7 +183,7 @@ function parseClip(html) {
 
 async function exportProblemClip(bench,vscode,message) {
     const uri=await vscode.window.showSaveDialog({filters:{HTML:["html"]},
-        defaultUri:vscode.workspace.workspaceFolders?.[0] && vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri,"problem.harmony-clip.html")});
+        defaultUri:vscode.workspace.workspaceFolders?.[0] && vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri,"harmony-evidence.html")});
     if (!uri) return;
     const clip=await createProblemClip(bench,message);
     await vscode.workspace.fs.writeFile(uri,Buffer.from(renderProblemClip(clip,bench.language),"utf8"));
@@ -193,7 +193,7 @@ async function openProblemClip(bench,vscode) {
     const [uri]=await vscode.window.showOpenDialog({canSelectMany:false,filters:{HTML:["html"]}}) || [];
     if (!uri) return;
     const clip=parseClip(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8"));
-    if (!clip) throw new Error(w(bench.language,"Choose an exported Harmony Agent problem clip.","请选择 Harmony Agent 导出的问题片段。"));
+    if (!clip) throw new Error(w(bench.language,"Choose an evidence HTML file exported by Harmony Agent.","请选择 Harmony Agent 导出的证据 HTML 文件。"));
     const panel=vscode.window.createWebviewPanel("harmonyAgent.problemClip",String(clip.title),vscode.ViewColumn.Active,
         {enableScripts:false,localResourceRoots:[]});
     panel.webview.html=renderProblemClip(clip,bench.language);

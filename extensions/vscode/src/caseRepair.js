@@ -6,6 +6,8 @@ const {createHash} = require("node:crypto");
 const {pageView, runView} = require("./model");
 const {readWorkflow} = require("./workflowFile");
 const {readiness} = require("./pytestCase");
+const {readCaseMetadata} = require("./caseLibrary");
+const {transferPresentation} = require("./casePresentation");
 const {parseLocator, selectNodes} = require("../media/elementsLocator");
 
 const sourceDigest = text => createHash("sha256").update(text).digest("hex");
@@ -148,6 +150,7 @@ class CaseRepair {
         if (!item || view?.stage !== "verified" || message.id !== view.trial || b.state.run?.entry.id !== view.trial) return;
         const doc = await this.source(item.original);
         const from = doc.getText();
+        const metadata = await readCaseMetadata(doc.uri);
         const edit = new this.v.WorkspaceEdit();
         let start=0, a=from.length, z=item.candidate.length;
         while (start<a && from[start]===item.candidate[start]) start++;
@@ -155,6 +158,14 @@ class CaseRepair {
         edit.replace(doc.uri,new this.v.Range(doc.positionAt(start),doc.positionAt(a)),item.candidate.slice(start,z));
         if (!(await this.v.workspace.applyEdit(edit)) || doc.getText() !== item.candidate || !(await doc.save()))
             throw new Error(this.word("Review the editor and save the verified change.","请核对编辑器中的修改并保存。"));
+        if (metadata?.presentation) {
+            const presentation = transferPresentation(readWorkflow(from).plan,readWorkflow(item.candidate).plan,metadata.presentation);
+            if (presentation) try {
+                await b.caseLibrary.updateMetadata(doc.uri,{presentation},metadata.presentation);
+            } catch {
+                b.state.error = this.word("The locator was saved. The case's step titles could not be updated.","定位器已保存，未能同步步骤名称。");
+            }
+        }
         view.stage = "applied";
         b.state.run.entry.repairApplied = true;
         await b.persistRuns();

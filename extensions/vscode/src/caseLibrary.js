@@ -3,6 +3,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
+const { isDeepStrictEqual } = require("node:util");
 const { findCase } = require("./pytestCase");
 const { createBdd } = require("./caseBdd");
 
@@ -33,10 +34,14 @@ async function readMetadata(file) {
     }
 }
 
-async function writeCaseMetadata(uri, {name, source, origin}) {
+async function readCaseMetadata(uri) {
+    if (uri?.scheme === "file") return readMetadata(uri.fsPath + suffix);
+}
+
+async function writeCaseMetadata(uri, {name, source, origin, presentation}) {
     if (uri.scheme !== "file" || !sources.has(source) || !name?.trim()) throw new Error("Invalid case metadata");
     const marker = uri.fsPath + suffix;
-    const data = {format, version: 1, ...description(name.trim(), source, origin)};
+    const data = {format, version: 1, ...description(name.trim(), source, origin), ...(presentation && {presentation})};
     // Publish the complete marker in one operation, without replacing another case's identity.
     const staging = marker + "." + data.id + ".tmp";
     await fs.writeFile(staging, JSON.stringify(data, null, 2) + "\n", {flag: "wx", mode: 0o600});
@@ -69,13 +74,13 @@ class CaseLibrary {
         this.pending = Promise.resolve();
     }
 
-    async add(uri, {name = defaultName(uri), source = "imported", origin} = {}) {
+    async add(uri, {name = defaultName(uri), source = "imported", origin, presentation} = {}) {
         if (!sources.has(source)) throw new Error("Unknown case source");
         const address = uri.toString();
         const folder = this.vscode.workspace.getWorkspaceFolder?.(uri);
         const relative = folder && path.relative(folder.uri.fsPath, uri.fsPath);
         const portable = source !== "imported" && uri.scheme === "file";
-        const meta = portable ? await writeCaseMetadata(uri, {name, source, origin}) : undefined;
+        const meta = portable ? await writeCaseMetadata(uri, {name, source, origin, presentation}) : undefined;
         const update = async () => {
             const saved = this.state.get("caseLibrary", {});
             const record = {...(meta || saved[address] || description(name, source, origin)), uri: address};
@@ -129,16 +134,18 @@ class CaseLibrary {
         return Uri.file(resolved);
     }
 
-    async rename(uri, name) {
+    async updateMetadata(uri, changes, originalPresentation) {
         const marker = uri.fsPath + suffix;
         const previous = await readMetadata(marker);
         if (!previous) throw new Error("The case metadata is unavailable.");
-        if (name === previous.name) return;
+        const conflict = () => new Error("The case metadata changed. Reopen the case before editing it.");
+        const revised = {...previous,...changes};
+        if (Object.hasOwn(changes,"presentation") && !isDeepStrictEqual(previous.presentation,originalPresentation)) throw conflict();
+        if (JSON.stringify(revised) === JSON.stringify(previous)) return;
         const stage = marker + "." + randomUUID() + ".tmp";
         try {
-            await fs.writeFile(stage, JSON.stringify({...previous,name}, null, 2) + "\n", {flag:"wx",mode:0o600});
-            if (JSON.stringify(await readMetadata(marker)) !== JSON.stringify(previous))
-                throw new Error("The case metadata changed. Reopen the case before renaming it.");
+            await fs.writeFile(stage, JSON.stringify(revised, null, 2) + "\n", {flag:"wx",mode:0o600});
+            if (!isDeepStrictEqual(await readMetadata(marker),previous)) throw conflict();
             await fs.rename(stage, marker);
         } finally {
             await fs.unlink(stage).catch(() => {});
@@ -213,4 +220,4 @@ class CaseLibrary {
     }
 }
 
-module.exports = {CaseLibrary, createBdd, writeCaseMetadata};
+module.exports = {CaseLibrary, createBdd, readCaseMetadata, writeCaseMetadata};

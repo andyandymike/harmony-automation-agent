@@ -22,24 +22,22 @@ function latch() {
 // Drive the same commands and webview messages as an installed extension.
 function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], configureHost, {openOnStart = true} = {}) {
     const commands = new Map();
+    const hostCommands = [];
     const storage = new Map();
     const storagePath = mkdtempSync(path.join(workbenchFixtures, "workspace-"));
     storage.set("runs", runs);
     if (selectedPlan) storage.set("plan", selectedPlan);
-    let state, navigation, sidebar, receive, disposePanel, saved, panel, notifyView, notifySidebar, notifyEdit, panelCount = 0;
-    let sidebarCloses = 0;
+    let state, navigation, launcher, receive, disposePanel, saved, panel, notifyView, notifyEdit, panelCount = 0;
     const live = { messages: [] };
     const uri = { fsPath: path.join(storagePath, "recording.json"), path: "/recording.json", toString: () => "file:///recording.json" };
     const vscode = {
-        env: { language: "en" }, ViewColumn: { Active: 1 }, RelativePattern: class {},
+        env: { language: "en" }, ViewColumn: { Active: 1 }, StatusBarAlignment: { Left:1 }, RelativePattern: class {},
         Uri: { joinPath: () => uri, file: () => uri, parse: () => uri },
         commands: {
             registerCommand: (key, handler) => commands.set(key, handler),
-            async executeCommand(key) {
-                assert.equal(key, "workbench.action.closeSidebar");
-                sidebarCloses++;
-                sidebar.visible = false;
-                notifySidebar({visible:false});
+            async executeCommand(key,...args) {
+                hostCommands.push(key);
+                return commands.get(key)?.(...args);
             },
         },
         workspace: {
@@ -53,13 +51,11 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
             openTextDocument: async () => ({ getText: () => JSON.stringify(saved) }),
         },
         window: {
-            createTreeView(id, options) {
-                assert.equal(id, "harmonyAgent.launcher");
-                sidebar = {
-                    provider: options.treeDataProvider, visible: false, dispose() {},
-                    onDidChangeVisibility(fn) { notifySidebar = fn; return {dispose() {}}; },
-                };
-                return sidebar;
+            createStatusBarItem(id, alignment) {
+                assert.equal(id, "harmonyAgent.workbenchLauncher");
+                assert.equal(alignment,vscode.StatusBarAlignment.Left);
+                launcher = {visible:false, show(){this.visible=true;}, dispose(){this.visible=false;}};
+                return launcher;
             },
             showSaveDialog: async () => uri,
             createWebviewPanel(type) {
@@ -111,14 +107,8 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
         live,
         screenshotPath: filename => path.join(storagePath, "agent", filename),
         get navigation() { return navigation; },
-        get sidebarVisible() { return sidebar.visible; },
-        get sidebarCloses() { return sidebarCloses; },
-        sidebarItems() { return sidebar.provider.getChildren(); },
-        setSidebarVisible(visible) {
-            if (sidebar.visible === visible) return;
-            sidebar.visible = visible;
-            notifySidebar({visible});
-        },
+        launcher, hostCommands,
+        clickLauncher() { return commands.get(launcher.command)(); },
         send(type, fields) { return receive({ type, ...fields }); },
         openLive() { commands.get("harmonyAgent.openLiveDevice")(); return live; },
         runCommand(key) { return commands.get(key)(); }, get panelCount() { return panelCount; },
@@ -209,9 +199,7 @@ test("recording and existing workflow actions generate editable pytest cases and
     assert.ok(bench.state.draft);
     await bench.send("caseReview", checks);
     assert.equal(bench.state.caseReview.source,"recording");
-    assert.equal(bench.state.caseReview.bdd.given.length,1);
-    assert.equal(bench.state.caseReview.bdd.when.length,1);
-    assert.equal(bench.state.caseReview.bdd.then.length,1);
+    assert.deepEqual(bench.state.caseReview.bdd.steps.map(step=>step.role),["Given","When","Then"]);
     await bench.send("caseSave",{id:bench.state.caseReview.id});
     assert.ok(bench.state.draft);
     name="first case";
@@ -257,7 +245,7 @@ test("workbench commands open the corresponding offline tab without a navigation
         };
     }, {openOnStart:false});
     const labels = ["测试", "元素", "网络调试", "AI 探索"];
-    assert.deepEqual(bench.sidebarItems(), []);
+    assert.equal(bench.launcher.tooltip,"打开 Harmony Agent 工作台");
     assert.equal(bench.panelCount, 0);
     const openingNetwork = bench.runCommand("harmonyAgent.network");
     assert.equal(bench.state.tool, "network");
@@ -280,7 +268,8 @@ test("workbench commands open the corresponding offline tab without a navigation
     languageChanged();
     assert.deepEqual(bench.navigation.tools.map(item => item.label),
         ["Tests","Elements","Network","AI exploration"]);
-    assert.equal(bench.sidebarCloses, 0);
+    assert.equal(bench.launcher.tooltip,"Open Harmony Agent Workbench");
+    assert.deepEqual(bench.hostCommands,[]);
     await bench.deactivate();
 });
 
@@ -301,7 +290,7 @@ test("long workflow previews identify each target and default text assertion wit
     assert.doesNotMatch(JSON.stringify(preview), /private/);
 });
 
-test("the activity bar opens one editor and closes the launcher sidebar on each use", async () => {
+test("the status bar launcher opens or reveals one editor without issuing sidebar commands", async () => {
     const calls = [];
     let closed = 0;
     const bench = openWorkbench(async (command) => {
@@ -314,10 +303,11 @@ test("the activity bar opens one editor and closes the launcher sidebar on each 
         async close() { closed++; },
     }, undefined, [], undefined, {openOnStart:false});
     assert.equal(bench.panelCount, 0);
-    bench.setSidebarVisible(true);
+    assert.equal(bench.launcher.visible,true);
+    assert.equal(bench.launcher.command,"harmonyAgent.openWorkbench");
+    bench.clickLauncher();
     assert.equal(bench.panelCount, 1);
-    assert.equal(bench.sidebarVisible, false);
-    assert.equal(bench.sidebarCloses, 1);
+    assert.deepEqual(bench.hostCommands,[]);
     const {live} = bench;
     await Promise.all([bench.send("ready"), live.send({ type: "ready" })]);
     assert.deepEqual(calls, ["devices"]);
@@ -358,17 +348,16 @@ test("the activity bar opens one editor and closes the launcher sidebar on each 
     assert.equal(live.messages.at(-1).streaming, true);
     bench.runCommand("harmonyAgent.openWorkbench");
     assert.equal(bench.state.tool, "exploration");
-    assert.equal(bench.sidebarCloses, 1);
+    assert.deepEqual(bench.hostCommands,[]);
     await bench.send("workspaceTab", {view:"recordings"});
     assert.equal(bench.state.testView, "history");
     assert.equal(live.messages.at(-1).epoch, resumedEpoch);
     assert.equal(live.messages.at(-1).streaming, true);
     bench.setVisible(false);
-    bench.setSidebarVisible(true);
+    bench.clickLauncher();
     assert.equal(bench.panelCount, 1);
     assert.equal(bench.state.testView, "history");
-    assert.equal(bench.sidebarVisible, false);
-    assert.equal(bench.sidebarCloses, 2);
+    assert.deepEqual(bench.hostCommands,[]);
     await bench.deactivate();
     assert.equal(closed, 1);
 });
@@ -605,7 +594,7 @@ test("a running BDD case follows durable receipts while switching tools", async 
     assert.equal(bench.live.messages.at(-1).epoch,epoch);
     for (let attempt=0; attempt<100 && bench.state.run.steps.length<2; attempt++) await wait(15);
     assert.deepEqual(bench.state.run.steps.map(step=>step.status),["passed","running"]);
-    assert.equal(bench.state.run.bdd.when[0].text,"Tap checkout");
+    assert.equal(bench.state.run.bdd.steps.find(step=>step.path==="steps[0]").text,"Tap checkout");
     finish.resolve();
     await running;
     assert.equal(bench.state.tool,"network");

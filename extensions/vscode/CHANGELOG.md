@@ -1,5 +1,25 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.18
+
+- Open the workbench from the status bar and keep the selected VS Code sidebar in place.
+
+## 0.20.17
+
+- Show BDD roles in execution order, including prerequisites and assertions within a workflow.
+- Insert a check after a step and choose its BDD role. AI can suggest roles along with step names and groups.
+
+## 0.20.16
+
+- Organize BDD step names and groups with AI. Review the suggestions before saving the case.
+- Rename, duplicate, delete, and reorder steps from their context menu. Pick a replacement locator from the current phone page.
+- Align the exploration mode, checkpoint, and rule-group controls with their labels.
+
+## 0.20.15
+
+- Review the first failure and decide whether to keep the case, investigate the page, or verify a replacement locator.
+- Find the optional HTML export under run or exploration evidence.
+
 ## 0.20.14
 
 - Open local workflows while device discovery and case indexing run in the background.

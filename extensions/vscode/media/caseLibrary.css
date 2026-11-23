@@ -64,6 +64,17 @@
 }
 .case-run-description { display:flex; align-items:baseline; flex-wrap:wrap; gap:3px 9px; min-width:0; }
 .case-run-description small, .case-run-label { color:var(--muted); font-size:12px; }
+#workbench .case-failure {
+    margin:10px 0; padding:12px 14px; min-width:0; border:1px solid var(--line);
+    border-inline-start:3px solid var(--bad,var(--accent)); border-radius:4px; overflow-wrap:anywhere;
+}
+#workbench .case-failure > header { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 12px; }
+#workbench .case-failure h2 { margin:0; font-size:15px; }
+#workbench .case-failure header > strong { color:var(--muted); font-size:12px; }
+#workbench .case-failure p { margin:6px 0 0; }
+#workbench .case-failure .case-failure-context { font-weight:600; }
+#workbench .case-failure .toolbar, #workbench .case-failure details { margin-top:8px; }
+#workbench .case-failure .case-recommendation { padding:8px 0 0; border-top:1px solid var(--line); }
 #workbench .case-summary-actions > button { min-height:26px; padding:3px 5px; color:var(--accent); }
 .case-run-picker { position:relative; min-width:0; }
 #workbench .case-run-picker summary { min-height:26px; padding:3px 5px; color:var(--muted); font-size:12px; cursor:pointer; }
@@ -78,31 +89,61 @@
 #case-all-runs { margin-top:8px; }
 #workbench .case-review-note { margin:10px 0 0; color:var(--muted); }
 #workbench .case-bdd { margin-top:15px; }
-#workbench .case-bdd > h2 { margin:0 0 5px; }
-#workbench .case-bdd-clause {
-    display:grid; grid-template-columns:46px minmax(0,1fr); gap:9px; padding:9px 0; border-bottom:1px solid var(--line);
-}
-#workbench .case-bdd-clause > h3 { margin:2px 0 0; font-size:13px; font-weight:600; color:var(--accent); }
-.case-bdd-clause > div { min-width:0; overflow-wrap:anywhere; }
-#workbench .case-bdd ul, #workbench .case-bdd ol { margin:0; padding-inline-start:1.4em; }
-.case-bdd li + li { margin-top:5px; }
-#workbench .case-bdd li small, #workbench .case-bdd .case-missing { margin:0; color:var(--muted); }
+#workbench .case-steps-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:5px 12px; margin:0 0 5px; }
+#workbench .case-steps-head h2 { margin:0; }
+.case-step-tools { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
+#workbench .case-steps-head .button { min-height:26px; padding:3px 5px; }
+#workbench .case-steps-head .button:not(.vscode-button) { border:0; background:transparent; color:var(--accent); }
+#workbench .case-bdd-steps { margin:0; padding:0; list-style:none; }
+.case-bdd-steps > li + li { margin-top:3px; }
+#workbench .case-bdd li small { margin:0; color:var(--muted); }
 #workbench .case-bdd details { margin:0; }
 .case-bdd summary { cursor:pointer; }
 .case-branch { margin:8px 0; border-inline-start:2px solid var(--line); padding-inline-start:10px; }
 .case-branch strong { font-size:12px; }
-.case-step-check { padding-block-start:3px; }
-#workbench .case-bdd-steps[data-order-kind] { padding-inline-start:0; }
-.case-sort-step { display:grid; grid-template-columns:24px minmax(0,1fr) auto; align-items:start; gap:6px; padding:3px 0; }
-.case-sort-content { min-width:0; padding-block:3px; }
-#workbench .case-add-check { margin-top:6px; }
+.case-step-entry { display:grid; grid-template-columns:19px minmax(0,1fr) 24px; align-items:start; column-gap:6px; padding:4px 0; }
+.case-step-entry > [data-order-grip] { grid-column:1; }
+.case-sort-content { grid-column:2; min-width:0; }
+.case-step-entry > [data-item-menu-trigger] { grid-column:3; }
+.case-bdd-line[data-bdd-role] { display:grid; grid-template-columns:45px minmax(0,1fr); align-items:baseline; gap:0 7px; }
+.case-bdd-role { color:var(--accent); font-weight:600; font-size:12px; }
+.case-bdd-text { min-width:0; overflow-wrap:anywhere; }
+#workbench .case-bdd-text > .case-value { vertical-align:baseline; }
+.case-attached-check { margin-block:2px; color:var(--muted); }
+.case-bdd-boundary-editor { margin-inline-start:77px; }
+#workbench .case-step-entry[data-order-index] :is(.case-bdd-role,[data-order-hit]) { cursor:grab; }
+#workbench .case-step-group { grid-column:2/-1; margin:3px 0 6px; padding-block-start:6px; border-top:1px solid var(--line); color:var(--accent); font-size:12px; }
+.case-step-title { display:inline-grid; gap:1px; max-width:100%; vertical-align:top; }
+#workbench .case-step-title small { display:block; font-size:12px; }
+#workbench .case-bdd .case-step-name { font-weight:600; }
 #workbench .case-add-check .button { min-height:25px; }
 .case-editor { margin-block:7px; padding:9px; background:var(--sidebar); border:1px solid var(--line); border-radius:4px; }
 .case-editor fieldset { display:grid; gap:7px; min-width:0; border:0; margin:0; padding:0; }
 .case-editor label { display:grid; gap:4px; }
-.case-editor label.case-replace { display:flex; align-items:center; gap:6px; }
-#workbench .case-editor input[type="checkbox"] { min-height:0; accent-color:var(--accent); }
+.case-role-options { display:flex; flex-wrap:wrap; gap:6px; }
+#workbench .case-role-field label {
+    display:flex; align-items:center; gap:6px; padding:3px 7px; border:1px solid var(--line); border-radius:4px; cursor:pointer;
+}
+#workbench .case-role-field input { width:13px; height:13px; min-height:0; margin:0; accent-color:var(--accent); }
+#workbench .case-role-field label:has(:checked) { background:var(--selected); border-color:var(--accent); }
 #workbench .case-editor .toolbar { margin:2px 0 0; }
+#workbench .case-locator-editor .toolbar {
+    position:sticky; bottom:0; z-index:1; padding-block:5px; border-top:1px solid var(--line); background:var(--sidebar);
+}
+.case-locator-current { display:grid; min-width:0; gap:3px; }
+.case-locator-current code { color:var(--muted); overflow-wrap:anywhere; }
+.case-target-head { display:flex; flex-wrap:wrap; align-items:center; gap:5px 9px; }
+#workbench .case-target-head p { margin:0; }
+.case-targets { display:grid; max-height:13rem; overflow:auto; border:1px solid var(--line); border-radius:4px; }
+.case-target-group { display:grid; gap:1px; min-width:0; padding:4px; }
+.case-target-group > strong { padding:2px 6px; font-size:12px; color:var(--muted); }
+#workbench .case-target {
+    display:grid; min-width:0; gap:1px; padding:5px 6px; text-align:start; color:var(--ink); font:inherit;
+    background:transparent; border:1px solid transparent; border-radius:3px; overflow-wrap:anywhere;
+}
+#workbench .case-target:enabled:hover { background:var(--hover); }
+#workbench .case-target[aria-pressed=true] { background:var(--selected); border-color:var(--accent); }
+#bdd-manual[open] > label { margin-top:5px; }
 #workbench .case-value, #workbench .inline-edit-title {
     padding:0; border:0; background:transparent; text-align:start; overflow-wrap:anywhere; font:inherit; color:inherit;
 }
