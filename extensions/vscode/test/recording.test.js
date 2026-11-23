@@ -1,11 +1,17 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { mkdtempSync, rmSync } = require("node:fs");
 const Module = require("node:module");
-const { mock, test } = require("node:test");
+const { tmpdir } = require("node:os");
+const path = require("node:path");
+const { after, mock, test } = require("node:test");
 const { recordedPlan } = require("../src/model");
 const { summarizePlan } = require("../src/planSummary");
 const { validateGesture } = require("../src/deviceRecorder");
+
+const workbenchFixtures = mkdtempSync(path.join(tmpdir(), "harmony-recording-"));
+after(() => rmSync(workbenchFixtures, { recursive: true, force: true }));
 
 function latch() {
     let resolve;
@@ -17,12 +23,13 @@ function latch() {
 function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], configureHost, {openOnStart = true} = {}) {
     const commands = new Map();
     const storage = new Map();
+    const storagePath = mkdtempSync(path.join(workbenchFixtures, "workspace-"));
     storage.set("runs", runs);
     if (selectedPlan) storage.set("plan", selectedPlan);
     let state, navigation, sidebar, receive, disposePanel, saved, panel, notifyView, notifySidebar, notifyEdit, panelCount = 0;
     let sidebarCloses = 0;
     const live = { messages: [] };
-    const uri = { fsPath: "/test", path: "/recording.json", toString: () => "file:///recording.json" };
+    const uri = { fsPath: path.join(storagePath, "recording.json"), path: "/recording.json", toString: () => "file:///recording.json" };
     const vscode = {
         env: { language: "en" }, ViewColumn: { Active: 1 }, RelativePattern: class {},
         Uri: { joinPath: () => uri, file: () => uri, parse: () => uri },
@@ -94,7 +101,7 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
     delete require.cache[require.resolve("../src/liveDevicePanel")];
     let extension;
     try { extension = require(entry); } finally { stub.mock.restore(); }
-    extension.activate({ globalStorageUri: uri, extensionUri: uri, subscriptions: [],
+    extension.activate({ globalStorageUri: { fsPath: storagePath }, extensionUri: uri, subscriptions: [],
         workspaceState: { get: (k, fallback) => storage.get(k) ?? fallback,
             async update(k, v) { storage.set(k, structuredClone(v)); } },
     });
@@ -102,6 +109,7 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
     live.send = message => receive({ ...message, channel: "live" });
     return {
         live,
+        screenshotPath: filename => path.join(storagePath, "agent", filename),
         get navigation() { return navigation; },
         get sidebarVisible() { return sidebar.visible; },
         get sidebarCloses() { return sidebarCloses; },
@@ -261,7 +269,7 @@ test("the activity bar opens one editor and closes the launcher sidebar on each 
         calls.push(command);
         if (command === "devices") return { devices: [{ id: "phone" }] };
         if (command === "start") return { observation: { frameId: "page", nodes: [] } };
-        if (command === "screenshot") return {path:"/test/agent/page.png"};
+        if (command === "screenshot") return {path:bench.screenshotPath("page.png")};
     }, {}, {
         async nextFrame() { return { data: Buffer.from([1]), width: 30, height: 100, mime: "image/jpeg" }; },
         async close() { closed++; },
@@ -340,7 +348,7 @@ test("the element overlay replaces the live frame, blocks stale touches and rest
         if (command === "devices") return { devices: [{ id: "phone" }] };
         if (command === "start") return { observation: { frameId: "read-" + ++observations, nodes } };
         if (command === "press") return { observation: { frameId: "pressed", nodes } };
-        if (command === "screenshot") return {path:"/test/agent/captured.png"};
+        if (command === "screenshot") return {path:bench.screenshotPath("captured.png")};
     }, {
         async replayGesture({ device }, input) {
             assert.equal(device, "phone");
@@ -471,7 +479,7 @@ test("returning to element selection reuses the snapshot until live pixels chang
         calls.push(command);
         if (command === "devices") return {devices:[{id:"phone"}]};
         if (command === "start") return {observation:{frameId:"pick-" + ++observations,nodes:[]}};
-        if (command === "screenshot") return {path:"/test/agent/pick-" + observations + ".png"};
+        if (command === "screenshot") return {path:bench.screenshotPath(`pick-${observations}.png`)};
         assert.fail("Unexpected device command: " + command);
     },{},{
         onOpen() { readers++; },
@@ -572,7 +580,7 @@ test("an acknowledged inspector gesture remains successful when controls cannot 
     let reads = 0;
     const bench = openWorkbench(async command => {
         if (command === "devices") return { devices: [{ id: "phone" }] };
-        if (command === "screenshot") return {path:"/test/agent/captured.png"};
+        if (command === "screenshot") return {path:bench.screenshotPath("captured.png")};
         if (command === "start") {
             if (++reads === 2) throw new Error("Control tree unavailable");
             return { observation: { frameId: "read-" + reads, nodes: [] } };
@@ -604,7 +612,7 @@ test("device changes in the inspector replace both the feed and the controls", a
     const reads = [];
     const bench = openWorkbench(async (command, input) => {
         if (command === "devices") return { devices: devices.map(id => ({ id })) };
-        if (command === "screenshot") return {path:"/test/agent/captured.png"};
+        if (command === "screenshot") return {path:bench.screenshotPath("captured.png")};
         if (command === "start") {
             reads.push(input.device);
             return { observation: { frameId: "page-" + input.device, nodes: [] } };
