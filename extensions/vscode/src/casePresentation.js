@@ -201,10 +201,10 @@ function parseOrganization(answer, rows) {
     });
 }
 
-function transferPresentation(plan, revised, stored) {
+function transferPresentation(plan, revised, stored, mapPath = path => path) {
     const original = restorePresentation(plan,stored);
     if (!original.size) return;
-    const byPath = new Map(Array.from(stepEntries(plan.steps),({path,step})=>[path,original.get(step)]));
+    const byPath = new Map(Array.from(stepEntries(plan.steps),({path,step})=>[mapPath(path),original.get(step)]));
     const moved = new Map(Array.from(stepEntries(revised.steps),({path,step})=>[step,byPath.get(path)]));
     return storePresentation(revised,moved);
 }

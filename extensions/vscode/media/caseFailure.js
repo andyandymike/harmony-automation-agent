@@ -22,6 +22,7 @@ const recommendations = {
     keepCase: ["Keep the case for now", "先保留原用例"],
     verifyLocator: ["Verify a replacement locator on a copy", "在副本上验证替代定位器"],
     verifyWait: ["Verify a page readiness check on a copy", "在副本上验证页面等待条件"],
+    verifyNavigation: ["Verify the added navigation step on a copy", "在副本上验证新增的跳转步骤"],
     reviewCase: ["Review the case steps or expected result", "核对用例步骤或预期结果"],
     inspectRequest: ["Check the recorded request", "核对同期失败的请求"],
     insufficientEvidence: ["Gather more evidence before editing", "补足证据后再决定是否修改"],
@@ -31,12 +32,13 @@ const unavailable = {
     sourceChanged: ["The workflow was edited after this run. Diagnose a run of the current version to prepare an edit.", "运行后用例已有变更。运行当前版本后，可按新的失败证据生成修改。"],
     sourceUnavailable: ["The workflow used by this run could not be read.", "无法读取这次执行使用的流程文件。"],
     groupChanged: ["The bound rule group differs from the one used in this run.", "当前绑定的规则组与这次执行时不同。"],
-    missingPage: ["A complete recorded failure page is needed to verify a locator.", "验证定位器需要完整的失败页面控件树。"],
-    missingChecks: ["Add a starting condition and a final assertion to verify a change on a copy.", "补充起始条件和最终断言后，可用副本验证修改。"],
-    noMatch: ["The saved page did not provide a matching control for an automatic edit.", "从这次失败页面还无法确认可自动替换的控件。"],
+    missingPage: ["A complete control tree is needed to prepare the edit.", "需要完整的页面控件树才能生成修改。"],
+    noMatch: ["No usable replacement was found on the observed page.", "在已读取的页面上没找到可用的替代控件。"],
+    composed: ["Review the failing step in the case editor. If it belongs to a reference, open that source or convert the reference to local steps.",
+        "请在用例编辑器核对失败步骤。若失败发生在引用内，可以打开来源，或将引用转为本地步骤。"],
 };
 
-export function failureView(review, runId, language, {stepTitle, ai, aiOutput, stop, disabled, repair, runner} = {}) {
+export function failureView(review, runId, language, {stepTitle, ai, aiOutput, stop, disabled, repair, runner, canReadLive} = {}) {
     if (!review) return "";
     const w = (en, zh) => /^zh/i.test(language) ? zh : en;
     const [name, cn, next, nextCn] = guidance[review.kind] || guidance.unknown;
@@ -51,6 +53,12 @@ export function failureView(review, runId, language, {stepTitle, ai, aiOutput, s
     const records = ai?.recommendation==="inspectRequest" && ai.evidence?.find(item=>item.kind==="http")?.records;
     const request = records?.length===1 ? button(w("Open failed request","打开失败请求")+" · "+records[0].status,
         "networkEvidenceRecord",{"data-id":records[0].id}) : "";
+    const live = canReadLive && !repair && analyzed && review.kind==="locator" &&
+        ["reviewCase","insufficientEvidence"].includes(ai.recommendation) &&
+        !["sourceChanged","sourceUnavailable","groupChanged"].includes(ai.reason) ?
+        button(w("Use current phone screen","用手机当前画面补充分析"),"diagnoseFailure",{"data-id":runId,"data-phase":"live"}) : "";
+    const generate = ["environment","runner","unknown"].includes(review.kind) ? w("Diagnose failure with AI","用 AI 诊断失败") :
+        w("Generate repair with AI","用 AI 生成修复方案");
     const analysis = analyzed ? `<div class="case-diagnosis">
         <p><strong>${w("Finding","发现")}</strong> ${h(ai.answer)}</p>
         ${ai.fromSavedEvidence ? `<small>${w("Prepared from the saved run evidence.","根据已保存的运行证据生成。")}</small>` : ""}
@@ -62,8 +70,8 @@ export function failureView(review, runId, language, {stepTitle, ai, aiOutput, s
         <h2 id="case-failure-title">${w("Failure review","失败排查")}</h2><strong>${h(w(name,cn))}</strong></header>
         ${context ? `<p class="case-failure-context">${h(context)}</p>` : ""}
         ${analysis}${repair || ""}
-        <div class="toolbar">${repair ? "" : button(analyzed ? w("Analyze again","重新分析") : w("Diagnose failure with AI","用 AI 诊断失败"),
+        <div class="toolbar">${repair ? "" : button(analyzed ? w("Analyze again","重新分析") : generate,
             "diagnoseFailure",{"data-id":runId},!analyzed)}
-        ${rerun}${request}${review.index !== undefined ? button(w("View failing step","查看失败步骤"),"showFailureStep",{"data-index":review.index}) : ""}${stop || ""}</div>
+        ${live}${rerun}${request}${review.index !== undefined ? button(w("View failing step","查看失败步骤"),"showFailureStep",{"data-index":review.index}) : ""}${stop || ""}</div>
         ${aiOutput || ""}</section>`;
 }

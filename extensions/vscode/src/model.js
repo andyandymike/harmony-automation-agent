@@ -92,7 +92,8 @@ const exceptional = new Set(["failed", "unknown", "cancelled", "budget_exhausted
 function runView(record) {
     const result = record.result || record;
     const assertions = result.goalVerification?.assertions || [];
-    const steps = (record.receipts || result.steps || []).map(step => {
+    const receipts = record.receipts || result.steps || [];
+    const steps = receipts.map((step,index) => {
         const detail = step.result || step.error?.details || {};
         const errorCode = step.error?.code;
         const condition = ["precondition", "goal", "assert"].includes(step.kind);
@@ -102,16 +103,21 @@ function runView(record) {
             value === "failed" || value === "unknown");
         const status = condition ? detail.status || step.status :
             step.status === "completed" && failedVerification ? failedVerification : step.status;
+        const dispatched = detail.action?.dispatched ?? step.error?.dispatched ?? step.error?.details?.dispatched;
+        const lookupFailed = ["TARGET_NOT_FOUND","AMBIGUOUS_TARGET","TARGET_AMBIGUOUS","TARGET_NOT_ACTIONABLE"].includes(errorCode);
+        // The terminal lookup can capture a newer page than the one at step start.
+        const failureFrame = step.kind==="command" && index===receipts.length-1 && dispatched==="no" && lookupFailed &&
+            result.observation?.frameId;
         return {
             path: step.path,
             kind: step.kind,
             command: step.command,
             status,
-            dispatched: detail.action?.dispatched ?? step.error?.dispatched,
+            dispatched,
             elapsedMs: step.elapsedMs,
             at: step.at,
             startedAt: step.startedAt,
-            before: step.beforeFrameId || detail.beforeFrameId || step.basisFrameId,
+            before: step.beforeFrameId || detail.beforeFrameId || failureFrame || step.basisFrameId,
             after: step.afterFrameId || detail.afterFrameId || assertion?.frameId || detail.frameId,
             screenshot: detail.evidence?.screenshot,
             selector: target,

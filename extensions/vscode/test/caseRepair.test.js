@@ -4,6 +4,8 @@ const test = require("node:test");
 const {CaseRepair,sourceDigest,replaceAt,locatorPath,candidatesFor} = require("../src/caseRepair");
 const {runView,pageView} = require("../src/model");
 const {diagnoseCase} = require("../src/caseDiagnosis");
+const {storePresentation,restorePresentation} = require("../src/casePresentation");
+const loadWebview = require("../test-support/loadWebview");
 
 const plan = {version:"1",preconditions:[{selector:{id:"cart"},property:"visible",equals:true}],
     steps:[{command:"press",input:{target:{id:"submit-old"}}}],
@@ -117,4 +119,96 @@ test("waiting for an existing target requires a saved loading state and a same-v
         expect:{selector:{id:"submit-old"},property:"visible",equals:true,timeoutMs:3000}}});
     assert.deepEqual(edited.steps[1],workflow.steps[1]);
     assert.deepEqual(edited.goals,workflow.goals);
+});
+
+test("a navigation repair inserts one observed same-app tap and verifies that the original step still ran", async () => {
+    const open = {command:"open",input:{app:"fixture.shop"}};
+    const workflow = {...plan,steps:[open,plan.steps[0],{command:"back",input:{}}]};
+    const source = "\uFEFF"+JSON.stringify(workflow,null,2).replaceAll("\n","\r\n");
+    const step = {...runView(report).steps[0],path:"steps[1]",dispatched:"no"};
+    const previous = {path:"steps[0]",command:"open",status:"completed",dispatched:"acknowledged"};
+    const entry = {id:"failed",plan:{uri:"file:///workflow.json"},sourceDigest:sourceDigest(source)};
+    const run = {entry,steps:[previous,step]};
+    const v = {Uri:{parse:s=>s},workspace:{openTextDocument:async()=>({getText:()=>source,uri:entry.plan.uri})}};
+    const observed = {...frozen,nodes:[
+        {...frozen.nodes[0],id:"review.continue",text:"Continue",bundleName:"fixture.shop",pagePath:"order-review"},
+        {...frozen.nodes[0],ref:"@2",id:"os.continue",text:"Continue",bundleName:"fixture.os"},
+    ]};
+    let reachOriginal = false;
+    const b = {state:{run,device:"fixture"},networks:{bindings:{}},
+        executePlan:async (from,trial)=>{
+            assert.equal(from,true);
+            assert.equal(trial.repairOf,entry.id);
+            const candidate = JSON.parse(trial.contents.slice(1));
+            assert.deepEqual(candidate.preconditions,plan.preconditions);
+            assert.deepEqual(candidate.goals,plan.goals);
+            assert.deepEqual(candidate.steps.slice(2),workflow.steps.slice(1));
+            const trialEntry = {id:"trial",status:"passed",repairOf:entry.id};
+            const steps = [{path:"steps[1]",status:"completed"}];
+            if (reachOriginal) steps.push({path:"steps[2]",status:"completed"});
+            b.state.run = {entry:trialEntry,steps,goalStatus:"passed"};
+            return trialEntry;
+        }};
+    const repair = new CaseRepair(b,v);
+    const request = {run,failure:{kind:"locator",index:1},language:"en",onEvent(){},agent:()=>({call:async()=>observed}),
+        prepare:input=>repair.prepare(input)};
+    const diagnosis = await diagnoseCase({...request,ask:async prompt=>{
+        const {options} = JSON.parse(prompt.split("\n").at(-1));
+        const nav = options.filter(option=>option.kind==="navigation");
+        assert.equal(nav.length,1);
+        assert.deepEqual(nav[0].proposed,{command:"press",target:{id:"review.continue",bundleName:"fixture.shop"}});
+        return JSON.stringify({summary:"Review now precedes the submit page.",next:"Tap Continue before Submit.",
+            recommendation:"verifyNavigation",option:nav[0].number,citations:["failure","page"]});
+    }});
+    const item = diagnosis.proposed;
+    assert.equal(item.kind,"navigation");
+    assert.match(item.candidate,/\r\n/);
+    const metadata = storePresentation(workflow,new Map([[workflow.steps[1],{name:"Submit order"}],[workflow.steps[2],{name:"Return to cart"}]]));
+    const revised = JSON.parse(item.candidate.slice(1));
+    const titles = restorePresentation(revised,repair.presentation(item,metadata));
+    assert.equal(titles.get(revised.steps[2]).name,"Submit order");
+    assert.equal(titles.get(revised.steps[3]).name,"Return to cart");
+    assert.equal(titles.has(revised.steps[1]),false);
+    repair.propose(item);
+    await repair.verify({id:entry.id});
+    assert.equal(b.state.repair.stage,"failed");
+    assert.equal(b.state.repair.notReached,true);
+    b.state.run = run;
+    reachOriginal = true;
+    await repair.verify({id:entry.id});
+    assert.equal(b.state.repair.stage,"verified");
+});
+
+test("a current-screen replacement can enter the editor when a legacy workflow has no final assertion", async () => {
+    const target = {id:"cart.apply",bundleName:"fixture.shop"};
+    const source = JSON.stringify({version:"1",steps:[{command:"press",input:{target}}]});
+    const run = {...runView(report),entry:{id:"old-run",status:"failed",plan:{uri:"file:///workflow.json"},sourceDigest:sourceDigest(source)}};
+    let draft;
+    const b = {state:{run},networks:{bindings:{}},caseAuthoring:{beginRepair:async input=>{draft=input;}}};
+    const v = {Uri:{parse:s=>s},workspace:{openTextDocument:async()=>({getText:()=>source,uri:run.entry.plan.uri})}};
+    const repair = new CaseRepair(b,v);
+    const diagnosis = await diagnoseCase({run,failure:{kind:"locator",index:0},onEvent(){},
+        agent:()=>({call:async()=>undefined}),
+        readLive:async()=>({...frozen,frameId:"now",nodes:[{...frozen.nodes[0],id:"promotion.confirm",
+            text:"Use discount",bundleName:"fixture.shop"}]}),
+        prepare:input=>repair.prepare(input),ask:async prompt=>{
+            const {options,evidence} = JSON.parse(prompt.split("\n").at(-1));
+            assert.equal(evidence.livePage.frameId,"now");
+            assert.equal(options[0].canVerify,false);
+            assert.equal(options[0].proposed.id,"promotion.confirm");
+            return '{"summary":"The Apply Coupon control is now labeled Use discount.","next":"Use its new ID.",'+
+                '"recommendation":"verifyLocator","option":1,"citations":["livePage"]}';
+        }});
+    repair.propose(diagnosis.proposed);
+    await assert.rejects(repair.verify({id:run.entry.id}),/final assertion/);
+    const {repairView} = await loadWebview("caseRepair");
+    const view = repairView({...b.state,devices:[]},run,"en",(label,type)=>type+" "+label);
+    assert.match(view,/repairDraft/);
+    assert.doesNotMatch(view,/repairVerify/);
+    await repair.stage({id:run.entry.id});
+    assert.deepEqual(draft.plan.steps[0].input.target,{...target,id:"promotion.confirm"});
+    assert.equal(draft.source,source);
+    assert.equal(b.state.repair.stage,"proposed");
+    draft.onSave();
+    assert.equal(b.state.repair.stage,"draftSaved");
 });

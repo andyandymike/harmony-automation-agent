@@ -49,6 +49,7 @@ function plannerPrompt({ goal, language, page, history, allowActions, canReadHtt
         choices += ' To assert a real current property, use {"action":"check","node":N,"property":"visible|enabled|checked|selected|focused|text","equals":VALUE}. To refresh use {"action":"observe"}.';
         if (canReadHttp) choices += ' To consult workspace HTTP history from the last five minutes, use {"action":"http","filter":"all|errors"}. The returned metadata is recorded local traffic and can include other apps. Use it to decide which control to check. A request is not a UI or business assertion.';
         if (allowActions) choices += ' To act use {"action":"press","node":N}, {"action":"scroll","node":N,"direction":"up|down|left|right"}, {"action":"fill","node":N,"text":"exact value from user"}, or {"action":"back"}.';
+        choices += ' For an action or check, include a short "name" for its purpose in the test. For example, "Open language settings" or "Confirm the cart total". Omit input values and avoid inventing a business outcome.';
     }
     return [
         "You are the next-step planner in a HarmonyOS test workbench. Reply with exactly one JSON object.",
@@ -92,7 +93,7 @@ function actionInput(item, node, goal, language) {
     return input;
 }
 
-async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, language, allowActions = true, workbenchSession, readRequests }) {
+async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, language, allowActions = true, workbenchSession, readRequests, prepare, acceptStart }) {
     const say = (type, text) => onEvent({ type, text });
     const local = (en, zh) => words(language, en, zh);
     if (!device || !goal?.trim()) throw new Error(local("Choose a device and enter a task.", "请选择手机并输入任务。"));
@@ -100,7 +101,7 @@ async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, languag
     const history = [];
     const steps = [];
     let replayable = true;
-    let outcome;
+    let outcome, screen;
     let finalText;
     let status;
     checkStop(signal);
@@ -121,7 +122,10 @@ async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, languag
             }
         }
         checkStop(signal);
+        if (prepare) await prepare(session);
+        checkStop(signal);
         let page = await agent.call("observe", { session, ...projection });
+        if (acceptStart && !acceptStart(page)) return {status:"blocked"};
         const first = pageView(page);
         while (history.length <= maxSteps) {
             checkStop(signal);
@@ -134,8 +138,11 @@ async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, languag
                 const done = item.action === "done";
                 status = done ? "completed" : "blocked";
                 finalText = (done ? local("AI assessment · ", "AI 观察 · ") : local("Task paused · ", "任务未完成 · ")) + item.text.trim();
-                if (done && replayable && steps.length) outcome = { source: "workbench",
-                    start: first.nodes.filter(n => n.selector), end: pageView(page).nodes.filter(n => n.selector), steps, goal };
+                if (done && replayable && steps.length) {
+                    outcome = { source: "workbench",start: first.nodes.filter(n => n.selector),
+                        end: pageView(page).nodes.filter(n => n.selector),steps,goal };
+                    if (acceptStart) screen = page;
+                }
                 break;
             }
             if (atLimit) throw new Error(local("Reached the eight-step limit.", "已达到八步上限。"));
@@ -180,7 +187,9 @@ async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, languag
                 if (input.target && !selector) replayable = false;
                 const label = target?.editable ? target.id || target.type : target?.label;
                 const evidence = stepEvidence({from:pageCue(before),to:pageCue(page)});
-                steps.push({command,input:input.target ? {...input,target:selector} : input,label,...(evidence && {evidence})});
+                let name = stepEvidence({control:item.name})?.control;
+                if (name && command==="fill" && name.toLowerCase().includes(input.text.toLowerCase())) name=undefined;
+                steps.push({command,input:input.target ? {...input,target:selector} : input,label,...(name && {name}),...(evidence && {evidence})});
             }
         }
     } finally {
@@ -189,7 +198,7 @@ async function runPhoneTask({ agent, device, goal, ask, signal, onEvent, languag
     }
     checkStop(signal);
     say("answer", finalText);
-    return { status, draft: outcome };
+    return { status, draft: outcome, ...(screen && {screen}) };
 }
 
 async function explainRun({ agent, run, goal, ask, signal, onEvent, language, readRequests }) {

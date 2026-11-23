@@ -13,6 +13,7 @@ const {deviceRecordingFormat, moveListItem} = require("./model");
 const {sourceDigest} = require("./caseRepair");
 const {readiness, safeCaseName, reserveCaseFolder, writeCase, findCase, templatePath, testFilename} = require("./pytestCase");
 const {readWorkflow, workflowWithScenario} = require("./workflowFile");
+const {authoredDocument, compileCase, referencesFor, compositionRecord, signature} = require("./caseComposition");
 
 const booleanProperties = ["visible", "enabled", "checked", "selected", "focused"];
 const sensitiveControl = /pass(?:word|code)|secret|token|密码|口令|验证码/i;
@@ -46,7 +47,8 @@ function caseDefinitions(plan, presentation) {
         const check = editableCheck(step.assert);
         const action = controls ? actionDefinition(step) : undefined;
         const gesture = controls ? undefined : gestureDefinition(step);
-        return [path,{name,group,roles,role:role || roles[0],removable:siblings>1 || /\.else\[\d+\]$/.test(path),
+        return [path,{name,group,roles,role:role || roles[0],reference:Boolean(step.useCase),
+            removable:siblings>1 || /\.else\[\d+\]$/.test(path),
             insertCheck:controls && entries.length<maxSteps && !step.stop && !step.yield,
             ...(locator && {locator:describeLocator(locator.owner[locator.field])}), ...(check && {check}),action,gesture}];
     }));
@@ -115,14 +117,18 @@ class CaseAuthoring {
         const uri = this.vscode.Uri.parse(selected.uri);
         const doc = await this.vscode.workspace.openTextDocument(uri);
         const original = doc.getText();
-        const {plan,scenario} = readWorkflow(original);
+        const file = readWorkflow(original);
+        const {scenario} = file;
         const metadata = await readCaseMetadata(uri);
+        const authored = authoredDocument(file,metadata);
         const existing = bench.state.activeCase?.uri === selected.uri ? bench.state.activeCase : undefined;
         const portable = await canEditCase(uri,existing);
         const copy = message.copy === true;
         const name = copy ? selected.name.slice(0,60).trim()+this.words(" copy"," 副本") : selected.name;
         this.begin({source:existing?.source==="imported" ? "workflow" : existing?.source || "workflow",
-            origin:existing?.origin,name,plan,group:scenario || bench.networks.bindings?.[selected.uri],presentationData:metadata?.presentation,
+            origin:existing?.origin,name,plan:authored.plan,group:scenario || bench.networks.bindings?.[selected.uri],
+            presentationData:authored.display,metadataPresentation:metadata?.presentation,compositionData:metadata?.composition,
+            compositionStale:authored.stale,section:metadata?.section,
             ...(portable && !copy && {edit:{uri,original}})});
     }
 
@@ -160,12 +166,23 @@ class CaseAuthoring {
         this.begin(candidate);
     }
 
-    begin(candidate) {
+    async beginRepair({doc,group,metadata,plan,source,entry,presentation,onSave}) {
+        if (this.candidate || this.bench.state.draft) return;
+        const uri = doc.uri;
+        const existing = this.bench.state.cases.find(item=>item.uri===uri.toString());
+        const edit = await canEditCase(uri,existing) ? {uri,original:source} : undefined;
+        this.begin({plan,group,edit,added:true,presentationData:metadata?.presentation,onSave,
+            name:existing?.name || entry.plan.name,
+            source:existing?.source && existing.source!=="imported" ? existing.source : "workflow",
+            origin:edit ? existing.origin : {reportId:entry.id,outcome:"observed"}},presentation ?? null);
+    }
+
+    begin(candidate, display = candidate.presentationData) {
         if (!candidate.plan?.steps?.length || !Array.isArray(candidate.plan.steps) || readiness(candidate.plan)==="invalid")
             throw new Error(this.words("No executable steps are available.", "还没有可执行的步骤。"));
         const state = this.bench.state;
         const plan = structuredClone(candidate.plan);
-        const presentation = restorePresentation(plan,candidate.presentationData);
+        const presentation = restorePresentation(plan,display);
         for (const {path,step} of stepEntries(plan.steps)) {
             const evidence = stepEvidence(candidate.stepEvidence?.[path]);
             if (evidence) presentation.set(step,{...presentation.get(step),evidence});
@@ -180,6 +197,7 @@ class CaseAuthoring {
 
     update() {
         const c = this.candidate, plan = c.plan;
+        const compiled = compileCase(plan);
         const targets = Object.fromEntries(Object.entries(c.targets).map(([key, values])=>[key,
             values.map(({label},index)=>({label,key:String(index)}))]));
         const picker = c.stepTargets;
@@ -190,7 +208,9 @@ class CaseAuthoring {
                 locator:describeLocator(selector),...(picker.picture && bounds && {bounds})})),
         } : undefined;
         this.bench.state.caseReview = {id:c.id,revision:c.revision,name:c.name,source:c.source,origin:c.origin,groupName:c.group?.name,
-            issue:readiness(plan),bdd:createBdd(plan,this.bench.language,c.group,c.presentation),added:c.added,timingUnknown:c.timingUnknown,edit:Boolean(c.edit),
+            issue:readiness(compiled.plan),bdd:createBdd(plan,this.bench.language,c.group,c.presentation,
+                {...compiled,sources:this.bench.composition?.sources}),added:c.added,timingUnknown:c.timingUnknown,edit:Boolean(c.edit),
+            compositionStale:c.compositionStale,
             dirty:Boolean(c.added || c.reordered || c.presentationChanged || c.name !== c.originalName || c.uri), pendingSave:Boolean(c.uri),
             definitions:caseDefinitions(plan,c.presentation),targets,stepTargets,organization:c.organization,
             undoRemove:Boolean(c.removedStep)};
@@ -201,6 +221,7 @@ class CaseAuthoring {
         c?.organizationJob?.abort();
         this.candidate = undefined;
         this.bench.state.caseReview = undefined;
+        this.bench.composition?.closeDraft(c?.id);
         if (!stay && c?.previousTool && this.bench.state.tool === "recordings") this.bench.state.tool = c.previousTool;
     }
 
@@ -617,13 +638,27 @@ class CaseAuthoring {
         this.stopOrganizing(id);
         const w = (en,zh)=>this.words(en,zh);
         const presentation = storePresentation(c.plan,c.presentation);
+        const compiled = compileCase(c.plan).plan;
+        const priorPresentation = Object.hasOwn(c,"metadataPresentation") ? c.metadataPresentation : c.presentationData;
+        let composition;
+        if (referencesFor(c.plan).length || c.compositionData) {
+            const revised = compositionRecord(c.plan,compiled,presentation);
+            const before = c.edit && readWorkflow(c.edit.original).plan;
+            const previous = before && (c.compositionData?.find(item=>item.digest===signature(before)) ||
+                compositionRecord(before,before,priorPresentation));
+            composition = [revised,...(previous && previous.digest!==revised.digest ? [previous] : [])];
+        }
         // If indexing or opening fails after the files were created, retry that step on the same directory.
         if (c.edit && !c.uri) {
             if (!c.added && !c.reordered && !c.presentationChanged && c.name === c.originalName) return;
             if ((c.presentationChanged || c.presentationData && (c.added || c.reordered)) &&
-                !isDeepStrictEqual((await readCaseMetadata(c.edit.uri))?.presentation,c.presentationData))
+                !isDeepStrictEqual((await readCaseMetadata(c.edit.uri))?.presentation,priorPresentation))
                 throw new Error(w("The case step titles changed on disk. Reopen the case before saving.","磁盘上的步骤名称有改动，请重新打开用例后再保存。"));
-            if (c.added || c.reordered) await this.updateDraft(c);
+            if (composition && (c.added || c.reordered || c.presentationChanged)) {
+                await b.caseLibrary.updateMetadata(c.edit.uri,{composition},priorPresentation,c.compositionData);
+                c.compositionData = composition;
+            }
+            if (c.added || c.reordered) await this.updateDraft(c,compiled);
             c.uri = c.edit.uri;
             c.savedName = c.name;
         } else if (!c.uri) {
@@ -636,8 +671,8 @@ class CaseAuthoring {
                 validateInput:value=>safeCaseName(value) ? undefined : w("Use a short folder name.","请输入不超过 70 个字符的有效目录名。")});
             if (!name || this.candidate !== c) return;
             if (!safeCaseName(name)) throw new Error(w("Invalid case name.","用例名称无效。"));
-            const folder = readiness(c.plan) ? await writeReplay(parent[0].fsPath,name,c.plan,c.group) :
-                (await writeCase(parent[0].fsPath,name,c.plan,c.group)).folder;
+            const folder = readiness(compiled) ? await writeReplay(parent[0].fsPath,name,compiled,c.group) :
+                (await writeCase(parent[0].fsPath,name,compiled,c.group)).folder;
             c.uri = v.Uri.file(path.join(folder,"workflow.json"));
             c.savedName = name;
         }
@@ -645,17 +680,39 @@ class CaseAuthoring {
         if (c.edit && !c.savedMetadata) {
             const changes = {...(c.savedName !== c.originalName && {name:c.savedName}),
                 ...((c.presentationChanged || c.presentationData && (c.added || c.reordered)) && {presentation})};
-            if (Object.keys(changes).length) await b.caseLibrary.updateMetadata(c.uri,changes,c.presentationData);
+            if (Object.keys(changes).length) await b.caseLibrary.updateMetadata(c.uri,changes,priorPresentation);
             c.savedMetadata = true;
         }
-        await b.caseLibrary.add(c.uri,{name:c.savedName,source:c.source,origin:c.origin,presentation});
+        await b.caseLibrary.add(c.uri,{name:c.savedName,source:c.source,origin:c.origin,presentation,composition,section:c.section});
         await b.refreshCases();
         await b.setPlan(c.uri);
         if (c.recording && b.state.draft === c.recording) b.state.draft = undefined;
+        c.onSave?.();
         this.cancel(true);
     }
 
-    async updateDraft(c) {
+    async saveSection(c, start, {through,name}) {
+        const end=stepLocation(c.plan,through);
+        const cleaned=typeof name==="string" ? name.trim() : "";
+        if (!end || end.list!==start.list || end.index<start.index || !safeCaseName(cleaned))
+            throw new Error(this.words("Choose a continuous range and give it a valid name.","请选择连续步骤并填写有效名称。"));
+        const steps=start.list.slice(start.index,end.index+1);
+        const plan={version:c.plan.version,steps};
+        const compiled=compileCase(plan).plan;
+        const presentation=storePresentation(plan,c.presentation);
+        const [parent]=await this.vscode.window.showOpenDialog({canSelectFolders:true,canSelectFiles:false,canSelectMany:false,
+            defaultUri:this.vscode.workspace.workspaceFolders?.[0]?.uri,
+            openLabel:this.words("Save reusable section here","在此保存可复用片段")}) || [];
+        if (!parent || parent.scheme!=="file" || this.candidate!==c) return;
+        const folder=await writeReplay(parent.fsPath,cleaned,compiled,c.group);
+        const uri=this.vscode.Uri.file(path.join(folder,"workflow.json"));
+        const composition=referencesFor(plan).length ? [compositionRecord(plan,compiled,presentation)] : undefined;
+        await this.bench.caseLibrary.add(uri,{name:cleaned,source:"workflow",section:true,presentation,composition});
+        await this.bench.refreshCases();
+        return true;
+    }
+
+    async updateDraft(c, compiled = c.plan) {
         const v=this.vscode, {uri,original}=c.edit;
         const doc = await v.workspace.openTextDocument(uri);
         const conflict = ()=>new Error(this.words("The case file changed. Go back, save your edits, and review the latest version.",
@@ -663,11 +720,11 @@ class CaseAuthoring {
         const unchanged = async()=>!doc.isDirty && doc.getText()===original &&
             (await fs.readFile(uri.fsPath,"utf8")).replace(/^\uFEFF/,"")===original.replace(/^\uFEFF/,"");
         if (!await unchanged()) throw conflict();
-        const next = JSON.stringify(c.group ? workflowWithScenario(c.plan,c.group) : c.plan,null,2) + "\n";
+        const next = JSON.stringify(c.group ? workflowWithScenario(compiled,c.group) : compiled,null,2) + "\n";
         const folder = path.dirname(uri.fsPath);
         let script, content;
         try {
-            if (c.added && !readiness(c.plan) && !await findCase(uri)) {
+            if (c.added && !readiness(compiled) && !await findCase(uri)) {
                 // Respect an edited/custom Python entry: adding another test here could run the same case twice.
                 const pythonTests = (await fs.readdir(folder)).some(name=>/^test_.*\.py$/i.test(name));
                 if (pythonTests) throw new Error(this.words("A custom Python test already exists. Open its source or save a separate case.",
@@ -690,4 +747,4 @@ class CaseAuthoring {
     }
 }
 
-module.exports = {CaseAuthoring,caseDefinitions,canEditCase};
+module.exports = {CaseAuthoring,caseDefinitions,canEditCase,stepLocation};

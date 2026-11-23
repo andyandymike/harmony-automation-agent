@@ -28,6 +28,8 @@ const { readiness, safeCaseName, writeCase, findCase, startPytest } = require(".
 const { CaseLibrary, createBdd, readCaseMetadata } = require("./caseLibrary");
 const { restorePresentation, pageCue, stepEvidence } = require("./casePresentation");
 const { CaseAuthoring, caseDefinitions, canEditCase } = require("./caseAuthoring");
+const { CaseCompositionEditor } = require("./caseCompositionEditor");
+const { authoredDocument } = require("./caseComposition");
 const { loadPytestRun } = require("./pytestReport");
 const { journalPath, watchRunJournal } = require("./runProgress");
 const { CaseRepair, sourceDigest } = require("./caseRepair");
@@ -51,7 +53,7 @@ const toolMessages = new Map([
     ["openRecordingWorkspace", "recordings"], ["inspect", "inspect"], ["inspectDevice", "inspect"], ["networkOpen", "network"],
 ]);
 const localCaseActions = new Set(["openPlan", "editPlan", "caseOpen", "caseReview", "caseDuplicate", "caseRemove", "caseRestore",
-    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest", "repairApply"]);
+    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest", "repairApply", "repairDraft"]);
 
 class Workbench {
     constructor(context) {
@@ -78,6 +80,31 @@ class Workbench {
         };
         this.caseLibrary = new CaseLibrary(vscode, context);
         this.caseAuthoring = new CaseAuthoring(this, vscode);
+        this.composition = new CaseCompositionEditor(this,vscode);
+        const caseFiles = vscode.workspace.createFileSystemWatcher("**/{workflow.json,*.harmony-case.json}");
+        const caseChanged = uri => {
+            if (!this.panel || !vscode.workspace.getWorkspaceFolder(uri)) return;
+            clearTimeout(this.caseRefreshTimer);
+            const renew = async () => {
+                if (!this.panel) return;
+                if (this.state.busy) { this.caseRefreshTimer=setTimeout(renew,300); return; }
+                try {
+                    await this.loadTestLibrary(this.panel);
+                    const draft = this.caseAuthoring.candidate;
+                    if (draft) {
+                        await this.composition.refreshFor(draft.plan);
+                        if (this.caseAuthoring.candidate===draft) {
+                            this.caseAuthoring.update();
+                            this.composition.refresh();
+                            this.publish();
+                        }
+                    }
+                } catch { /* The regular library refresh reports its own read error. */ }
+            };
+            this.caseRefreshTimer=setTimeout(renew,180);
+        };
+        context.subscriptions.push(caseFiles,caseFiles.onDidChange(caseChanged),caseFiles.onDidCreate(caseChanged),caseFiles.onDidDelete(caseChanged),
+            {dispose:()=>clearTimeout(this.caseRefreshTimer)});
         this.caseRepair = new CaseRepair(this, vscode);
         this.explorations = new ExplorationController(this, vscode);
         this.elements = new ElementsController(this, vscode);
@@ -220,12 +247,16 @@ class Workbench {
             } else if (message.type === "diagnoseFailure") {
                 const run = this.state.run;
                 const failure = reviewCaseFailure(run);
-                if (failure && this.state.tool === "recordings" && this.state.mode === "run" && run.entry.id === message.id)
-                    await this.runAI("diagnosis", this.text.aiFailureTask, false, undefined, failure);
+                if (failure && this.state.tool === "recordings" && this.state.mode === "run" && run.entry.id === message.id) {
+                    const useLive = message.phase==="live" && failure.kind==="locator" && this.state.devices.includes(this.state.device);
+                    await this.runAI("diagnosis", this.text.aiFailureTask, false, undefined, failure, useLive);
+                }
             } else if (message.type === "explainStep" || message.type === "suggestCheck") {
                 if (message.type === "suggestCheck") await this.runAI("check");
                 else if (!message.id || (message.id === this.state.run?.entry?.id && message.index === this.state.run.selected)) {
-                    await this.runAI("diagnosis", typeof message.goal === "string" ? message.goal.trim().slice(0,1200) : undefined);
+                    const run = this.state.run, failure = reviewCaseFailure(run);
+                    const goal = typeof message.goal === "string" ? message.goal.trim().slice(0,1200) : undefined;
+                    await this.runAI("diagnosis",goal,false,undefined,failure?.index===run?.selected ? failure : undefined);
                 }
             } else if (message.type === "cancelAI") {
                 this.cancelAI();
@@ -245,6 +276,11 @@ class Workbench {
                 this.publish();
             } else if (message.type === "caseEndPick") {
                 if (this.caseAuthoring.endPick(message)) this.publish();
+            } else if (message.type === "caseComposeCancel") {
+                this.composition.cancelJob();
+            } else if (message.type === "caseCompose") {
+                await this.perform(()=>this.composition.handle(message),{
+                    runtime:["runExplore","scanCheck","verifyCheck","verifyUpdate"].includes(message.action)});
             } else {
                 await this.perform(() => this.dispatch(message), {runtime:!localCaseActions.has(message.type) || Boolean(message.fromRun) ||
                     (message.type === "caseTargets" && message.live === true)});
@@ -264,6 +300,7 @@ class Workbench {
             this.cancelAI();
             this.caseAuthoring.stopOrganizing();
             this.caseAuthoring.endPick();
+            this.composition.cancelJob();
             this.explorations.cancel("pause");
             this.flowDebugger.stop();
             this.nativeReplay?.abort();
@@ -339,7 +376,29 @@ class Workbench {
         return createCopilotAsk(vscode, {signal, language:this.language});
     }
 
-    runAI(kind, goal, readOnly = false, exchangeId, failure) {
+    async readRepairObservation(device, signal) {
+        await this.closingLive;
+        await this.projectRuntime.ready(false,true);
+        const agent = this.agent, session = this.session;
+        const read = async () => {
+            signal.throwIfAborted();
+            try { return await agent.call("observe",{session,...controlTreeOptions}); }
+            catch (error) { if (error.code!=="NO_SESSION") throw error; }
+            const probe = "workbench-repair-"+randomUUID();
+            try {
+                signal.throwIfAborted();
+                const result = await agent.call("start",{device,session:probe,...controlTreeOptions});
+                return result.observation;
+            } finally {
+                await agent.call("detach",{session:probe}).catch(error=>{
+                    if (error.code!=="NO_SESSION") this.state.error = this.errorMessage(error);
+                });
+            }
+        };
+        return this.livePanel ? this.livePanel.withDeviceOperation(read) : read();
+    }
+
+    runAI(kind, goal, readOnly = false, exchangeId, failure, useLive = false) {
         if (this.aiJob || this.state.busy) return;
         const { device, draft, recording, run } = this.state;
         if (kind === "phone" && (!device || draft || !goal?.trim())) return;
@@ -390,6 +449,7 @@ class Workbench {
                     if (failure) {
                         const diagnosis = await diagnoseCase({...options,run,failure,agent:entry=>this.reportAgent(entry),
                             baseline:baseline && (()=>this.readRunView(baseline)),
+                            readLive:useLive ? ()=>this.readRepairObservation(device,signal) : undefined,
                             prepare:input=>this.caseRepair.prepare(input)});
                         const {summary,proposed,...details} = diagnosis;
                         Object.assign(result,{answer:summary,...details});
@@ -535,6 +595,7 @@ class Workbench {
             case "caseRun": await this.runCase(message); break;
             case "repairVerify": await this.caseRepair.verify(message); break;
             case "repairApply": await this.caseRepair.apply(message); break;
+            case "repairDraft": await this.caseRepair.stage(message); break;
             case "device": await this.selectDevice(message.device); break;
             case "observe": await this.observe(); break;
             case "detach":
@@ -948,8 +1009,11 @@ class Workbench {
 
     async refreshCases(panel = this.panel) {
         const request = this.caseListRead = Symbol();
-        const cases = await this.caseLibrary.list(this.state.runs);
-        if (this.caseListRead === request && this.panel === panel) this.state.cases = cases;
+        const cases = await this.caseLibrary.list(this.state.runs,{includeHidden:true});
+        if (this.caseListRead === request && this.panel === panel) {
+            this.knownCases = cases;
+            this.state.cases = cases.filter(item=>!item.hidden);
+        }
     }
 
     loadTestLibrary(panel) {
@@ -994,12 +1058,16 @@ class Workbench {
         const libraryOnly = zh ? "从用例库移除" : "Remove from library";
         const trash = zh ? "移入回收站" : "Move to Trash";
         const folder = item.editable && await this.caseLibrary.managedFolder(uri);
+        const uses = await this.composition.usages(item.portableId);
+        const impact = uses.length ? "\n\n"+(zh ? "以下引用可继续使用各自保存的版本。\n" :
+            "These references can continue with their saved versions.\n")+
+            uses.map(use=>use.name+(use.before?" · "+use.before:"")).join("\n") : "";
         const choice = await vscode.window.showWarningMessage(
             zh ? `如何移除「${item.name}」？` : `How should “${item.name}” be removed?`,
-            {modal:true,detail:folder ?
+            {modal:true,detail:(folder ?
                 (zh ? "可将用例目录放入回收站，或只从工作台的用例库中移除。\n"+folder.fsPath :
                     "Move the case folder to Trash, or remove the entry from this workbench’s case library.\n"+folder.fsPath) :
-                (zh ? "从当前工作区的用例库移除，项目文件保留。" : "Remove the entry from this workspace’s case library and keep its project files.")},
+                (zh ? "从当前工作区的用例库移除，项目文件保留。" : "Remove the entry from this workspace’s case library and keep its project files."))+impact},
             ...(folder ? [libraryOnly,trash] : [libraryOnly]));
         if (choice===trash && folder) {
             const current = await this.caseLibrary.managedFolder(uri);
@@ -1089,6 +1157,7 @@ class Workbench {
             "请在 workflow.json 中恢复此用例需要的规则组快照。" : "Restore this case's required rule group snapshot in workflow.json.");
         const digest = sourceDigest(document.getText());
         const metadata = await readCaseMetadata(document.uri);
+        const composedBdd = options.bdd || (!options.workflowOverride && this.composedReportBdd(file,metadata));
         let active, result;
         try {
             result = await startPytest(vscode, this, {...entry, requiresRuleGroup: entry.requiresRuleGroup || Boolean(file.scenario)}, {
@@ -1096,6 +1165,8 @@ class Workbench {
                 onRunning:(run,locate,candidate)=>{
                     active = run;
                     Object.assign(run,{sourceDigest:digest,caseId:this.state.activeCase?.id});
+                    if (composedBdd) run.composedBdd = composedBdd;
+                    if (options.compositionTrial) run.compositionTrial = true;
                     if (options.repairOf) run.repairOf = options.repairOf;
                     return this.showRunning(run,candidate || file.plan,file.scenario,locate,metadata?.presentation);
                 },
@@ -1108,9 +1179,11 @@ class Workbench {
             throw error;
         }
         if (result) {
-            if (!options.repairOf) this.state.pytestOutcome = {uri: this.state.plan.uri, code: result.code, at: new Date().toISOString()};
+            if (!options.repairOf && !options.compositionTrial) this.state.pytestOutcome = {uri: this.state.plan.uri, code: result.code, at: new Date().toISOString()};
             if (result.entry) {
                 Object.assign(result.entry, {sourceDigest: digest, caseId: this.state.activeCase?.id});
+                if (composedBdd) result.entry.composedBdd = composedBdd;
+                if (options.compositionTrial) result.entry.compositionTrial = true;
                 if (options.repairOf) result.entry.repairOf = options.repairOf;
                 this.state.runs = [result.entry, ...this.state.runs.filter(row => row.id !== result.entry.id)].slice(0,50);
                 await this.persistRuns();
@@ -1154,7 +1227,7 @@ class Workbench {
         if (!plan) return;
         const request = this.planRead = Symbol();
         const activeCase = this.state.cases.find(row => row.uri === plan.uri);
-        let summary, digest, bdd, definitions, pytestReadiness, entry = this.context.workspaceState.get("pytestCases", {})[plan.uri];
+        let summary, digest, bdd, definitions, pytestReadiness, compositionStale, entry = this.context.workspaceState.get("pytestCases", {})[plan.uri];
         try {
             const uri = vscode.Uri.parse(plan.uri);
             if (this.panel && this.watchedUri !== plan.uri) this.watchPlan(uri);
@@ -1169,9 +1242,12 @@ class Workbench {
                 if (summary) {
                     digest = sourceDigest(contents);
                     const meta = activeCase && await readCaseMetadata(uri);
-                    const presentation = restorePresentation(file.plan,meta?.presentation);
-                    bdd = createBdd(file.plan, this.language, file.scenario || this.networks.bindings[plan.uri], presentation);
-                    if (activeCase && await canEditCase(uri,activeCase)) definitions = caseDefinitions(file.plan,presentation);
+                    const authored = authoredDocument(file,meta);
+                    const sources = authored.authored ? await this.composition.refreshFor(authored.plan) : this.composition.sources;
+                    compositionStale = authored.stale;
+                    bdd = createBdd(authored.plan,this.language,file.scenario || this.networks.bindings[plan.uri],
+                        authored.presentation,{...authored,sources});
+                    if (activeCase && await canEditCase(uri,activeCase)) definitions = caseDefinitions(authored.plan,authored.presentation);
                 }
                 if(summary && file.scenario) summary.scenarioName=String(file.scenario.name || this.text.netUntitledGroup);
             } catch {
@@ -1186,6 +1262,7 @@ class Workbench {
             this.state.planDigest = digest;
             this.state.caseBdd = bdd;
             this.state.caseDefinitions = definitions;
+            this.state.compositionStale = compositionStale;
             this.state.activeCase = this.state.cases.find(row => row.uri === plan.uri);
             this.state.pytestReadiness = pytestReadiness;
             this.state.pytestCase = entry;
@@ -1240,9 +1317,30 @@ class Workbench {
         await this.context.workspaceState.update("runs", this.state.runs);
     }
 
+    composedReportBdd(file,metadata) {
+        const authored = authoredDocument(file,metadata);
+        if (!authored.authored) return;
+        return createBdd(authored.plan,this.language,file.scenario,authored.presentation,{...authored,sources:this.composition.sources});
+    }
+
+    async verifyCompositionCopy(contents,bdd,runner) {
+        if (runner!=="pytest") return this.executePlan(false,{contents,bdd,compositionTrial:true});
+        const root = path.join(this.storage.fsPath,"case-verification");
+        await fs.mkdir(root,{recursive:true});
+        const dir = await fs.mkdtemp(path.join(root,"draft-"));
+        const workflowOverride=path.join(dir,"workflow.json");
+        try {
+            await fs.writeFile(workflowOverride,contents,{flag:"wx",mode:0o600});
+            return await this.usePytest(true,{workflowOverride,bdd,compositionTrial:true});
+        } finally {
+            await fs.unlink(workflowOverride).catch(()=>{});
+            await fs.rmdir(dir).catch(()=>{});
+        }
+    }
+
     showRunning(entry, plan, group, locate, presentationData) {
         this.state.mode = "run";
-        const run = this.state.run = {entry,steps:[],selected:0,bdd:createBdd(plan,this.language,group,restorePresentation(plan,presentationData))};
+        const run = this.state.run = {entry,steps:[],selected:0,bdd:entry.composedBdd || createBdd(plan,this.language,group,restorePresentation(plan,presentationData))};
         this.publish();
         if (!locate) return;
         return watchRunJournal(locate, record=>{
@@ -1262,11 +1360,15 @@ class Workbench {
         if (!selected) throw new Error(this.text.chooseSavedPlan);
         const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(selected.uri));
         const contents = document.getText();
-        const {plan,scenario} = readWorkflow(trial?.contents || contents);
+        const file = readWorkflow(trial?.contents || contents);
+        const {plan,scenario} = file;
         const metadata = await readCaseMetadata(document.uri);
         const entry = { id: randomUUID(), plan: selected, status: "running", time: new Date().toISOString(),
             sourceDigest: sourceDigest(contents), caseId: this.state.cases.find(row => row.uri === selected.uri)?.id };
         if (trial) entry.repairOf = trial.repairOf;
+        if (trial?.compositionTrial) entry.compositionTrial = true;
+        const composedBdd = trial?.bdd || (!trial && this.composedReportBdd(file,metadata));
+        if (composedBdd) entry.composedBdd = composedBdd;
         await this.prepareFlowScenario(selected,scenario,entry.id);
         if (plan.format === deviceRecordingFormat) entry.source = "device";
         const expired = this.state.runs.slice(49);
@@ -1424,7 +1526,7 @@ class Workbench {
             const uri = this.planForEntry(entry)?.uri;
             const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
             const report = await loadPytestRun(entry,this.language,metadata?.presentation);
-            this.state.run = {...report, entry};
+            this.state.run = {...report, entry, bdd:entry.composedBdd || report.bdd};
             if (report.steps?.length) await this.inspectStep(report.selected ?? 0);
             return;
         }
@@ -1457,7 +1559,7 @@ class Workbench {
         const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
         const presentation = restorePresentation(plan,metadata?.presentation);
         entry.status = view.status;
-        this.state.run = { entry, ...view, bdd:createBdd(plan,this.language,group,presentation), cleanup: entry.cleanup || view.cleanup };
+        this.state.run = { entry, ...view, bdd:entry.composedBdd || createBdd(plan,this.language,group,presentation), cleanup: entry.cleanup || view.cleanup };
         await this.persistRuns();
         await this.inspectStep(view.selected);
     }
@@ -1492,7 +1594,8 @@ class Workbench {
     baseline() {
         const current = this.state.run?.entry;
         return current && current.source !== "device" && this.state.runs.find(entry =>
-            entry.status === "passed" && (!entry.repairOf || entry.repairApplied) && this.planForEntry(entry)?.uri === this.planForEntry(current)?.uri && entry.time < current.time);
+            entry.status === "passed" && !entry.compositionTrial && (!entry.repairOf || entry.repairApplied) &&
+            this.planForEntry(entry)?.uri === this.planForEntry(current)?.uri && entry.time < current.time);
     }
 
     async readRunView(entry) {

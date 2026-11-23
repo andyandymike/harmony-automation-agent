@@ -1,5 +1,17 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.25
+
+- Insert a saved case or a reusable section at a step boundary, including inside a branch or loop. A reference uses the version saved in the calling case.
+- Find references and affected cases, review source updates, and keep, replace, or copy the saved steps when a source is unavailable.
+- Explore from a case position or the current phone screen, verify selected controls, and add reviewed steps or checks to the case draft.
+
+## 0.20.24
+
+- Generate executable step repairs from recorded controls, including an extra tap when a new screen interrupts the flow.
+- Open a proposed change as an editable draft, including for cases awaiting starting conditions or final assertions.
+- Supplement a locator diagnosis with the current phone screen and preserve the original final checks during verification.
+
 ## 0.20.23
 
 - Save same-name cases in separate directories, including when an earlier case has been removed from the library.

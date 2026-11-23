@@ -90,6 +90,7 @@ module.exports = {
     xSave: ["Save regression workflow…", "保存为回归流程…"],
     xSaveWithGroup: ["Save workflow and rule group…", "保存回归流程和规则组…"],
     xSaveCase: ["Save finding as test case…", "将此发现保存为测试用例…"],
+    xInsertCase: ["Add to existing case…", "加入现有用例…"],
     xSaveMainCase: ["Save original flow as case…", "将主路保存为用例…"],
     xSavePathCase: ["Save observed path as case…", "将已执行路径保存为用例…"],
     xSaveBranchCase: ["Save branch as case…", "将此分支保存为用例…"],

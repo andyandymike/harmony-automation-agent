@@ -29,6 +29,16 @@ test("the first observed blocker separates locator, page, assertion, device and 
     assert.equal(reviewCaseFailure({entry:{...entry,status:"cancelled"},steps:[{status:"cancelled"}]}),undefined);
 });
 
+test("a terminal locator error uses the page inspected before it refused to dispatch", () => {
+    const failed = {path,kind:"command",command:"press",status:"failed",basisFrameId:"prior",
+        error:{code:"TARGET_NOT_FOUND",details:{dispatched:"no",selector:{id:"checkout"}}}};
+    const run = runView({receipts:[failed],result:{status:"failed",observation:{frameId:"lookup"}}});
+    assert.equal(run.steps[0].dispatched,"no");
+    assert.equal(run.steps[0].before,"lookup");
+    failed.error.details.dispatched = "unknown";
+    assert.equal(runView({receipts:[failed],result:{observation:{frameId:"lookup"}}}).steps[0].before,"prior");
+});
+
 test("failure diagnosis reads the failing and preceding steps, passing page and HTTP window before its one model call", async () => {
     const start = "2026-01-01T01:02:00.000Z", middle = "2026-01-01T01:02:02.000Z", end = "2026-01-01T01:02:03.000Z";
     const entryWithDigest = {...entry,sourceDigest:"current-source"};
@@ -101,8 +111,15 @@ test("the failure section states the next check with its own evidence action and
         {stepTitle:"点按提交"});
     assert.match(locator,/失败排查/);
     assert.match(locator,/到达预期页面/);
-    assert.match(locator,/data-type="diagnoseFailure"[^>]*>用 AI 诊断失败/);
+    assert.match(locator,/data-type="diagnoseFailure"[^>]*>用 AI 生成修复方案/);
     assert.match(locator,/data-type="showFailureStep"[^>]*data-index="1"/);
+    const missing=failureView({kind:"locator",index:1},entry.id,"zh-CN",{canReadLive:true,
+        ai:{recommendation:"insufficientEvidence",reason:"missingPage",answer:"无法读取失败页面。",next:"打开付款页。"}});
+    assert.match(missing,/data-phase="live"[^>]*>用手机当前画面补充分析/);
+    const patch=failureView({kind:"locator",index:1},entry.id,"zh-CN",{
+        ai:{recommendation:"verifyNavigation",answer:"订单前需要经过确认页。",next:"选择选项 2。"},repair:"<p>点按继续</p>"});
+    assert.match(patch,/点按继续/);
+    assert.doesNotMatch(patch,/选择选项/);
     const runner=failureView({kind:"runner",phase:"setup"},entry.id,"zh-CN",{runner:"pytest",
         ai:{recommendation:"keepCase",answer:"缺少 session_data fixture。",next:"检查 conftest.py。"}});
     assert.match(runner,/测试准备/);

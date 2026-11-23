@@ -38,10 +38,11 @@ async function readCaseMetadata(uri) {
     if (uri?.scheme === "file") return readMetadata(uri.fsPath + suffix);
 }
 
-async function writeCaseMetadata(uri, {name, source, origin, presentation}) {
+async function writeCaseMetadata(uri, {name, source, origin, presentation, composition, section}) {
     if (uri.scheme !== "file" || !sources.has(source) || !name?.trim()) throw new Error("Invalid case metadata");
     const marker = uri.fsPath + suffix;
-    const data = {format, version: 1, ...description(name.trim(), source, origin), ...(presentation && {presentation})};
+    const data = {format, version: 1, ...description(name.trim(), source, origin), ...(presentation && {presentation}),
+        ...(composition && {composition}),...(section && {section:true})};
     // Publish the complete marker in one operation, without replacing another case's identity.
     const staging = marker + "." + data.id + ".tmp";
     await fs.writeFile(staging, JSON.stringify(data, null, 2) + "\n", {flag: "wx", mode: 0o600});
@@ -74,16 +75,17 @@ class CaseLibrary {
         this.pending = Promise.resolve();
     }
 
-    async add(uri, {name = defaultName(uri), source = "imported", origin, presentation} = {}) {
+    async add(uri, {name = defaultName(uri), source = "imported", origin, presentation, composition, section} = {}) {
         if (!sources.has(source)) throw new Error("Unknown case source");
         const address = uri.toString();
         const folder = this.vscode.workspace.getWorkspaceFolder?.(uri);
         const relative = folder && path.relative(folder.uri.fsPath, uri.fsPath);
         const portable = source !== "imported" && uri.scheme === "file";
-        const meta = portable ? await writeCaseMetadata(uri, {name, source, origin, presentation}) : undefined;
+        const meta = portable ? await writeCaseMetadata(uri, {name, source, origin, presentation, composition, section}) : undefined;
         const update = async () => {
             const saved = this.state.get("caseLibrary", {});
-            const record = {...(meta || saved[address] || description(name, source, origin)), uri: address};
+            const {composition:_layout, ...index} = meta || saved[address] || description(name,source,origin);
+            const record = {...index,uri:address};
             if (relative) Object.assign(record, {folderName: folder.name, relative});
             await this.state.update("caseLibrary", {...saved, [address]: record});
             const hidden = this.state.get("hiddenCases", []);
@@ -134,13 +136,14 @@ class CaseLibrary {
         return Uri.file(resolved);
     }
 
-    async updateMetadata(uri, changes, originalPresentation) {
+    async updateMetadata(uri, changes, originalPresentation, originalComposition) {
         const marker = uri.fsPath + suffix;
         const previous = await readMetadata(marker);
         if (!previous) throw new Error("The case metadata is unavailable.");
         const conflict = () => new Error("The case metadata changed. Reopen the case before editing it.");
         const revised = {...previous,...changes};
         if (Object.hasOwn(changes,"presentation") && !isDeepStrictEqual(previous.presentation,originalPresentation)) throw conflict();
+        if (Object.hasOwn(changes,"composition") && !isDeepStrictEqual(previous.composition,originalComposition)) throw conflict();
         if (JSON.stringify(revised) === JSON.stringify(previous)) return;
         const stage = marker + "." + randomUUID() + ".tmp";
         try {
@@ -152,7 +155,7 @@ class CaseLibrary {
         }
     }
 
-    async list(runs = []) {
+    async list(runs = [], {includeHidden=false} = {}) {
         await this.pending;
         const {workspace, Uri} = this.vscode;
         const hidden = new Set(this.state.get("hiddenCases", []));
@@ -179,7 +182,8 @@ class CaseLibrary {
         const items = [];
         for (const candidate of candidates.values()) {
             const {uri, registered, pytest, marker} = candidate;
-            if (hidden.has(uri.toString())) continue;
+            const isHidden = hidden.has(uri.toString());
+            if (isHidden && !includeHidden) continue;
             if (uri.scheme === "file") {
                 try { if (!(await fs.stat(uri.fsPath)).isFile()) continue; }
                 catch (error) {
@@ -195,6 +199,8 @@ class CaseLibrary {
             const address = uri.toString();
             items.push({id: record?.id || address, uri: address, previousUri: registered?.uri, name: record?.name || defaultName(uri),
                 source: record?.source || "workflow", origin: record?.origin, runner: test ? "pytest" : "workbench",
+                ...(isHidden && {hidden:true}),...(meta?.id && {portableId:meta.id}),...(meta?.section && {section:true}),
+                ...(Array.isArray(meta?.tags) && {tags:meta.tags.filter(tag=>typeof tag==="string").slice(0,20)}),
                 editable:Boolean(meta && meta.source!=="imported" && uri.scheme==="file" && path.basename(uri.fsPath)==="workflow.json")});
         }
         const ids = new Set(), repeated = new Set(), names = new Set(), sharedNames = new Set();
@@ -206,12 +212,15 @@ class CaseLibrary {
         }
         const cases = items.map(({previousUri, ...item}) => {
             // Two copies in the same workspace can share their portable ID. Their histories belong to distinct files.
-            if (repeated.has(item.id)) item.id = item.uri;
+            if (repeated.has(item.id)) {
+                item.id = item.uri;
+                delete item.portableId;
+            }
             if (sharedNames.has(item.name)) {
                 const uri = Uri.parse(item.uri);
                 item.location = workspace.asRelativePath?.(uri, true) || uri.fsPath || uri.path;
             }
-            const last = runs.find(r => (!r.repairOf || r.repairApplied) &&
+            const last = runs.find(r => !r.compositionTrial && (!r.repairOf || r.repairApplied) &&
                 (r.caseId === item.id || r.plan?.uri === item.uri || (previousUri && r.plan?.uri === previousUri)));
             if (last) item.lastRun = {id: last.id, status: last.status, source:last.source, at: last.time};
             return item;

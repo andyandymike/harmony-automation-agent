@@ -1,7 +1,8 @@
 "use strict";
 
 const {targetLabel, deviceRecordingFormat} = require("./model");
-const {stepRoles} = require("./casePresentation");
+const {stepRoles, restorePresentation} = require("./casePresentation");
+const {referenceStatus} = require("./caseComposition");
 
 const secret = /pass(?:word|code)|secret|token|密码|口令|验证码/i;
 const properties = {visible: ["visible", "可见", "不可见"], enabled: ["enabled", "可用", "不可用"],
@@ -68,7 +69,7 @@ function commandText(command, input, w) {
     }
 }
 
-function createBdd(plan, language = "en", ruleGroup, presentation) {
+function createBdd(plan, language = "en", ruleGroup, presentation, composition) {
     if (!Array.isArray(plan?.steps)) return;
     const index = /^zh/i.test(language) ? 1 : 0;
     const w = (...pair) => pair[index];
@@ -80,7 +81,21 @@ function createBdd(plan, language = "en", ruleGroup, presentation) {
             const location = path + "[" + i + "]";
             const input = step?.input || {};
             const display = presentation?.get(step);
-            const row = {area:"step", index:i, path:location, ...(display?.name && {name:display.name}), ...(display?.group && {group:display.group})};
+            const receiptPath = composition?.paths?.get(location);
+            const row = {area:"step", index:i, path:location, ...(receiptPath && receiptPath!==location && {receiptPath}),
+                ...(display?.name && {name:display.name}), ...(display?.group && {group:display.group})};
+            if (step?.useCase) {
+                const ref = referenceStatus(step.useCase,composition?.sources);
+                const preview = createBdd(ref.plan,language,undefined,restorePresentation(ref.plan,ref.presentation));
+                const layout = composition?.layouts?.get(location);
+                function linked(child) {
+                    return {...child,path:location+".linked."+child.path,receiptPath:layout?.map(child.path),
+                        ...(child.branches && {branches:child.branches.map(branch=>({...branch,steps:branch.steps.map(linked)}))})};
+                }
+                return {...row,role:w("Use case","引用"),text:ref.name,
+                    reference:{caseId:ref.caseId,status:ref.status,digest:ref.digest?.slice(0,8)},
+                    branches:[{steps:preview?.steps?.map(linked) || [],readOnly:true}]};
+            }
             if (coordinate) return {...row, text: gesture(input, w)};
             row.role = display?.role || stepRoles(step)[0];
             if (step?.if) {

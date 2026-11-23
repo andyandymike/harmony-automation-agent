@@ -181,7 +181,8 @@ function findings(model,t) {
             <div class="toolbar">
             ${step ? action("traceStep",t.xInspectTrace,{attrs:{"data-id":step.id}}) : ""}
             ${item.canRecheck ? action("recheck",t.xRecheck,{disabled:!canAct,attrs}) : ""}
-            ${model.explorationCaseRoutes?.findingIds?.includes(item.id) ? action("caseFinding",t.xSaveCase,{disabled:busy,attrs}) : ""}
+            ${model.explorationCaseRoutes?.findingIds?.includes(item.id) ? action("caseFinding",t.xSaveCase,{disabled:busy,attrs})+
+                (model.cases?.some(c=>c.editable)?action("insertFinding",t.xInsertCase,{disabled:busy,attrs}):"") : ""}
             ${(item.regression || item.plan) ? action("save",report.mockScenario ? t.xSaveWithGroup : t.xSave,{disabled:busy,attrs}) : ""}</div></div></details>`;
     }).join("");
 }
@@ -276,12 +277,14 @@ function reportView(model,t,exportClip) {
         ${r.currentPage ? `<p class="guide-copy">${h(t.xCurrentPage)} · ${h(r.currentPage)}</p>` : ""}
         ${running ? `<div class="x-activity"><small>${h(r.pending ? t.xNow : t.xLatest)}</small><strong>${h(latest?.label || t.xWatching)}</strong>
             ${latest?.reason ? `<p>${h(latest.reason)}</p>` : ""}</div>` : ""}
-        <div class="toolbar">${model.explorationCaseRoutes?.main && !running ? action("caseMain",r.mode==="flow"?t.xSaveMainCase:t.xSavePathCase,{disabled:model.busy}) : ""}${actions}${paused && !connected ? `<small>${h(t.xResumeDevice)}</small>` : ""}</div>
+        <div class="toolbar">${model.explorationCaseRoutes?.main && !running ? action("caseMain",r.mode==="flow"?t.xSaveMainCase:t.xSavePathCase,{disabled:model.busy})+
+            (model.cases?.some(c=>c.editable)?action("insertMain",t.xInsertCase,{disabled:model.busy}):"") : ""}${actions}${paused && !connected ? `<small>${h(t.xResumeDevice)}</small>` : ""}</div>
         ${!running && r.steps.length && exportClip ? exportClip(selectedStep) : ""}</header>
         ${r.branches?.length ? `<details id="x-branches"><summary>${h(t.xBranch)} · ${r.branches.length}</summary>
             <ul class="x-branch-list">${r.branches.map(b=>`<li><span>${h(b.label)}</span> <small>${h(status(b.status,t))}</small>
                 ${b.reason ? `<p>${h(b.reason)}</p>` : ""}
-                ${b.id!=="baseline" && model.explorationCaseRoutes?.branchIds?.includes(b.id) ? action("caseBranch",t.xSaveBranchCase,{disabled:model.busy,attrs:{"data-id":b.id}}) : ""}</li>`).join("")}</ul></details>` : ""}
+                ${b.id!=="baseline" && model.explorationCaseRoutes?.branchIds?.includes(b.id) ? action("caseBranch",t.xSaveBranchCase,{disabled:model.busy,attrs:{"data-id":b.id}})+
+                    (model.cases?.some(c=>c.editable)?action("insertBranch",t.xInsertCase,{disabled:model.busy,attrs:{"data-id":b.id}}):"") : ""}</li>`).join("")}</ul></details>` : ""}
         ${tabList(tabs)}${tabPanels(tabs,hint+contents)}</section>`;
 }
 
@@ -324,6 +327,8 @@ export function exploreClick(el, model, send, render) {
     if (x==="save") send({type:"explorationSave",id:model.exploration.id,findingId:id});
     if (["caseMain","caseStep","caseBranch","caseFinding"].includes(x)) send({type:"explorationCase",id:model.exploration.id,
         ...(x==="caseStep" && {stepId:id}), ...(x==="caseBranch" && {branchId:id}), ...(x==="caseFinding" && {findingId:id})});
+    if (["insertMain","insertBranch","insertFinding"].includes(x)) send({type:"caseCompose",action:"importReport",reportId:model.exploration.id,
+        ...(x==="insertBranch" && {branchId:id}),...(x==="insertFinding" && {findingId:id})});
     if (x==="recheck") send({type:"explorationRecheck",id:model.exploration.id,findingId:id});
     if (x==="note" || x==="triage") {
         const item = model.exploration.findings.find(f => f.id===id);

@@ -1,4 +1,5 @@
 import {caseBddView,caseStepLabel} from "./caseLibrary.js";
+import {compositionGap, compositionStepMenu, compositionPanel, referenceControls} from "./caseComposition.js";
 import {actionButton,escapeHtml as h} from "./ui/controls.js";
 
 const properties = {visible:["Visibility","可见性"], text:["Text","文字"], enabled:["Enabled","可用状态"],
@@ -334,6 +335,8 @@ export function stepEditArea(definition) {
 
 export function caseStepActions(step, definition, edit, w) {
     if (!definition) return "";
+    if (definition.reference) return definition.removable ? actionButton(w("Remove reference","移除引用"),{
+        attrs:{"data-type":"caseStepAction","data-step-action":"remove","data-case-path":step.path}}) : "";
     const change = (action,label)=>actionButton(label,{attrs:{"data-type":"caseStepAction","data-step-action":action,"data-case-path":step.path}});
     const main = stepEditArea(definition), context = {path:step.path,defaultName:step.text};
     return edit(w("Edit step…","编辑步骤…"),main,{...context,primaryStep:true}) +
@@ -396,10 +399,11 @@ export function caseReviewView(model,language,runSummary="") {
         ${actionButton(organization?.working ? w("Stop","停止") : w("Organize with AI","用 AI 整理步骤"),{
             quiet:true,disabled:Boolean(editor || model.busy || review.pendingSave),attrs:{id:"bdd-organize","data-area":"organize",
                 "data-bdd":organization?.working ? "stopOrganizing" : "organize"}})}
-        ${review.undoRemove ? button("caseStepAction",w("Undo step deletion","撤销删除步骤"),{"data-step-action":"undoRemove"}) : ""}</div>`;
+        ${review.undoRemove ? button("caseStepAction",w("Undo step deletion","撤销删除步骤"),{"data-step-action":"undoRemove"}) : ""}
+        ${issue!=="gestures" ? referenceControls(model,w) : ""}</div>`;
     const organizationNote = organization?.error || (organization?.ready && w("Review the suggested step details, then save the case.",
         "请核对 AI 建议的步骤名称、分组和角色，然后保存用例。"));
-    return `<section class="plan-sheet case-detail-sheet"><header class="case-detail-head">
+    return `<div class="case-composition-layout"><section class="plan-sheet case-detail-sheet"><header class="case-detail-head">
         <div class="case-heading">
             ${review.edit ? "" : `<p class="kicker">${h(w("Review test case","核对测试用例"))}</p>`}
             ${editor?.area === "name" ? form : `<h1><button type="button" class="case-value case-title"
@@ -413,8 +417,12 @@ export function caseReviewView(model,language,runSummary="") {
         ${review.timingUnknown ? `<p>${h(w("This older report retained the confirmed gestures only. Their original delays are unavailable.","旧报告仅保留了已确认的手势，无法恢复原先的操作间隔。"))}</p>` : ""}
         ${status && (!review.edit || issue!=="gestures") ? `<p class="case-review-note">${h(status)}</p>` : ""}
         ${organizationNote ? `<p class="case-review-note" role="status">${h(organizationNote)}</p>` : ""}
+        ${review.compositionStale ? `<p class="case-composition-warning">${w("Workflow JSON changed. Review the executable steps before saving.",
+            "流程 JSON 已修改。保存前请核对当前执行步骤。")}</p>` : ""}
         ${caseBddView(review.bdd,language,{renderRow,boundaryEditor,tools,coordinates:issue==="gestures",
             renderAfterStep:step=>editingStep(step.path) && (step.branches || inserting) ? form : "",
-            stepActions:!editor && !editingDisabled ? step=>caseStepActions(step,review.definitions.steps[step.path],edit,w) : undefined,
-            reorder:!editor && !editingDisabled})}</section>`;
+            stepActions:!editor && !editingDisabled ? step=>caseStepActions(step,review.definitions.steps[step.path],edit,w)+
+                compositionStepMenu(step,model,w) : undefined,
+            renderGap:!editor && !editingDisabled ? (step,side)=>compositionGap(step,side,model,language) : undefined,
+            reorder:!editor && !editingDisabled})}</section>${compositionPanel(model,language)}</div>`;
 }

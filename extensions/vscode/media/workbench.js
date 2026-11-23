@@ -6,6 +6,8 @@ import { caseReviewView, caseStepActions, stepEditArea, caseEditorClick, caseEdi
     endCasePicture, selectCasePictureTarget } from "./caseAuthoring.js";
 import { pytestPhases } from "./pytestReport.js";
 import { repairView } from "./caseRepair.js";
+import {compositionGap, compositionStepMenu, compositionPanel, referenceControls,
+    compositionClick, compositionInput, compositionPickControl, compositionKeydown} from "./caseComposition.js";
 import { failureView } from "./caseFailure.js";
 import { networkView, networkClick, networkInput, networkOrder, requestMenuItems, requestFieldMenuItems, ruleGroupMenuItems } from "./networkView.js";
 import { trafficKeydown } from "./networkTraffic.js";
@@ -425,13 +427,14 @@ function selectedCaseRun() {
 
 function caseRunSummary(run, locked = false) {
     const runs = model.runs.filter(entry=>isCaseRun(entry,model.plan,model.activeCase?.id));
-    const latest = runs.find(entry=>!entry.repairOf || entry.repairApplied) || runs[0];
+    const latest = runs.find(entry=>!entry.compositionTrial && (!entry.repairOf || entry.repairApplied)) || runs[0];
     const shown = run?.entry || latest;
     const replay = shown?.source==="device" || (!shown && model.planSummary?.source==="coordinates");
     const label = run && shown.id!==latest?.id ? word("Selected run","所选运行") :
         replay ? word("Latest replay","最近回放") : word("Latest run","最近运行");
     const result = !shown && replay ? word("Not replayed","尚未回放") : caseRunStatus(shown,language);
-    const meta = shown ? [shown.source==="pytest" ? "pytest" : word("Workbench","工作台"),caseRunTime(shown,language),
+    const meta = shown ? [shown.compositionTrial && word("Copy verification","副本验证"),
+        shown.source==="pytest" ? "pytest" : word("Workbench","工作台"),caseRunTime(shown,language),
         run?.runtimeMs === undefined ? "" : (run.runtimeMs/1000).toFixed(2)+" s"].filter(Boolean).join(" · ") : "";
     const visible = run && shown.status!=="running";
     const toggle = visible || (!run && latest) ? actionButton(visible ? word("Hide report","收起报告") : word("View report","查看报告"),
@@ -455,10 +458,12 @@ function caseEditValue(text,area,{index,path,add,defaultName,stepLabel,primarySt
 
 function definitionBdd(run, coordinates) {
     const defs = model.caseDefinitions;
-    const tools = defs && actionButton(word("Organize with AI","用 AI 整理步骤"),{quiet:true,disabled:model.busy,
-        attrs:{"data-type":"caseReview","data-case-area":"organize"}});
-    const stepActions = defs && !model.busy ? step=>caseStepActions(step,defs.steps[step.path],caseEditValue,word) : undefined;
-    return caseBddView(model.caseBdd,language,{coordinates,tools,stepActions,reorder:Boolean(defs && !model.busy),renderRow:runRows(run,(text,context)=>{
+    const tools = defs && (actionButton(word("Organize with AI","用 AI 整理步骤"),{quiet:true,disabled:model.busy,
+        attrs:{"data-type":"caseReview","data-case-area":"organize"}}) + (!coordinates?referenceControls(model,word):""));
+    const stepActions = defs && !model.busy ? step=>caseStepActions(step,defs.steps[step.path],caseEditValue,word)+
+        compositionStepMenu(step,model,word) : undefined;
+    return caseBddView(model.caseBdd,language,{coordinates,tools,stepActions,reorder:Boolean(defs && !model.busy),
+        renderGap:defs ? (step,side)=>compositionGap(step,side,model,language) : undefined,renderRow:runRows(run,(text,context)=>{
         const {area,path,index,step}=context;
         if (area==="step") return caseStepLabel(text,step,defs?.steps[path] && caseEditValue(step.name || text,stepEditArea(defs.steps[path]),
             {path,defaultName:text,stepLabel:true}));
@@ -472,7 +477,7 @@ function definitionBdd(run, coordinates) {
 
 function caseWorkspace() {
     if (model.caseReview?.edit) return caseReviewView(model,language,caseRunSummary(undefined,true));
-    if (!model.plan) return recordingWorkspace(model,t);
+    if (!model.plan) return recordingWorkspace(model,t) + compositionPanel(model,language);
     const run = selectedCaseRun();
     const ready = model.devices.includes(model.device);
     const coordinates = model.planSummary?.source==="coordinates" || (!model.caseBdd && run?.entry.source==="device");
@@ -505,8 +510,9 @@ function caseWorkspace() {
                 "caseRemove",{attrs:{"data-id":model.activeCase.uri}}) : ""}
         ${runnable && !coordinates ? button(word("Explore from these steps","沿这些步骤探索"),"explorationFromCase") : ""}
         ${prior ? button(word("Open source report","查看来源报告"),exploration?"explorationReport":"report",{attrs:{"data-id":origin.reportId}}) : ""}</div></details>`;
-    const joined = run && (!run.entry.repairOf || run.entry.repairApplied) && model.planDigest && run.entry.sourceDigest===model.planDigest &&
-        model.caseBdd && JSON.stringify(model.caseBdd)===JSON.stringify(run.bdd);
+    const joined = run && !run.entry.compositionTrial && (!run.entry.repairOf || run.entry.repairApplied) && model.planDigest &&
+        run.entry.sourceDigest===model.planDigest && model.caseBdd &&
+        (run.entry.composedBdd || JSON.stringify(model.caseBdd)===JSON.stringify(run.bdd));
     const definition = model.caseBdd ? definitionBdd(joined ? run : undefined,coordinates) : planPreview(model.planSummary);
     const headingNote = [coordinates&&word("Coordinate recording","坐标录制"),needsPhone&&(coordinates ?
         word("Connect a phone to replay","连接手机后可回放") : word("Connect a phone to run","连接手机后可运行"))].filter(Boolean).join(" · ");
@@ -521,16 +527,19 @@ function caseWorkspace() {
     const repair = run && repairView(model,run,language,button);
     const rerun = run?.entry.source!=="device" && run?.entry.sourceDigest && run.entry.sourceDigest===model.planDigest ?
         (run.entry.source==="pytest" ? model.pytestCase && "pytest" : ready && "workbench") : undefined;
-    return `<section class="plan-sheet case-detail-sheet"><header class="case-detail-head">
+    return `<div class="case-composition-layout"><section class="plan-sheet case-detail-sheet"><header class="case-detail-head">
         <div class="case-heading"><h1>${model.caseDefinitions ? caseEditValue(title,"name") : h(title)}</h1>
             ${headingNote ? `<small>${h(headingNote)}</small>` : ""}</div>
         <div class="case-header-actions">${runnerSelect}${runButton}${save}${menu}</div></header>
         ${caseRunSummary(run)}
         ${failureView(review,run?.entry.id,language,{stepTitle:failedStep && stepTitle(failedStep),ai,
-            aiOutput:aiOutput(ai?.next ? {...ai,answer:undefined} : ai,failureKey),stop:aiStop(ai),disabled:model.busy,repair,runner:rerun})}
+            aiOutput:aiOutput(ai?.next ? {...ai,answer:undefined} : ai,failureKey),stop:aiStop(ai),disabled:model.busy,repair,runner:rerun,
+            canReadLive:ready && !run?.entry.repairOf})}
         ${!review && repair ? repair : ""}
+        ${model.compositionStale ? `<p class="case-composition-warning">${word("Workflow JSON changed outside the editor. Showing executable steps.",
+            "流程 JSON 已在用例编辑器之外修改，当前显示实际执行步骤。")}</p>`:""}
         ${model.planSummary?.scenarioName?`<p class="case-review-note">${h(t.netRuleGroup)} · ${h(model.planSummary.scenarioName)}</p>`:""}
-        ${definition}${run ? caseReportBody(run,joined) : ""}${settings}</section>`;
+        ${definition}${run ? caseReportBody(run,joined) : ""}${settings}</section>${compositionPanel(model,language)}</div>`;
 }
 
 function display(value) {
@@ -619,7 +628,7 @@ function runRows(run, draw = (text,{step})=>caseStepLabel(text,step)) {
     return (text, context) => {
         const body = draw(text,context);
         if (!context.path) return body;
-        const receipt = receipts.get(context.path);
+        const receipt = receipts.get(context.step?.receiptPath || context.path);
         const pending = run.entry.status==="running" ? word("Waiting","等待中") : word("Not reached","未执行");
         const value = receipt ? caseStepAction(run,receipt.step,receipt.index,true) : `<small class="case-step-status">${pending}</small>`;
         const open = receipt && showCaseEvidence(run,receipt.index,true);
@@ -700,7 +709,8 @@ function focusKey(el) {
     if (!el || !shell.contains(el)) return "";
     if (el.id) return "#" + CSS.escape(el.id);
     if (el.matches("summary")) return el.parentElement.id ? "#" + CSS.escape(el.parentElement.id) + " > summary" : ".station-settings > summary";
-    const attrs = ["data-field", "data-type", "data-el", "data-x", "data-net", "data-bdd", "data-area", "data-path",
+    const attrs = ["data-field", "data-type", "data-el", "data-x", "data-net", "data-bdd", "data-compose","data-compose-field",
+        "data-source-id","data-side","data-area", "data-path",
         "data-row", "data-checkpoint", "data-view", "data-index", "data-command", "data-direction", "data-target", "data-id",
         "data-ref", "data-phase", "data-replacement", "data-case-area", "data-case-path", "data-case-index", "data-case-add", "data-inline"];
     return attrs.filter(name => el.hasAttribute(name)).map(name => `[${name}="${CSS.escape(el.getAttribute(name))}"]`).join("");
@@ -895,6 +905,7 @@ window.addEventListener("message", event => {
 function handleClick(event) {
     const control = event.target.closest("button");
     if (!control || control.disabled) return;
+    if (compositionClick(control,model,sendWorkbench,render)) return;
     if (event.target.closest("[data-tree-toggle]")) {toggleNode(control);return;}
     if (caseEditorClick(control,model,message=>vscode.postMessage(message),render)) return;
     if (["native","nativeChoose","nativeTimed"].includes(control.dataset.net)) {
@@ -1071,6 +1082,7 @@ const cancelOrderDrag = bindListOrder(root,change=>{
     else if (!networkOrder(change,model,sendWorkbench,render)) pendingOrderFocus=undefined;
 });
 root.addEventListener("submit", event => caseEditorSubmit(event,model,message=>vscode.postMessage(message)));
+root.addEventListener("keydown",compositionKeydown);
 root.addEventListener("keydown", event => {
     if (event.key==="Escape" && event.target.closest("#bdd-editor") && !event.isComposing) {
         event.preventDefault();
@@ -1112,6 +1124,7 @@ root.addEventListener("keydown", event => {
 });
 
 root.addEventListener("input", event => {
+    if (event.target.tagName!=="SELECT" && compositionInput(event.target,render)) return;
     if (caseEditorInput(event.target,model,sendWorkbench,render)) return;
     if (event.target.id === "ai-diagnosis-goal") {
         diagnosisGoals.set(event.target.dataset.diagnosis,event.target.value);
@@ -1139,6 +1152,7 @@ root.addEventListener("input", event => {
 });
 
 function changeField(event) {
+    if (event.target.tagName==="SELECT" && compositionInput(event.target,render)) return;
     if (caseEditorInput(event.target,model,sendWorkbench,render)) return;
     if (event.target.dataset.x === "mode" && event.target.checked) {
         exploreClick(event.target,model,sendWorkbench,render);
@@ -1208,7 +1222,10 @@ bindElements(render, ref => {
         if (itemBox.bottom > listBox.bottom) list.scrollTop += itemBox.bottom - listBox.bottom;
     }
 },{
-    selectCaseTarget:(key,picture)=>selectCasePictureTarget(key,picture,model,sendWorkbench,render),
+    selectCaseTarget:(key,picture)=>{
+        if (!compositionPickControl(key,model,render)) return selectCasePictureTarget(key,picture,model,sendWorkbench,render);
+        endCasePicture(model,sendWorkbench);
+    },
     endCasePick:()=>endCasePicture(model,sendWorkbench),
 });
 

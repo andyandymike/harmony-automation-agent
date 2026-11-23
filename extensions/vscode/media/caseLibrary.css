@@ -212,3 +212,55 @@
     .case-rename fieldset { grid-template-columns:minmax(0,1fr); }
     .case-step-line { flex-wrap:wrap; }
 }
+
+.case-composition-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; align-items:start; }
+.case-composition-layout:has(> .case-composition-panel) {
+    grid-template-columns:minmax(0,1fr) minmax(230px, min(34%, 340px));
+}
+.case-composition-panel {
+    min-width:0; padding:12px; border:1px solid var(--line); border-radius:6px;
+    background:var(--sidebar); overflow-wrap:anywhere;
+}
+.case-composition-panel > header {
+    display:flex; align-items:start; justify-content:space-between; gap:6px; margin-bottom:8px;
+}
+#workbench .case-composition-panel :is(h3,h4) { margin:0 0 6px; }
+#workbench .case-composition-panel :is(p,details,ol,ul) { margin:6px 0; }
+#workbench .case-composition-panel summary { cursor:pointer; }
+.case-composition-position { color:var(--muted); font-size:12px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+.case-composition-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(94px,1fr)); gap:6px; }
+.case-composition-field { display:grid; gap:3px; margin:7px 0; min-width:0; font-size:12px; }
+.case-composition-field > span { color:var(--muted); }
+#workbench .case-composition-field :is(input,select,textarea) { width:100%; min-width:0; }
+.case-composition-results { display:grid; gap:2px; max-height:220px; overflow:auto; margin:8px 0; }
+#workbench .case-source-choice {
+    display:grid; gap:1px; width:100%; text-align:start; padding:6px 8px; border:1px solid transparent;
+    background:transparent; color:var(--ink); border-radius:4px; font-size:13px;
+}
+#workbench .case-source-choice small { color:var(--muted); }
+#workbench .case-source-choice[aria-pressed="true"] { background:var(--selected); border-color:var(--line); }
+#workbench .case-source-choice:hover:enabled { background:var(--hover); }
+.case-composition-review { padding-top:8px; margin-top:10px; border-top:1px solid var(--line); }
+.case-composition-preview, .case-composition-progress { list-style:none; padding:0; display:grid; gap:3px; font-size:12px; }
+.case-composition-preview { max-height:240px; overflow:auto; }
+.case-composition-preview li { padding:4px 6px; border-inline-start:2px solid var(--line); }
+.case-composition-preview li > span { color:var(--accent); font-weight:600; margin-inline-end:8px; }
+.case-composition-preview li > small { display:block; color:var(--muted); }
+.case-diff-added li { border-color:var(--good); background:var(--selected); }
+.case-diff-removed li { border-color:var(--bad); }
+.case-composition-warning { color:var(--ink); border-inline-start:2px solid var(--warning,var(--accent)); padding-inline-start:8px; }
+.case-reference-state { color:var(--muted); margin-inline-start:6px; }
+.case-composition-gap {
+    list-style:none; min-height:20px; display:flex; align-items:center; justify-content:flex-end;
+    position:relative; margin:-4px 0; width:100%;
+}
+.case-composition-gap::before { content:""; position:absolute; inset-inline:0; border-top:1px dashed var(--line); pointer-events:none; }
+#workbench .case-composition-gap button {
+    position:relative; min-width:24px; min-height:20px; padding:0 5px; font-weight:600; color:var(--muted); background:var(--paper);
+}
+#workbench .case-composition-gap button:is(:hover,[aria-expanded="true"],:focus-visible) { color:var(--accent); background:var(--selected); }
+#workbench .case-composition-layout > .case-detail-sheet { min-width:0; }
+@media(max-width:1200px) {
+    .case-composition-layout:has(> .case-composition-panel) { grid-template-columns:minmax(0,1fr); }
+    .case-composition-layout > .case-composition-panel { grid-row:1; }
+}

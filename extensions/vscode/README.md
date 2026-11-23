@@ -6,7 +6,7 @@ Operate a connected HarmonyOS phone, inspect the controls on its current screen,
 
 ## Install
 
-Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.23` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
+Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.25` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
 
 To build from source, clone the [project repository](https://github.com/andyandymike/harmony-automation-agent), install Node.js 22+, and run the following from its root on Windows.
 
@@ -15,7 +15,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.23.vsix
+code --install-extension ./harmony-agent-workbench-0.20.25.vsix
 ```
 
 On macOS and Linux, use `.venv/bin/python` and `cd extensions/vscode`. If you already have the wheel and VSIX, use `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl` in your chosen environment and install the VSIX with **Extensions → Install from VSIX…**. Node.js is only needed to develop or build the extension.
@@ -100,7 +100,17 @@ Double-click a step to edit its action and parameters. Right-click to insert, du
 
 When a new case has the same name as an existing folder, it is saved in a separate folder with a numeric suffix. Removing a case from the library keeps its files on disk.
 
-Choose **Workbench** or **pytest** in the runner selector, then select **Run**. The report shows recorded step status, expected and actual values, and saved frames. **Diagnose failure with AI** reads the first failure, the preceding step, and any available passing run and local HTTP errors. The failure card shows the finding, next action, and any proposed edit. It can replace a locator grounded in the recorded controls, or wait for a target when the evidence shows a loading page. Choose **Run a copy with this change** to use the original runner. **Apply to case** becomes available after the copy executes the changed step and passes the original final assertions. Both runs remain in the history.
+Choose **Workbench** or **pytest** in the runner selector, then select **Run**. The report shows step status, expected and actual values, and saved frames. **Generate repair with AI** reads the failure, the preceding step, any available passing run, and local HTTP errors. It can propose a replacement locator, a wait condition, or a tap that advances past an intervening screen. For a locator failure with insufficient evidence, bring the phone to the relevant screen and choose **Use current phone screen**. Select **Open edit draft** to review the changes in the case editor and save them yourself. Cases with a starting condition and a final assertion can also use **Run a copy with this change**. **Apply to case** becomes available after the original runner exercises the changed steps and passes the original final assertions. Both runs remain in the history.
+
+### Reuse a case or extend it with exploration
+
+Select **+** between steps, or choose **Insert before** or **Insert after** in a step’s context menu. Search case names, step titles and tags, and preview each source’s entry and result checks. **Insert reference** keeps a versioned link. **Copy steps** adds editable steps to this case. To reuse a smaller sequence, choose **Save a reusable section** on its first step and select its last step.
+
+A reference runs its saved steps at the insertion point. **References** can filter updates and missing sources, and **Where used** lists saved callers. Case identity follows the source metadata when a case is renamed or moved. Use **Review update** to inspect differences, verify a copy, and adopt a new version. If a source is unavailable, its saved steps can still run. You can locate the same case, replace the reference, or convert it to local steps.
+
+Choose **Explore here** at an insertion point. Replay can reach a top-level position, or you can start from the current phone screen, including inside a branch or loop. Select a control in the preview and use **Verify now** to compare the expected and actual results. Choose **Add to this case** to put the reviewed route or verification in the draft. From a saved exploration report, choose **Add to existing case** to select its destination.
+
+Save both `workflow.json` and its `.harmony-case.json` metadata with the project. Workbench and standalone pytest run the expanded `workflow.json`. Edit composed cases in the workbench when you want to preserve their reference layout.
 
 ## Add a recording to pytest
 

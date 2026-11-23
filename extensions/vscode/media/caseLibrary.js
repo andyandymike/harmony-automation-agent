@@ -55,13 +55,14 @@ export function caseLibraryView(model, language) {
     const rows = cases.map(entry => {
         const source = Object.hasOwn(sourceLabels, entry.source) ? w(...sourceLabels[entry.source]) : "";
         const live = model.run?.entry;
-        const latest = live?.status === "running" && isCaseRun(live,entry,entry.id) ? live :
-            model.runs?.find(run=>(!run.repairOf || run.repairApplied) && isCaseRun(run,entry,entry.id)) || entry.lastRun;
+        const latest = live?.status === "running" && !live.compositionTrial && isCaseRun(live,entry,entry.id) ? live :
+            model.runs?.find(run=>!run.compositionTrial && (!run.repairOf || run.repairApplied) && isCaseRun(run,entry,entry.id)) || entry.lastRun;
         const options = (label,type,id,attrs={})=>actionButton(label,{attrs:{"data-type":type,"data-id":id,...attrs}});
         const menu = itemMenu(w("Case actions","用例操作"),
             options(w("View workflow JSON","查看流程 JSON"),"editPlan",entry.uri) +
             (entry.editable ? options(w("Rename case","重命名用例"),"caseReview",entry.uri,{"data-case-area":"name"}) : "") +
             options(w("Duplicate case…","复制用例…"),"caseDuplicate",entry.uri) +
+            (entry.portableId ? actionButton(w("Where used…","查看引用位置…"),{attrs:{"data-compose":"sourceUsages","data-uri":entry.uri}}) : "") +
             (latest?.id && latest.status!=="running" ? options(w("View latest report","查看最近报告"),"report",latest.id) : "") +
             options(entry.editable?w("Delete case…","删除用例…"):w("Remove from library…","从用例库移除…"),"caseRemove",entry.uri),locked);
         return `<li class="case-library-row" data-item-actions><button type="button" class="case-file" data-type="caseOpen" data-id="${html(entry.uri)}"
@@ -92,7 +93,7 @@ export function caseStepLabel(text, step, title) {
         ${step.name === text ? "" : `<small>${html(text)}</small>`}</span>`;
 }
 
-export function caseBddView(bdd, language, {renderRow, renderAfterStep, stepActions, tools, boundaryEditor, coordinates=false,
+export function caseBddView(bdd, language, {renderRow, renderAfterStep, stepActions, tools, boundaryEditor, renderGap, coordinates=false,
     branchId="case-branch", showHeading=true, reorder=false} = {}) {
     if (!bdd) return "";
     const w = words(language);
@@ -100,25 +101,31 @@ export function caseBddView(bdd, language, {renderRow, renderAfterStep, stepActi
     const row = step => renderRow?.(step.text,{area:step.area || "step",index:step.index,path:step.path,step}) || caseStepLabel(step.text,step);
     const line = (role, content, attached = false) => `<div class="case-bdd-line${attached ? " case-attached-check" : ""}"
         ${role ? `data-bdd-role="${html(role)}"><span class="case-bdd-role">${html(role)}</span>` : ">"}<div class="case-bdd-text">${content}</div></div>`;
-    function steps(values, root = false) {
+    function steps(values, root = false, readOnly = false) {
         const executable = values.filter(authored);
-        const sortable = reorder && executable.length>1;
+        const sortable = reorder && !readOnly && executable.length>1;
         const orderKey = sortable ? executable[0].path.replace(/\[\d+\]$/,"") : "";
         const items = values.map((step,index) => {
-            if (!authored(step)) return `<li class="case-step-entry"><div class="case-sort-content">${line(step.role,row(step))}</div></li>`;
-            const title = step.branches ? `<details id="${branchId}-${html(step.path)}"><summary${sortable?" data-order-hit":""}>${caseStepLabel(step.text,step)}</summary>
-                ${step.branches.map(branch=>`<div class="case-branch"><strong>${html(branch.label)}</strong>${steps(branch.steps)}</div>`).join("")}</details>` : row(step);
+            const gap = !readOnly && renderGap ? renderGap(step,"before") : "";
+            if (!authored(step)) return gap+`<li class="case-step-entry"><div class="case-sort-content">${line(step.role,row(step))}</div></li>`;
+            const referenceState = step.reference?.status==="update" ? w("Update available","有新版本") :
+                step.reference?.status==="missing" ? w("Source unavailable · saved version","来源不可用 · 已保存版本") : "";
+            const title = step.branches ? `<details id="${branchId}-${html(step.path)}"><summary${sortable?" data-order-hit":""}>${caseStepLabel(step.text,step)}${referenceState ?
+                `<small class="case-reference-state">${html(referenceState)}</small>`:""}</summary>
+                ${step.branches.map(branch=>`<div class="case-branch">${branch.label ? `<strong>${html(branch.label)}</strong>`:""}
+                    ${steps(branch.steps,false,readOnly||branch.readOnly)}</div>`).join("")}</details>` : row(step);
             const body = (step.before || []).map(text=>line("Given",html(text),true)).join("") +
                 line(coordinates ? undefined : step.role,title) +
                 (step.after ? line("Then",html(step.after),true) : "") + (renderAfterStep?.(step) || "");
             const position = step.index ?? index;
-            const menu = (stepActions?.(step) || "") + (sortable ? orderActions(w,position,executable.length) : "");
+            const menu = (!readOnly && stepActions?.(step) || "") + (sortable ? orderActions(w,position,executable.length) : "");
             const group = step.group && step.group !== values[index-1]?.group ? `<h3 class="case-step-group">${html(step.group)}</h3>` : "";
             const order = sortable ? ` data-order-index="${position}" data-step-path="${html(step.path)}" data-order-label="${html(step.name || step.text)}"` : "";
-            return `<li class="case-step-entry" data-case-step="${html(step.path)}"${menu ? " data-item-actions" : ""}${order}>
+            return gap+`<li class="case-step-entry" data-case-step="${html(step.path)}"${menu ? " data-item-actions" : ""}${order}>
                 ${group}${sortable ? orderGrip(w) : ""}<div class="case-sort-content">${body}</div>
                 ${itemMenu(w("Step actions","步骤操作"),menu)}</li>`;
         });
+        if (values.length && !readOnly && renderGap) items.push(renderGap(values.at(-1),"after"));
         if (root && !coordinates && boundaryEditor) {
             const start = boundaryEditor("start"), end = boundaryEditor("goal");
             if (start) items.splice(values.findLastIndex(step=>step.area==="start" || step.area==="setup")+1,0,
