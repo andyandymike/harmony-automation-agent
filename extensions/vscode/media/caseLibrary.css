@@ -8,6 +8,7 @@
 .case-library-head { display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap; }
 #workbench .case-library h2 { margin:0; font-size:14px; }
 #workbench .case-library-empty { margin-top:8px; color:var(--muted); }
+#workbench .case-removal { margin-top:9px; color:var(--muted); overflow-wrap:anywhere; }
 #workbench .case-library .case-open-file { padding:4px 6px; min-height:26px; color:var(--accent); }
 .case-files { display:grid; gap:3px; margin:8px 0 0; padding:0; list-style:none; max-height:60vh; overflow:auto; }
 .case-library-row { position:relative; min-width:0; }

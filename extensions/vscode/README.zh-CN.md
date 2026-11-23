@@ -6,7 +6,7 @@
 
 ## 安装
 
-使用桌面版 VS Code 1.101 或更新版本，并打开受信任的工作区。连接手机时，在同一台电脑上运行 VS Code、Python 3.10+ 和官方 HDC。扩展版本为 `0.20.11`，使用同一仓库的 Python 运行时。交互式流程调试需要运行时 `0.1.0a10` 或更新版本。
+使用桌面版 VS Code 1.101 或更新版本，并打开受信任的工作区。连接手机时，在同一台电脑上运行 VS Code、Python 3.10+ 和官方 HDC。扩展版本为 `0.20.12`，使用同一仓库的 Python 运行时。交互式流程调试需要运行时 `0.1.0a10` 或更新版本。
 
 从源码安装时，克隆[项目仓库](https://github.com/andyandymike/harmony-automation-agent)，安装 Node.js 22+，在 Windows 上从仓库根目录运行以下命令。
 
@@ -15,7 +15,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.11.vsix
+code --install-extension ./harmony-agent-workbench-0.20.12.vsix
 ```
 
 macOS 和 Linux 上使用 `.venv/bin/python`，并用 `cd extensions/vscode` 进入扩展目录。已有 wheel 和 VSIX 时，在选定的 Python 环境运行 `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl`，再通过 **扩展 → 从 VSIX 安装…** 装入 VSIX。开发或打包扩展时才需要 Node.js。

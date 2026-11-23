@@ -62,6 +62,12 @@ export function returnToExchange(network,id) {
     reading = true;
     return true;
 }
+export function showExchangeTab(tab) { detail.tab=tab; }
+export function filterByExchangePath(record) {
+    filters={...freshFilters(),query:"path:"+record.path};
+    failuresOnly=false;
+    reading=false;
+}
 function inStep(record,network) {
     if (!network.stepLabel) return true;
     const start = Date.parse(record.startedAt);
@@ -221,7 +227,7 @@ export function trafficView(model,n,w,lang,renderEditor) {
         ${filtersBar(scope,failures.length,w)}${findBar(currentResults,w)}
         ${record ? `<div class="net-grid" data-reading="${reading}">${recordList(rows,record,currentResults,favorites,w,model.busy)}${detailView(record,retained,detail,hit?.id===record.id ? hit : undefined,w,lang,
             record.ruleId && record.ruleScenarioId===n.activeScenarioId && n.scenario.rules.some(rule=>rule.id===record.ruleId),
-            {favorite:favorites.get(record.id),inHistory:n.records.some(r=>r.id===record.id),ai:model.aiResults?.exchange,busy:model.busy,
+            {favorite:favorites.get(record.id),ai:model.aiResults?.exchange,busy:model.busy,
                 editor:renderEditor?.(record)})}</div>` :
         `<div class="net-empty"><h3>${w("No requests match these filters","没有符合筛选条件的请求")}</h3></div>`}
         ${n.omittedRecords && !favoritesOnly ? `<p class="net-footnote">${html(n.omittedRecords)} ${w("older records outside the retention window","条较早的请求已超出保留上限")}</p>` : ""}`;

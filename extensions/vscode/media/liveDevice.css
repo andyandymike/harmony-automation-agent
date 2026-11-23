@@ -47,10 +47,11 @@ body.vscode-light #live-device {
     background: var(--monitor-rail); border: 1px solid var(--monitor-line);
     border-bottom: 0; border-radius: 5px 5px 0 0;
 }
-#live-preview[data-connected="true"] .preview-action-bar { display: grid; }
-#live-device #live-preview[data-connected="true"] { --record-choices-space: 56px; }
+#live-preview:is([data-connected="true"],[data-recording="true"]) .preview-action-bar { display: grid; }
+#live-device #live-preview:has(.record-choices:not([hidden])) { --record-choices-space: 56px; }
 #live-device #live-preview:has(#record-format-note:not([hidden])) { --record-choices-space: 79px; }
 #live-device .record-choices { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+#live-device #record[hidden], #live-device .record-choices[hidden] { display:none; }
 #live-device .record-choices fieldset { min-width:0; margin:0; padding:0; border:0; }
 #live-device .record-choices legend { padding:0 0 3px; color:var(--monitor-muted); font-size:11px; }
 #live-device .record-segments {
@@ -69,6 +70,7 @@ body.vscode-light #live-device {
 #live-device .record-segments input:disabled + span { opacity:.53; cursor:default; }
 #live-device #record-format-note { color: var(--monitor-muted); font-size: 11px; }
 #live-device .preview-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+#live-device #toggle { margin-inline-start:auto; }
 #live-device #record, #live-device #toggle {
     display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap;
     min-height: 30px; padding: 3px 8px; font: inherit; font-size: 12px; line-height: 1.25;

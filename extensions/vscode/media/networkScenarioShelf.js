@@ -1,5 +1,6 @@
 import {html} from "./networkInspector.js";
 import {actionButton} from "./ui/controls.js";
+import {itemMenuTrigger} from "./ui/itemActions.js";
 
 const action=(id,text,disabled=false,primary=false)=>actionButton(text,{disabled,primary,attrs:{"data-net":id}});
 const titles={
@@ -46,10 +47,12 @@ export function shelfView(n,w,busy,currentDrafts) {
     return `<aside class="sc-shelf" aria-labelledby="sc-library-title">
         <header><h2 id="sc-library-title">${w("Rule groups","工作区规则组")}</h2>
         ${action("sc-create",w("New rule group","新建规则组"),busy)}</header>
-        <ul>${list.map(s=>`<li><button type="button" class="sc-library-item" data-net="sc-select" data-id="${html(s.id)}"
+        <ul>${list.map(s=>`<li class="sc-library-row" data-item-actions="rule-group" data-group-id="${html(s.id)}"
+            data-item-label="${html(s.name)}"><button type="button" class="sc-library-item" data-net="sc-select" data-id="${html(s.id)}"
             ${s.id===n.activeScenarioId?'aria-current="true"':""} ${busy?"disabled":""}>
             <strong>${html(s.name)}</strong><small>${s.id===(n.gatewayScenarioId||n.activeScenarioId)?w("Used by gateway · ","网关使用 · "):""}${s.paused?w("Disabled · ","已停用 · "):""}
-            ${html(s.ruleCount)} ${w("rules","条规则")}${currentDrafts.has(s.id)?w(" · Draft"," · 草稿"):""}</small></button></li>`).join("")}</ul>
+            ${html(s.ruleCount)} ${w("rules","条规则")}${currentDrafts.has(s.id)?w(" · Draft"," · 草稿"):""}</small></button>
+            ${itemMenuTrigger(w("Rule group actions","规则组操作"),busy)}</li>`).join("")}</ul>
         ${action("load",w("Import rule group…","导入规则组…"),busy)}
         ${management(n,w,busy)}</aside>`;
 }
@@ -78,7 +81,9 @@ export function shelfClick(el,n,w,send,request){
         form=undefined;
         if(el.dataset.id!==n.activeScenarioId) send({type:"networkScenarioBrowse",id:el.dataset.id});
     } else if(id==="activate"){
-        request("networkScenarioSelect",send,attrs);
+        const target=el.dataset.id || n.activeScenarioId;
+        if (target===n.activeScenarioId || n.scenarioLibrary.some(group=>group.id===target))
+            request("networkScenarioSelect",send,{...attrs,id:target});
     } else if(titles[id]){
         const name=id==="rename"?n.scenario.name:id==="duplicate"?
             nextName(n.scenarioLibrary,w(n.scenario.name+" copy",n.scenario.name+" 副本")):"";

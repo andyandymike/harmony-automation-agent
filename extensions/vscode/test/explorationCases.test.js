@@ -219,3 +219,27 @@ test("dragging saved BDD steps moves a whole step inside its branch and writes o
     const saved=JSON.parse(await fs.readFile(file.fsPath,"utf8"));
     assert.deepEqual(saved.steps,[{...plan.steps[0],then:[plan.steps[0].then[1],plan.steps[0].then[0]]},plan.steps[1]]);
 });
+
+test("copying a portable case saves an independent case identity and preserves the source workflow",async t=>{
+    const {directory,b,author,folders,inputs,picks}=await host(t);
+    author.begin(explorationCandidate(free(),{findingId:"review"}));
+    folders.push([uri(directory)]);inputs.push("Source");
+    await author.save({id:b.state.caseReview.id});
+    const original=b.selected;
+    const contents=await fs.readFile(original.fsPath,"utf8");
+    const marker=JSON.parse(await fs.readFile(original.fsPath+".harmony-case.json","utf8"));
+    b.state.activeCase={...marker,uri:original.toString()};
+    b.planForRun=()=>({name:"Source",uri:original.toString()});
+    author.vscode.Uri.parse=()=>original;
+    author.vscode.workspace.openTextDocument=async()=>({getText:()=>contents});
+    await author.open({copy:true});
+    assert.equal(b.state.caseReview.edit,false);
+    assert.equal(b.state.caseReview.name,"Source 副本");
+    folders.push([uri(directory)]);inputs.push("Source 副本");
+    await author.save({id:b.state.caseReview.id});
+    assert.notEqual(b.selected.fsPath,original.fsPath);
+    assert.equal(await fs.readFile(original.fsPath,"utf8"),contents);
+    const copy=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
+    assert.notEqual(copy.id,marker.id);
+    assert.deepEqual(JSON.parse(await fs.readFile(b.selected.fsPath,"utf8")),JSON.parse(contents));
+});

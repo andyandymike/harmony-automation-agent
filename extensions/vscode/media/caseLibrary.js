@@ -61,7 +61,9 @@ export function caseLibraryView(model, language) {
         const menu = itemMenu(w("Case actions","用例操作"),
             options(w("View workflow JSON","查看流程 JSON"),"editPlan",entry.uri) +
             (entry.editable ? options(w("Rename case","重命名用例"),"caseReview",entry.uri,{"data-case-area":"name"}) : "") +
-            (latest?.id && latest.status!=="running" ? options(w("View latest report","查看最近报告"),"report",latest.id) : ""),locked);
+            options(w("Duplicate case…","复制用例…"),"caseDuplicate",entry.uri) +
+            (latest?.id && latest.status!=="running" ? options(w("View latest report","查看最近报告"),"report",latest.id) : "") +
+            options(entry.editable?w("Delete case…","删除用例…"):w("Remove from library…","从用例库移除…"),"caseRemove",entry.uri),locked);
         return `<li class="case-library-row" data-item-actions><button type="button" class="case-file" data-type="caseOpen" data-id="${html(entry.uri)}"
             ${!draft && (currentUri === entry.uri || (currentCaseId && currentCaseId === entry.id)) ? 'aria-current="true"' : ""} ${locked ? "disabled" : ""}>
             <span class="case-identity"><strong>${html(entry.name)}</strong>${source || entry.location ? `<small>${html([source, entry.location].filter(Boolean).join(" · "))}</small>` : ""}</span>
@@ -78,6 +80,8 @@ export function caseLibraryView(model, language) {
             ${actionButton(w("Open file…","打开文件…"),{quiet:true,className:"case-open-file",attrs:{"data-type":"openPlan"},disabled:locked})}</header>
         ${rows || pending || temporary ? `<ul class="case-files" id="case-files">${pending}${rows}${temporary}</ul>` :
             `<p class="case-library-empty">${w("No saved cases","尚未保存用例")}</p>`}
+        ${model.removedCase ? `<p class="case-removal" role="status">${html(model.removedCase.name)} · ${w("Removed","已移除")}
+            ${actionButton(w("Undo","撤销"),{quiet:true,disabled:locked,attrs:{"data-type":"caseRestore","data-id":model.removedCase.uri}})}</p>` : ""}
         ${showAllRuns ? caseRunHistory(allRuns,language,{id:"case-all-runs",label:w("All runs","全部运行"),open:model.testView==="history",
             selected:model.testView==="run"?model.run?.entry.id:undefined,disabled:locked,showName:true}) : ""}</nav>`;
 }
@@ -93,11 +97,11 @@ export function caseBddView(bdd, language, {renderRow, groupEnd, coordinates=fal
         const sortable = reorder && values.length>1;
         const orderKey = sortable ? values[0].path.replace(/\[\d+\]$/,"") : "";
         return `<ol class="case-bdd-steps"${sortable?' data-order-kind="case" data-order-key="'+html(orderKey)+'"':""}>${values.map((step,index) => {
-            const body = step.branches ? `<details id="${branchId}-${html(step.path)}"><summary>${html(step.text)}</summary>${step.branches.map(branch =>
+            const body = step.branches ? `<details id="${branchId}-${html(step.path)}"><summary${sortable?" data-order-hit":""}>${html(step.text)}</summary>${step.branches.map(branch =>
                 `<div class="case-branch"><strong>${html(branch.label)}</strong>${steps(branch.steps)}</div>`).join("")}</details>` :
                 `${step.before ? `<small>${w("Before", "操作前检查")}</small>${list(step.before)}` : ""}
                 ${row(step.text,"step",undefined,step.path)}${step.after ? `<div class="case-step-check"><small>${w("Then verify", "操作后验证")}</small> ${html(step.after)}</div>` : ""}`;
-            return sortable ? `<li class="case-sort-step" data-item-actions data-order-index="${index}" data-step-path="${html(step.path)}">
+            return sortable ? `<li class="case-sort-step" data-item-actions data-order-index="${index}" data-step-path="${html(step.path)}" data-order-label="${html(step.text)}">
                 ${orderGrip(w)}<div class="case-sort-content">${body}</div>
                 ${itemMenu(w("Step actions","步骤操作"),orderActions(w,index,values.length))}</li>` : `<li>${body}</li>`;
         }).join("")}</ol>`;

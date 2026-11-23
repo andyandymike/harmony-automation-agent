@@ -86,3 +86,6 @@
     .net-view .sc-rule {grid-template-columns:1.25rem minmax(0,1fr);}
     .sc-rule>.sc-rule-actions {grid-column:2;}
 }
+.sc-library-row { position:relative; min-width:0; }
+#workbench .sc-library-row .sc-library-item { padding-inline-end:34px; }
+#workbench .sc-library-row > .item-menu-trigger { position:absolute; inset-block-start:4px; inset-inline-end:3px; }

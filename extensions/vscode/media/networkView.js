@@ -1,9 +1,10 @@
-import { trafficView, trafficClick, trafficInput, resetTraffic, openExchange, returnToExchange, inspectBatch } from "./networkTraffic.js";
+import { trafficView, trafficClick, trafficInput, resetTraffic, openExchange, returnToExchange, inspectBatch, showExchangeTab, filterByExchangePath } from "./networkTraffic.js";
 import { nativeCaptureStatus } from "./nativeCapture.js";
 import { studioView, studioClick, studioInput, openStudio, resumeStudioRules, resumeStudioReplay, resumeStudioComposer, closeStudioComposer, observeStudio, studioActive, editingRuleId, resendSourceId, moveStudioRule } from "./networkStudio.js";
 import { scenarioView, scenarioClick, scenarioInput, editMatchedScenario, receiveScenarioDraft, showScenarioOverview, moveScenarioResponse } from "./networkScenarios.js";
 import { tabList, tabPanels } from "./ui/tabs.js";
 import { fieldSeed } from "./networkFieldActions.js";
+import { fieldText } from "./networkInspector.js";
 
 let tab="requests", requestPage="traffic", mockPage="groups", filterVersion, pendingExchange;
 const words=lang=>(en,zh)=>/^zh/i.test(lang)?zh:en;
@@ -26,15 +27,61 @@ function exchangeFor(n,id) {
 }
 
 export function requestMenuItems(owner,model,lang,send,render) {
-    const n=model.network, id=owner.dataset.recordId, w=words(lang);
-    if (!n || model.busy || !exchangeFor(n,id)) return [];
+    const n=model.network, id=owner.dataset.recordId, w=words(lang), record=n && exchangeFor(n,id);
+    if (model.busy || !record) return [];
     const saved=n.favorites?.some(item=>item.record.id===id);
     const inHistory=n.records.some(item=>item.id===id);
+    const body=fieldText(record,"responseBody");
+    const item=(group,net,label)=>({group,label,run:()=>networkClick({dataset:{net,id}},model,send,render)});
+    const copy=(label,text)=>({group:"copy",label,run:()=>send({type:"networkCopyRetained",id,text})});
+    const canSequence=record.status>=200 && record.status<=599 && (record.method==="HEAD" || [204,205,304].includes(record.status) ||
+        (record.response?.bodyState==="json" && record.response.body!==undefined && !/\[redacted\]/i.test(body)));
+    return [
+        item("inspect","inspectRequest",w("View request","查看请求")),
+        item("inspect","inspectResponse",w("View response","查看响应")),
+        item("inspect","filterPath",w("Filter by this path","按此路径筛选")),
+        record.batch && item("inspect","captureResults",w("View this capture","查看本次采集")),
+        item("rules","createRule",w("Create rule","创建规则")),
+        canSequence && !owner.dataset.recordDetail && item("rules","from",w("Create response sequence","创建顺序响应")),
+        record.ruleId && n.activeScenarioId===record.ruleScenarioId && n.scenario.rules.some(rule=>rule.id===record.ruleId) &&
+            item("rules","matchedRule",w("Open matched rule","查看命中的规则")),
+        item("rules","resend",w("Edit & resend","编辑并重发")),
+        copy(w("Copy request URL","复制请求 URL"),record.request.url),
+        copy(w("Copy request path","复制请求路径"),record.path),
+        body && copy(w("Copy retained response body","复制保留的响应正文"),body),
+        item("library",saved?"unfavorite":"favorite",saved?w("Remove favorite","取消收藏"):w("Favorite request","收藏请求")),
+        saved && item("library","renameFavorite",w("Rename favorite","给收藏改名")),
+        inHistory && item("library","deleteCapture",w("Remove from history","从历史移除"))];
+}
+
+export function requestFieldMenuItems(owner,model,lang,send,render) {
+    const n=model.network, w=words(lang), {id,fieldLabel,target,ref}=owner.dataset;
+    const record=n && exchangeFor(n,id);
+    const seed=record && !model.busy && fieldSeed(record,owner.dataset);
+    if (!seed) return [];
+    const copy=(label,text)=>({group:"copy",label,run:()=>send({type:"networkCopyRetained",id,text})});
+    return [
+        {group:"edit",label:w("Create rule for this field","为此字段创建规则"),
+            run:()=>networkClick({dataset:{net:"fieldRule",id,target,ref}},model,send,render)},
+        copy(w("Copy field name or path","复制字段名称或路径"),fieldLabel),
+        copy(w("Copy field value","复制字段值"),typeof seed.value==="string"?seed.value:JSON.stringify(seed.value,null,2))];
+}
+
+export function ruleGroupMenuItems(owner,model,lang,send,render) {
+    const id=owner.dataset.groupId, live=model.network, w=words(lang);
+    const group=live?.scenarioLibrary?.find(item=>item.id===id);
+    if (!group || model.busy) return [];
+    const viewed=live.viewedGroup?.id || live.activeScenarioId;
     const item=(net,label)=>({label,run:()=>networkClick({dataset:{net,id}},model,send,render)});
-    return [item("createRule",w("Create rule","创建规则")),item("resend",w("Edit & resend","编辑并重发")),
-        item(saved?"unfavorite":"favorite",saved?w("Remove favorite","取消收藏"):w("Favorite request","收藏请求")),
-        saved && item("renameFavorite",w("Rename favorite","给收藏改名")),
-        inHistory && item("deleteCapture",w("Remove from history","从历史移除"))];
+    return [
+        id!==viewed && item("sc-select",w("Open rule group","查看规则组")),
+        id!==live.activeScenarioId && item("sc-activate",w("Use for gateway","设为网关使用")),
+        ...(id===viewed ? [
+            item("sc-rename",w("Rename rule group","重命名规则组")),
+            item("sc-duplicate",w("Duplicate rule group","复制规则组")),
+            item("sc-pause",group.paused?w("Enable rule group","启用规则组"):w("Disable rule group","停用规则组")),
+            item("save",w("Export rule group…","导出规则组…")),
+            item("sc-delete",w("Delete rule group…","删除规则组…"))] : [])];
 }
 
 export function networkView(model,lang) {
@@ -117,8 +164,21 @@ export function networkClick(el,model,send,render) {
         focusAfter='[data-net="resend"]';
     }
     else if(id==="captureResults"){
-        showRequests();inspectBatch(n,el.dataset.id);
+        showRequests();inspectBatch(n,lookup(el.dataset.id)?.batch?.id || el.dataset.id);
         focusAfter='[data-net="previousList"]';
+    }
+    else if(id==="inspectRequest" || id==="inspectResponse" || id==="filterPath"){
+        const record=lookup(el.dataset.id);
+        if(!record)return true;
+        showRequests();
+        if(!returnToExchange(live,record.id))openExchange(record.id,!live.records.some(row=>row.id===record.id));
+        if (id==="filterPath") {
+            filterByExchangePath(record);
+            focusAfter="#net-filter";
+        } else {
+            showExchangeTab(id==="inspectRequest"?"request":"response");
+            focusAfter=".net-detail-title h2";
+        }
     }
     else if(id==="openExchange" || id==="returnExchange" || id==="compareReplay"){
         const target=el.dataset.id;
@@ -154,7 +214,7 @@ export function networkClick(el,model,send,render) {
         }
         return true;
     }
-    else if(id==="matchedRule" || id==="sceneRule"){
+    else if(id==="matchedRule" || id==="sceneRule" || id==="ruleOpen"){
         const record=id==="matchedRule"?lookup(el.dataset.id):undefined;
         if(id==="matchedRule" && (!record || record.ruleScenarioId!==live.activeScenarioId))return true;
         const group=record ? live : rules.network;

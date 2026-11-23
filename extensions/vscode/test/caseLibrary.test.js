@@ -85,6 +85,27 @@ test("a saved case keeps one identity on repeated or concurrent registration and
     assert.deepEqual(await offline.list(), []);
 });
 
+test("removing a case from the library persists without changing files, and a shared folder is not a trash target",async t=>{
+    const project=await fs.mkdtemp(path.join(os.tmpdir(),"ha-remove-case-"));
+    t.after(()=>fs.rm(project,{recursive:true,force:true}));
+    const store=new Map();
+    const {folder}=await writeCase(project,"Checkout",plan);
+    const file=Uri.file(path.join(folder,"workflow.json"));
+    const paths=["Checkout/workflow.json","Checkout/workflow.json.harmony-case.json"];
+    const library=host(project,paths,store);
+    await library.add(file,{name:"Checkout",source:"recording"});
+    const contents=await fs.readFile(file.fsPath,"utf8");
+    assert.equal((await library.managedFolder(file)).fsPath,await fs.realpath(folder));
+    await library.setHidden(file.toString(),true);
+    const reopened=host(project,paths,store);
+    assert.deepEqual(await reopened.list(),[]);
+    assert.equal(await fs.readFile(file.fsPath,"utf8"),contents);
+    assert.equal(await reopened.registerExisting(file),true);
+    assert.equal((await reopened.list())[0].name,"Checkout");
+    await fs.writeFile(path.join(folder,"company_fixture.py"),"fixture = 1\n");
+    assert.equal(await reopened.managedFolder(file),undefined);
+});
+
 test("Given When Then follows guards, branching and bounded repetition and conceals filled values", async () => {
     const nested = {version: "2", preconditions: [check], steps: [
         {command: "fill", before: [check], input: {target: {id: "password"}, text: "secret-input",

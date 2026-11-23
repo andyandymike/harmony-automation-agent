@@ -81,6 +81,8 @@ class CaseLibrary {
             const record = {...(meta || saved[address] || description(name, source, origin)), uri: address};
             if (relative) Object.assign(record, {folderName: folder.name, relative});
             await this.state.update("caseLibrary", {...saved, [address]: record});
+            const hidden = this.state.get("hiddenCases", []);
+            if (hidden.includes(address)) await this.state.update("hiddenCases", hidden.filter(item=>item!==address));
             return record;
         };
         const current = this.pending.then(update);
@@ -89,9 +91,42 @@ class CaseLibrary {
     }
 
     async registerExisting(uri) {
-        if (uri.scheme !== "file" || !(await readMetadata(uri.fsPath + suffix) || await findCase(uri))) return false;
+        const known = this.state.get("caseLibrary", {})[uri.toString()];
+        if (!known && (uri.scheme !== "file" || !(await readMetadata(uri.fsPath + suffix) || await findCase(uri)))) return false;
         await this.add(uri);
         return true;
+    }
+
+    setHidden(address, hidden) {
+        const current = this.pending.then(async()=>{
+            const entries = new Set(this.state.get("hiddenCases", []));
+            if (hidden) entries.add(address);
+            else entries.delete(address);
+            await this.state.update("hiddenCases", [...entries]);
+        });
+        this.pending = current.catch(()=>{});
+        return current;
+    }
+
+    async managedFolder(uri) {
+        if (uri.scheme!=="file" || path.basename(uri.fsPath)!=="workflow.json") return;
+        const folder = path.dirname(uri.fsPath);
+        const {workspace, Uri} = this.vscode;
+        const meta = await readMetadata(uri.fsPath+suffix);
+        if (!meta || meta.source==="imported") return;
+        if (!(await fs.lstat(folder)).isDirectory()) return;
+        const resolved = await fs.realpath(folder);
+        for (const project of workspace.workspaceFolders || []) {
+            if (project.uri.scheme!=="file") continue;
+            const root = await fs.realpath(project.uri.fsPath).catch(()=>undefined);
+            if (root && path.relative(resolved,root)==="") return;
+        }
+        const names = new Set(["workflow.json","workflow.json"+suffix,(await findCase(uri))?.filename]);
+        const entries = await fs.readdir(folder,{withFileTypes:true});
+        if (!["workflow.json","workflow.json"+suffix].every(name=>entries.some(entry=>entry.name===name && entry.isFile()))) return;
+        if (!entries.every(entry=>entry.isFile() && names.has(entry.name) ||
+            entry.isDirectory() && [".pytest_cache","__pycache__"].includes(entry.name))) return;
+        return Uri.file(resolved);
     }
 
     async rename(uri, name) {
@@ -113,6 +148,7 @@ class CaseLibrary {
     async list(runs = []) {
         await this.pending;
         const {workspace, Uri} = this.vscode;
+        const hidden = new Set(this.state.get("hiddenCases", []));
         const candidates = new Map();
         function add(uri, fields = {}) {
             const key = uri.toString();
@@ -136,6 +172,7 @@ class CaseLibrary {
         const items = [];
         for (const candidate of candidates.values()) {
             const {uri, registered, pytest, marker} = candidate;
+            if (hidden.has(uri.toString())) continue;
             if (uri.scheme === "file") {
                 try { if (!(await fs.stat(uri.fsPath)).isFile()) continue; }
                 catch (error) {

@@ -72,7 +72,7 @@ export function drawEditor(form,w,selectedRule=0,{locked=false}={}) {
                 const edit=(key,label,kind,objectOnly=false)=>fieldView(s,key,{id:"ne-"+row+"-"+key,label,kind,objectOnly},w);
                 const controls = r.steps.length>1 ? itemMenu(w("Response actions","响应操作"),
                     orderActions(w,j,r.steps.length)+button("rmreply",w("Remove response","移除此响应"),row),locked) : "";
-                return `<div class="ne-step" data-item-actions data-order-index="${j}"><header class="ne-step-head" data-order-head>
+                return `<div class="ne-step" data-item-actions data-order-index="${j}" data-order-label="${e(w("Response","响应")+" · HTTP "+s.status)}"><header class="ne-step-head" data-order-head>
                     ${!locked && r.steps.length>1?orderGrip(w):""}<h3>${w("On hit","第")} ${j+1} ${w("","次命中")}</h3>${controls}</header>
                 <div class="ne-row">${input(row,"status",w("Response status","响应状态码"),s.status)}${input(row,"delay",w("Delay (ms)","延迟（毫秒）"),s.delay)}</div>
                 ${edit("body",w("Response body","响应正文"),"json")}

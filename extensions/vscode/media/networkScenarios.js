@@ -126,9 +126,9 @@ function sceneRule(rule,index,model,w,blocked,editorPanel) {
         !enabled?w("Enable this rule first","先启用这条规则"):!n.running?w("Start the gateway first","先启动网关"):"";
     const hintId=prerequisite?"sc-test-hint-"+index:undefined;
     const controls=studioRuleControls(n,w,{...model,busy:blocked},rule,index);
-    return `<li class="sc-rule" data-item-actions data-rule-id="${html(rule.id)}" data-order-index="${index}">
+    return `<li class="sc-rule" data-item-actions data-rule-id="${html(rule.id)}" data-order-index="${index}" data-order-label="${html(rule.id)}">
         <span class="sc-priority" data-order-head aria-hidden="true">${!blocked && n.scenario.rules.length>1?orderGrip(w):""} ${index+1}</span><div class="sc-rule-main">
-        <button type="button" class="sc-rule-select" data-net="${rule.steps?"editSequence":"sceneRule"}" data-id="${html(rule.id)}"
+        <button type="button" class="sc-rule-select" data-net="${rule.steps?"editSequence":"sceneRule"}" data-id="${html(rule.id)}" data-order-hit
             aria-expanded="${Boolean(editorPanel)}" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" ${blocked?"disabled":""}>
         <span class="sc-rule-line"><strong>${html(rule.id)}</strong><span class="sc-caption">${ruleActionLabel(rule,w)}</span></span>
         <span class="sc-match"><code>${html(rule.method)} ${html(match.value)}</code><span class="sc-caption">${pattern} · ${matchField}</span></span>
@@ -145,8 +145,8 @@ function sceneRule(rule,index,model,w,blocked,editorPanel) {
             `<strong>HTTP ${html(test.status)}</strong> · ${html(test.winner?w("Matched ","实际命中 ")+test.winner+" #"+test.hit:w("No rule matched","未命中规则"))}
             ${!test.matched?html(w(" · This sequence did not advance."," · 本序列未推进。")):""}
             ${n.records.some(r=>r.id===test.recordId)?button("openExchange",w("View test request","查看测试请求"),{id:test.recordId}):""}`}</div>`:""}
-        ${controls.edit ? `<div class="sc-inline-editor">${controls.edit}</div>` : ""}
-        ${editorPanel ? `<div class="sc-inline-editor">${editorPanel}</div>` : ""}</li>`;
+        ${controls.edit ? `<div class="sc-inline-editor" data-order-ignore>${controls.edit}</div>` : ""}
+        ${editorPanel ? `<div class="sc-inline-editor" data-order-ignore>${editorPanel}</div>` : ""}</li>`;
 }
 function workflowGroup(model,n,w,blocked) {
     const plan=model.plan,summary=model.planSummary;

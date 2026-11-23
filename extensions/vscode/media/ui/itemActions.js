@@ -37,7 +37,12 @@ export function showItemMenu(items, {anchor, trigger, point, label} = {}) {
     menu.className = "item-action-menu";
     menu.setAttribute("role","menu");
     menu.setAttribute("aria-label",label || trigger?.getAttribute("aria-label") || "");
-    const buttons = actions.map(item=>{
+    const buttons = actions.map((item,index)=>{
+        if(index && item.group!==actions[index-1].group) {
+            const separator=document.createElement("div");
+            separator.setAttribute("role","separator");
+            menu.append(separator);
+        }
         const button = document.createElement("button");
         button.type = "button";
         button.setAttribute("role","menuitem");

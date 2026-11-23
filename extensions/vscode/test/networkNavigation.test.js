@@ -253,6 +253,25 @@ test("a request context action uses the row under the pointer even when another 
     assert.deepEqual(messages,[{type:"networkSaveFavorite",id:"unrelated",remove:false}]);
 });
 
+test("right click on the request details and a retained JSON field exposes targeted actions",async()=>{
+    const {view,model,render,messages,source}=await workspace();
+    assert.match(render(),/class="net-detail" data-item-actions="request"/);
+    const send=message=>messages.push(message);
+    const items=view.requestMenuItems({dataset:{recordId:source.id,recordDetail:"true"}},model,"en",send,render);
+    items.find(item=>item?.label==="Copy request URL").run();
+    assert.deepEqual(messages,[{type:"networkCopyRetained",id:source.id,text:source.request.url}]);
+    items.find(item=>item?.label==="View request").run();
+    assert.match(render(),/id="network-detail-tab-request"[^>]*aria-selected="true"/s);
+    items.find(item=>item?.label==="Filter by this path").run();
+    assert.match(render(),/value="path:\/cart"/);
+    const field=view.requestFieldMenuItems({dataset:{id:source.id,target:"responseJson",ref:'["retryAfter"]',fieldLabel:"retryAfter"}},
+        model,"en",send,render);
+    field.find(item=>item.label==="Copy field value").run();
+    assert.deepEqual(messages[1],{type:"networkCopyRetained",id:source.id,text:"2"});
+    field.find(item=>item.label==="Create rule for this field").run();
+    assert.match(render(),/retryAfter/);
+});
+
 for (const [action, parent] of [["createRule","mock"], ["fieldRule","mock"], ["resend","requests"], ["matchedRule","mock"]]) {
     test(action+" opens from a scoped request and returns to it with the same URL filter", async () => {
         const {view, network, source, rewrite, click, render, messages} = await workspace();

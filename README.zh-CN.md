@@ -6,7 +6,7 @@
 
 项目提供 Python CLI、[VS Code 工作台](extensions/vscode/README.zh-CN.md)、可移植的 Agent Skill 和本地 stdio MCP 适配器，共用基于 Python 标准库的执行核心。工作台支持真机预览、流程录制与回放，以及逐步调试。
 
-**Python 运行时 `0.1.0a10` 和 VS Code 工作台 `0.20.11` 均为开发预览版。** [工作台指南](extensions/vscode/README.zh-CN.md)提供 VSIX 的构建和安装方式。已验证环境见[兼容性](docs/compatibility.md)，运行时版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
+**Python 运行时 `0.1.0a10` 和 VS Code 工作台 `0.20.12` 均为开发预览版。** [工作台指南](extensions/vscode/README.zh-CN.md)提供 VSIX 的构建和安装方式。已验证环境见[兼容性](docs/compatibility.md)，运行时版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
 
 ## 功能
 

@@ -5,7 +5,7 @@ import { caseBddView, caseLibraryView, caseRunHistory, caseRunStatus, caseRunTim
 import { caseReviewView, caseEditorClick, caseEditorInput, caseEditorSubmit } from "./caseAuthoring.js";
 import { pytestPhases } from "./pytestReport.js";
 import { repairView } from "./caseRepair.js";
-import { networkView, networkClick, networkInput, networkOrder, requestMenuItems } from "./networkView.js";
+import { networkView, networkClick, networkInput, networkOrder, requestMenuItems, requestFieldMenuItems, ruleGroupMenuItems } from "./networkView.js";
 import { trafficKeydown } from "./networkTraffic.js";
 import { tabKeydown, tabList } from "./ui/tabs.js";
 import { actionButton } from "./ui/controls.js";
@@ -274,7 +274,7 @@ function recordedList(draft, editable) {
         const menu = editable ? itemMenu(word("Step actions","步骤操作"),
             (reorder?orderActions(word,index,draft.steps.length):"") +
             button(t.remove,"removeStep",{attrs:{"data-index":index,"data-revision":draft.stepRevision || 0}}),model.busy) : "";
-        return `<li ${editable?`data-item-actions data-order-index="${index}"`:""}>
+        return `<li ${editable?`data-item-actions data-order-index="${index}" data-order-label="${h(info.title)}"`:""}>
             ${reorder?orderGrip(word):""}<div class="recorded-step-title"><strong>${h(info.title)}</strong>
             ${info.detail ? `<small>${h(info.detail)}</small>` : ""}</div>${menu}</li>`;
     }).join("")}</ol>`;
@@ -424,7 +424,7 @@ function caseRunSummary(run, locked = false) {
 function caseEditValue(text,area,{index,path,add}={}) {
     return actionButton(text,{quiet:true,className:area==="name"?"case-value case-title":"case-value",
         disabled:model.busy,attrs:{"data-type":"caseReview","data-case-area":area,"data-case-index":index,
-            "data-case-path":path,"data-case-add":add}});
+            "data-case-path":path,"data-case-add":add,"data-order-hit":area==="step"?"":undefined}});
 }
 
 function definitionBdd(run, coordinates) {
@@ -470,6 +470,9 @@ function caseWorkspace() {
     const menu = `<details class="case-tools" id="case-tools">
         <summary title="${word("More actions","更多操作")}" aria-label="${word("More actions","更多操作")}">⋯</summary>
         <div>${button(word("View workflow JSON","查看流程 JSON"),"editPlan")}
+        ${model.activeCase ? button(word("Duplicate case…","复制用例…"),"caseDuplicate",{attrs:{"data-id":model.activeCase.uri}})+
+            button(model.activeCase.editable?word("Delete case…","删除用例…"):word("Remove from library…","从用例库移除…"),
+                "caseRemove",{attrs:{"data-id":model.activeCase.uri}}) : ""}
         ${runnable && !coordinates ? button(word("Explore from these steps","沿这些步骤探索"),"explorationFromCase") : ""}
         ${prior ? button(word("Open source report","查看来源报告"),exploration?"explorationReport":"report",{attrs:{"data-id":origin.reportId}}) : ""}</div></details>`;
     const joined = run && !run.entry.repairOf && model.planDigest && run.entry.sourceDigest===model.planDigest &&
@@ -725,6 +728,7 @@ function render() {
         <div class="test-detail">${detail}</div></div>` : detail;
     if (html !== contentSignature) {
         closeItemMenu();
+        cancelOrderDrag();
         const scrolls = ["node-list", "record-controls", "live-step-log", "net-record-list", "net-detail-body", "case-files"]
             .map(id => document.getElementById(id)).filter(Boolean)
             .map(el => ({id: el.id, top: el.scrollTop, left: el.scrollLeft, key: el.dataset.scrollKey}));
@@ -986,12 +990,14 @@ const sendWorkbench = message=>vscode.postMessage(message);
 bindItemMenus(root,owner=>{
     if (!model || model.busy) return [];
     if (owner.dataset.itemActions==="request") return requestMenuItems(owner,model,language,sendWorkbench,render);
+    if (owner.dataset.itemActions==="request-field") return requestFieldMenuItems(owner,model,language,sendWorkbench,render);
+    if (owner.dataset.itemActions==="rule-group") return ruleGroupMenuItems(owner,model,language,sendWorkbench,render);
     if (owner.dataset.itemActions==="element") return elementMenuItems(owner.dataset.ref);
     if (owner.dataset.itemActions==="finding")
         return menuItems(owner.querySelectorAll("[data-x=traceStep], [data-x=caseFinding], [data-x=save], [data-x=triage]"));
     return [];
 });
-bindListOrder(root,change=>{
+const cancelOrderDrag = bindListOrder(root,change=>{
     if (!model || model.busy) return;
     const {row,list,from,to} = change, {orderKind:kind,orderKey:key} = list.dataset;
     if (kind!=="rules") pendingOrderFocus = {kind,key,to,tool:model.tool};

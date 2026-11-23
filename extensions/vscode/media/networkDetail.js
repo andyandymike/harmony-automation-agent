@@ -1,6 +1,7 @@
 import {html, requestHost, fieldNames, fieldText, highlight, ruleDifferences, exchangeDifferences, isTransportChange} from "./networkInspector.js";
 import {tabList, tabPanels} from "./ui/tabs.js";
 import {actionButton} from "./ui/controls.js";
+import {itemMenuTrigger} from "./ui/itemActions.js";
 import {jsonFields, headerFields, queryFields, fieldBrowser} from "./networkFieldActions.js";
 
 export function button(action, label, options = {}) {
@@ -96,7 +97,7 @@ function timing(record,w) {
         ${stages.length ? `<dl class="net-timings">${stages.map(([name,ms]) => `<dt>${html(labels[name] || name)}</dt><dd>${duration(ms)}</dd>`).join("")}</dl>` :
         `<p class="net-unavailable">${w("This source did not retain timing phases.","此来源未保留分段耗时。")}</p>`}</section>`;
 }
-export function detailView(record, records, detail, hit, w, lang, matchedRule, {favorite,inHistory=true,ai,busy,editor=""}={}) {
+export function detailView(record, records, detail, hit, w, lang, matchedRule, {favorite,ai,busy,editor=""}={}) {
     const tabs = {response:w("Response","响应"),request:w("Request","请求"),timing:w("Timing","耗时"),
         changes:w("Rule changes","改写差异"),compare:w("Compare","对比请求")};
     let contents;
@@ -111,7 +112,8 @@ export function detailView(record, records, detail, hit, w, lang, matchedRule, {
     const original = record.replayOf && records.find(row=>row.id===record.replayOf);
     const tabOptions = {id:"network-detail",className:"net-detail-tabs",label:w("Exchange details","请求详情"),active:detail.tab,
         items:Object.entries(tabs).map(([id,label])=>({id,label,data:{net:"detail",id}}))};
-    return `<article class="net-detail" aria-label="${w("Exchange details","请求详情")}">
+    return `<article class="net-detail" data-item-actions="request" data-record-detail="true" data-record-id="${html(record.id)}"
+        data-item-label="${html(record.method+" "+record.path)}" aria-label="${w("Exchange details","请求详情")}">
         ${button("backToList",w("← Back to requests","← 返回请求列表"),{className:"net-back-list",quiet:true})}
         <header class="net-detail-head"><div class="net-detail-title"><h2><span class="net-verb">${html(record.method)}</span> ${html(record.path)}</h2>
         ${button(favorite?"unfavorite":"favorite",favorite?w("★ Saved","★ 已收藏"):w("☆ Save","☆ 收藏"),
@@ -130,10 +132,9 @@ export function detailView(record, records, detail, hit, w, lang, matchedRule, {
         ${record.error ? `<p role="alert">${html(record.error)}</p>` : ""}
         <div class="net-actions">${button("createRule",w("Create rule","创建规则"),{id:record.id})}
         ${button("resend",w("Edit & resend","编辑并重发"),{id:record.id})}
-        <details class="net-record-menu" id="net-actions-${html(record.id)}"><summary>${w("More","更多")}</summary><div>
-            ${actionButton(w("Explain this request with AI","用 AI 解释这条请求"),{quiet:true,disabled:busy,attrs:{"data-type":"explainExchange","data-id":record.id}})}
-            ${button("from",w("Create response sequence","创建顺序响应"),{id:record.id,quiet:true})}
-            ${inHistory?button("deleteCapture",w("Remove from history","从历史移除"),{id:record.id,quiet:true}):""}</div></details></div></header>
+        ${itemMenuTrigger(w("Request actions","请求操作"),busy)}
+        <div data-item-menu hidden>${actionButton(w("Explain this request with AI","用 AI 解释这条请求"),{quiet:true,disabled:busy,attrs:{"data-type":"explainExchange","data-id":record.id}})}
+            ${button("from",w("Create response sequence","创建顺序响应"),{id:record.id,quiet:true,disabled:busy})}</div></div></header>
         ${ai?.key === record.id ? `<section class="inline-ai"><strong>${w("AI explanation","AI 解释")}</strong>
             ${["running","stopping"].includes(ai.status) ? `<p role="status">${w("Reviewing this request…","正在分析这条请求…")}</p>
                 ${actionButton(w("Stop","停止"),{disabled:ai.status==="stopping",attrs:{"data-type":"cancelAI"}})}` : ""}

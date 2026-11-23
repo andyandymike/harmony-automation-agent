@@ -363,6 +363,8 @@ export function studioRuleControls(n,w,model,r,index) {
         tools:`<button type="button" class="sc-rule-switch" role="switch" aria-checked="${enabled}" data-net="studio-toggle"
             data-id="${html(r.id)}" aria-label="${html(r.id)} · ${w("Enabled","启用")}" title="${html(name)}" ${disabled?"disabled":""}><span></span></button>
             ${itemMenu(r.id+" · "+w("Rule actions","规则操作"),
+                actionButton(w("Edit rule","编辑规则"),{disabled,attrs:{"data-net":"ruleOpen","data-id":r.id}})+
+                button("toggle",enabled?w("Disable rule","停用规则"):w("Enable rule","启用规则"),{id:r.id,disabled})+
                 button("copy",w("Duplicate","复制"),{id:r.id,disabled})+button("rename",w("Rename","重命名"),{id:r.id,disabled})+
                 orderActions(w,index,n.scenario.rules.length)+button("remove",w("Remove","移除"),{id:r.id,disabled}),disabled)}`,
         edit:state.rename?.id===r.id?`<div class="ns-confirm"><label>${w("Rule name","规则名称")} <input id="ns-rename-rule" class="vscode-textfield" data-ns="renameRule" value="${html(state.rename.name)}"></label>

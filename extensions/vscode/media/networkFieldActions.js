@@ -42,7 +42,8 @@ export function fieldSeed(record,{target,ref}) {
 function fieldAction(record,target,path,label,w,title,disabled=false) {
     if(disabled) return label;
     const hint=w("Create rule for ","为此字段创建规则 · ")+title;
-    return `<button type="button" class="net-field-action" data-net="fieldRule" data-id="${html(record.id)}" data-target="${target}"
+    return `<button type="button" class="net-field-action" data-item-actions="request-field" data-item-label="${html(title)}"
+        data-field-label="${html(pathLabel(path)||"$")}" data-net="fieldRule" data-id="${html(record.id)}" data-target="${target}"
         data-ref="${html(JSON.stringify(path))}" aria-label="${html(hint)}" title="${html(hint)}">${label}</button>`;
 }
 function scalar(value,root=false) {

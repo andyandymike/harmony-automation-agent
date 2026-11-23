@@ -132,7 +132,7 @@ export function caseReviewView(model,language,runSummary="") {
         const editable = area === "step" ? review.definitions?.steps[path] : review.definitions?.[area]?.[index];
         if (!editable) return;
         const opened = editor?.area === area && (area === "step" ? editor.path === path : editor.index === index);
-        return opened ? form : `<button type="button" class="case-value" data-bdd="edit" data-area="${area}"
+        return opened ? form : `<button type="button" class="case-value" data-bdd="edit" data-area="${area}" ${area==="step"?"data-order-hit":""}
             data-index="${index}" data-path="${h(path)}" ${model.busy?"disabled":""}>${h(text)}</button>`;
     };
     const groupEnd = area => {

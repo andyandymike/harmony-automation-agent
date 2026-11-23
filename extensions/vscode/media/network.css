@@ -115,9 +115,6 @@
 #workbench .net-record-item .net-row-star[aria-pressed=true], #workbench .net-save-exchange[aria-pressed=true] { color:var(--accent); }
 #workbench .net-favorites-filter[aria-pressed=true] { border-color:var(--accent); background:var(--selected); }
 .net-undo { padding:4px 8px; background:var(--net-well); }
-#workbench .net-record-menu { margin:0; }
-.net-record-menu summary { padding:4px 7px; color:var(--muted); }
-.net-record-menu > div { display:flex; gap:6px; flex-wrap:wrap; }
 #workbench .net-field-action {
     display:inline; min-height:0; padding:0; border:0; border-radius:2px; font:inherit; color:inherit; background:transparent;
     text-decoration:underline dotted color-mix(in srgb,var(--muted) 50%,transparent); text-underline-offset:3px;

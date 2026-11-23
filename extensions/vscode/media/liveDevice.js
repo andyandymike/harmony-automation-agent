@@ -49,6 +49,8 @@ function updateKeyboard() {
     sendText.disabled = !editable || !textField.value;
 }
 
+const canOfferRecording = () => state?.tool==="recordings" && !state.caseEditing && !state.draftLocation && !state.recording;
+
 function updateRecordingOptions() {
     const t = state.text;
     const location = state.draftLocation || recordLocation;
@@ -63,7 +65,8 @@ function updateRecordingOptions() {
     locationGroup.disabled = formatGroup.disabled =
         Boolean(!state.connected || state.busy || state.caseEditing || state.draftLocation);
     const note = byId("record-format-note");
-    note.hidden = !phone;
+    byId("record-choices").hidden = !canOfferRecording();
+    note.hidden = !canOfferRecording() || !phone;
 }
 
 function status() {
@@ -95,7 +98,8 @@ function status() {
     byId("phone-text-help").textContent = recordingControls ? t.stationControlTextHelp :
         recordingHere ? t.stationRecordedTextHelp : t.stationPhoneTextHelp;
     const record = byId("record");
-    record.disabled = Boolean(state.busy || (!state.recording && (state.caseEditing || state.draftLocation || !state.connected)));
+    record.hidden = !(state.recording || canOfferRecording());
+    record.disabled = Boolean(state.busy || (!state.recording && !state.connected));
     record.dataset.recording = String(state.recording);
     buttonText("record", state.recording ? t.finish : t.beginRecording);
     record.title = state.recording ? t.screenCounter.replace("{n}", state.steps) : "";
@@ -286,7 +290,7 @@ formatGroup.addEventListener("change", event => {
 byId("record").addEventListener("click", () => void afterGestures(() => {
     if (state.recording) {
         postLive({ type: "stopRecord" });
-    } else {
+    } else if (canOfferRecording()) {
         vscode.postMessage({ type: "startRecord", location: recordLocation, stepFormat: recordLocation==="phone"?"coordinates":previewStepFormat });
     }
 }));

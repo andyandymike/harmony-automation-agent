@@ -419,6 +419,10 @@ class NetworkController {
             }
             case "networkDeleteCapture": this.net.removeRecord(m.id);break;
             case "networkUndoCapture": this.net.undoRecordRemoval(m.id);break;
+            case "networkCopyRetained":
+                if (this.net.findRecord(m.id) && typeof m.text==="string" && m.text.length<=256*1024)
+                    await vscode.env.clipboard.writeText(m.text);
+                return;
             case "networkUpstream":
                 return this.studioAction(m, () => { this.net.setUpstream(m.origin); });
             case "networkPreviewRule":

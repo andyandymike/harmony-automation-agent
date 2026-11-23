@@ -2,7 +2,7 @@
   "name": "harmony-agent-workbench",
   "displayName": "Harmony Agent",
   "description": "%extension.description%",
-  "version": "0.20.11",
+  "version": "0.20.12",
   "publisher": "harmony-automation-agent",
   "license": "MIT",
   "repository": {

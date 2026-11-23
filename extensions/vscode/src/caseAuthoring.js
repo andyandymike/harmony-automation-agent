@@ -114,9 +114,11 @@ class CaseAuthoring {
         const {plan,scenario} = readWorkflow(original);
         const existing = bench.state.activeCase?.uri === selected.uri ? bench.state.activeCase : undefined;
         const portable = await canEditCase(uri,existing);
+        const copy = message.copy === true;
+        const name = copy ? selected.name.slice(0,60).trim()+this.words(" copy"," 副本") : selected.name;
         this.begin({source:existing?.source==="imported" ? "workflow" : existing?.source || "workflow",
-            origin:existing?.origin,name:selected.name,plan,group:scenario || bench.networks.bindings?.[selected.uri],
-            ...(portable && {edit:{uri,original}})});
+            origin:existing?.origin,name,plan,group:scenario || bench.networks.bindings?.[selected.uri],
+            ...(portable && !copy && {edit:{uri,original}})});
     }
 
     async fromRun(run) {

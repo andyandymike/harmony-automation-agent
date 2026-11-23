@@ -438,6 +438,18 @@ class Workbench {
                 if (message.id && !message.fromRun && !this.state.draft) await this.openCase(message.id);
                 await this.caseAuthoring.open(message);
                 break;
+            case "caseDuplicate":
+                await this.openCase(message.id);
+                await this.caseAuthoring.open({copy:true});
+                break;
+            case "caseRemove": await this.removeCase(message.id); break;
+            case "caseRestore":
+                if (this.state.removedCase?.uri===message.id) {
+                    await this.caseLibrary.setHidden(message.id,false);
+                    this.state.removedCase=undefined;
+                    await this.refreshCases();
+                }
+                break;
             case "caseSave": await this.caseAuthoring.save(message); break;
             case "caseBoundary": await this.caseAuthoring.addBoundary(message); break;
             case "caseEdit": await this.caseAuthoring.edit(message); break;
@@ -832,6 +844,38 @@ class Workbench {
         await this.setPlan(vscode.Uri.parse(item.uri));
     }
 
+    async removeCase(id) {
+        const state = this.state;
+        const item = state.cases.find(row=>row.uri===id);
+        if (!item || state.draft || state.caseReview) return;
+        const zh = /^zh/i.test(this.language);
+        const uri = vscode.Uri.parse(item.uri);
+        const libraryOnly = zh ? "从用例库移除" : "Remove from library";
+        const trash = zh ? "移入回收站" : "Move to Trash";
+        const folder = item.editable && await this.caseLibrary.managedFolder(uri);
+        const choice = await vscode.window.showWarningMessage(
+            zh ? `如何移除「${item.name}」？` : `How should “${item.name}” be removed?`,
+            {modal:true,detail:folder ?
+                (zh ? "可将用例目录放入回收站，或只从工作台的用例库中移除。\n"+folder.fsPath :
+                    "Move the case folder to Trash, or remove the entry from this workbench’s case library.\n"+folder.fsPath) :
+                (zh ? "从当前工作区的用例库移除，项目文件保留。" : "Remove the entry from this workspace’s case library and keep its project files.")},
+            ...(folder ? [libraryOnly,trash] : [libraryOnly]));
+        if (choice===trash && folder) {
+            const current = await this.caseLibrary.managedFolder(uri);
+            if (!current || current.fsPath!==folder.fsPath ||
+                (vscode.workspace.textDocuments || []).some(doc=>doc.isDirty && containsPath(folder.fsPath,doc.uri.fsPath)))
+                throw new Error(zh ? "用例目录已变化或有未保存的修改，请检查后再删除。" :
+                    "The case folder changed or contains unsaved edits. Review it before removing it.");
+            await vscode.workspace.fs.delete(folder,{useTrash:true,recursive:true});
+            state.removedCase=undefined;
+        } else if (choice===libraryOnly) {
+            await this.caseLibrary.setHidden(id,true);
+            state.removedCase={uri:id,name:item.name};
+        } else return;
+        await this.refreshCases();
+        if (state.plan?.uri===id) await this.setPlan(state.cases[0] ? vscode.Uri.parse(state.cases[0].uri) : undefined);
+    }
+
     async runCase(message = {}) {
         if (message.fromRun) {
             const previous = this.state.run?.entry;
@@ -950,18 +994,23 @@ class Workbench {
     }
 
     async setPlan(uri) {
-        this.state.activeCase = this.state.cases.find(row => row.uri === uri.toString());
-        const name = this.state.activeCase?.name || path.basename(uri.path);
-        this.state.plan = { name, uri: uri.toString() };
+        this.state.activeCase = uri && this.state.cases.find(row => row.uri === uri.toString());
+        const name = uri && (this.state.activeCase?.name || path.basename(uri.path));
+        this.state.plan = uri && { name, uri: uri.toString() };
         this.state.planSummary = undefined;
         this.state.planDigest = undefined;
         this.state.caseBdd = undefined;
         this.state.caseDefinitions = undefined;
         this.state.pytestReadiness = undefined;
-        this.state.pytestCase = this.context.workspaceState.get("pytestCases", {})[uri.toString()];
-        this.state.mode = "workflow";
+        this.state.pytestCase = uri && this.context.workspaceState.get("pytestCases", {})[uri.toString()];
+        this.state.mode = uri ? "workflow" : "recordings";
         await this.context.workspaceState.update("plan", this.state.plan);
-        await this.refreshPlanSummary();
+        if (uri) await this.refreshPlanSummary();
+        else {
+            this.planRead=undefined;
+            this.planWatch?.dispose();
+            this.planWatch=this.watchedUri=undefined;
+        }
     }
 
     async refreshPlanSummary() {
