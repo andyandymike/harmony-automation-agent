@@ -45,9 +45,9 @@ async function runNative(host,job,{probe=supportsManual,capture=captureDevice,ta
         info.bundle=target;host.changed();
         const manual=!timed && await probe(device,hdcPath);
         job.close.signal.throwIfAborted();
-        info.mode=manual?"manual":"timed";
-        if(!manual && !timed && !choose){info.status="timedOnly";return;}
-        if(!manual){
+        info.mode=timed?"timed":"manual";
+        if(!manual && !timed){info.status="timedOnly";return;}
+        if(timed){
             const value=await vscode.window.showInputBox({title:w("Timed native capture","定时原生采集")+" · "+target,
                 prompt:w("Choose a capture duration in seconds.","输入采集时长（秒）。"),value:"30",
                 validateInput:v=>timedSeconds(v)===undefined?w("Enter 1–"+maxTimedSeconds+" whole seconds.","请输入 1 到 "+maxTimedSeconds+" 之间的整数秒数。"):undefined},job.picker?.token);
@@ -70,7 +70,7 @@ async function runNative(host,job,{probe=supportsManual,capture=captureDevice,ta
         host.net.append(records,count-records.length);
         host.logs=[...host.logs,...result.logs].slice(-500);
         Object.assign(info,{startedAt:info.startedAt??result.start,endedAt:result.end,count,batch,
-            unreadable:result.unreadable,logsAvailable:result.logsAvailable,status:count?"finished":"empty"});
+            unreadable:result.unreadable,logsAvailable:result.logsAvailable,endedBy:result.endedBy,status:count?"finished":"empty"});
     } catch(e) {
         if(job.disconnected.signal.aborted)return;
         if(job.close.signal.aborted && info.status==="starting"){host.captureInfo=previous;return;}

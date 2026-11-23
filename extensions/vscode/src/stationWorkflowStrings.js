@@ -42,6 +42,8 @@ module.exports = {
     stationAiCheck: ["Ask AI to suggest a check", "让 AI 建议检查条件"],
     stationNoRuns: ["Replay a workflow to see its result here.", "回放过的流程会在这里留下结果。"],
     stationUnconnected: ["No device connected", "未连接设备"],
+    stationCheckingDevices: ["Checking devices…", "正在检测设备…"],
+    stationDeviceLookupFailed: ["Device check failed", "设备检测失败"],
     stationInspector: ["Native controls", "原生控件"],
     stationPickOnScreen: ["Pick a control on the phone or from the list below.", "点击手机画面上的控件，或在下方列表中选择。"],
     stationReadingControls: ["Reading the current screen…", "正在读取当前屏幕的控件…"],

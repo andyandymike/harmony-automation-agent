@@ -22,10 +22,13 @@ export function nativeCaptureStatus(n,w,model) {
     const active=Boolean(n.capturing),sameDevice=c?.device===model.device;
     const timed=c?.mode==="timed" && sameDevice,recording=c?.status==="recording";
     const canStop=active && recording && c.mode==="manual";
+    const deviceEnded=c?.endedBy==="device" && ["finished","empty"].includes(c.status);
+    const deviceEndedLabel=w("The device ended capture early","设备提前结束了采集");
     const labels={starting:w("Preparing capture…","准备采集…"),reading:w("Reading requests…","正在读取请求…"),
         recording:w("Capturing","采集中"),timedOnly:w("Could not confirm manual capture support","未能确认设备支持手动启停"),
-        empty:w("No HTTP requests captured","本次没有采集到 HTTP 请求"),error:w("Native capture failed","原生采集失败"),
-        finished:c?.count===0?w("No HTTP requests captured","本次没有采集到 HTTP 请求"):w("Capture complete","采集完成")};
+        empty:deviceEnded?deviceEndedLabel:w("No HTTP requests captured","本次没有采集到 HTTP 请求"),error:w("Native capture failed","原生采集失败"),
+        finished:deviceEnded?deviceEndedLabel:c?.count===0?w("No HTTP requests captured","本次没有采集到 HTTP 请求"):
+            c?.endedBy==="timer"?w("Timed capture complete","定时采集完成"):w("Capture complete","采集完成")};
     const retained=c?.batch && (n.records?.some(row=>row.batch?.id===c.batch.id) ||
         n.favorites?.some(f=>f.record.batch?.id===c.batch.id));
     const clock=recording && Number.isFinite(c.startedAt) ? `<span id="network-native-clock" data-started="${c.startedAt}" data-mode="${timed?"timed":"manual"}"
@@ -33,7 +36,7 @@ export function nativeCaptureStatus(n,w,model) {
     if(clock && typeof document!=="undefined" && !timer)updateClock();
     else if(!clock){clearInterval(timer);timer=undefined;}
     const target=active && c?.bundle ? c.bundle : w("Current app","当前 App");
-    const note=c?.status==="error"?html(c.error):c?.status==="empty"?
+    const note=c?.status==="error"?html(c.error):deviceEnded?html(c.count||0)+" HTTP":c?.status==="empty"?
         w("Operate the app during capture to generate a Network Kit request.","请在采集期间操作应用，触发 Network Kit 请求。"):
         c?.status==="timedOnly"?w("Set a duration in More capture options.","请在「更多采集选项」设置时长。"):
         c?.status==="finished"&&c.count>0?html(c.count)+" HTTP":"";

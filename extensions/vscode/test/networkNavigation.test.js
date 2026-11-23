@@ -50,6 +50,23 @@ function assertPrimary(markup, current) {
     assert.deepEqual(primaryTabs(markup), [["requests", current==="requests"], ["mock", current==="mock"]]);
 }
 
+test("the request list exposes clear and the emptied list offers undo without clearing favorites",async()=>{
+    const {network,render,click,messages}=await workspace();
+    const retained=network.records[0];
+    network.favorites=[{name:"Saved request",record:retained}];
+    click("clearTraffic");
+    assert.equal(messages.at(-1).type,"networkClearTraffic");
+    network.records=[];
+    network.clearedHistory="cleared-request-list";
+    const empty=render();
+    assert.match(empty,/Request history cleared/);
+    assert.match(empty,/Favorites · 1/);
+    assert.doesNotMatch(empty,/class="net-row"/);
+    click("undoClearTraffic",{id:"cleared-request-list"});
+    assert.equal(messages.at(-1).type,"networkUndoClearTraffic");
+    assert.equal(messages.at(-1).id,"cleared-request-list");
+});
+
 test("the workspace names the activity, group controls and saved group in both languages", async () => {
     const {view, model, network, click} = await workspace();
     const savedName = "Checkout 场景 A";

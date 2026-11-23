@@ -101,6 +101,7 @@ class NetworkSession {
     snapshot() {
         return {running:Boolean(this.baseUrl), baseUrl:this.baseUrl, upstream:this.upstream, scenario:this.scenario, records:[...this.records],
             favorites:[...this.collection.items.values()], removedFavorite:this.collection.removed?.record.id, deletedCapture:this.removedRecord?.record.id,
+            clearedHistory:this.clearedHistory?.id,
             omittedRecords:this.omittedRecords, hits:this.scenario.rules.map(rule => ({ruleId:rule.id,count:this.counts.get(rule.id) || 0}))};
     }
 
@@ -147,6 +148,26 @@ class NetworkSession {
         }
         this.removedRecord = undefined;
         this.notify();
+    }
+
+    clearRecords() {
+        if (!this.records.length && !this.omittedRecords) return;
+        this.clearedHistory = { id: randomUUID(), records: this.records, omitted: this.omittedRecords };
+        this.records = [];
+        this.omittedRecords = 0;
+        this.removedRecord = undefined;
+        this.notify();
+    }
+
+    undoClearRecords(id) {
+        const saved = this.clearedHistory;
+        if (!saved || saved.id !== id) return;
+        this.clearedHistory = undefined;
+        const incoming = this.records;
+        const retained = new Set(incoming.map(record => record.id));
+        this.records = saved.records.filter(record => !retained.has(record.id));
+        this.omittedRecords += saved.omitted;
+        this.append(incoming);
     }
 
     setScenario(input, savedHits = []) {

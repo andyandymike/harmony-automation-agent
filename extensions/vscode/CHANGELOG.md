@@ -1,5 +1,11 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.14
+
+- Open local workflows while device discovery and case indexing run in the background.
+- Clear the network request history with Undo. Favorites stay available.
+- Keep manual capture active while the profiler is still running and identify captures ended by the device.
+
 ## 0.20.13
 
 - Share a trusted workspace's Python, CLI, source directory and HDC across the workbench, pytest and MCP using `.harmony-agent/runtime.json`.

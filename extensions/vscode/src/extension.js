@@ -47,6 +47,8 @@ const recordingViews = new Set(["recordings", "workflow", "run", "history"]);
 const toolMessages = new Map([
     ["openRecordingWorkspace", "recordings"], ["inspect", "inspect"], ["inspectDevice", "inspect"], ["networkOpen", "network"],
 ]);
+const localCaseActions = new Set(["openPlan", "editPlan", "caseOpen", "caseReview", "caseDuplicate", "caseRemove", "caseRestore",
+    "caseCancel", "caseMoveStep", "openPytest"]);
 
 class Workbench {
     constructor(context) {
@@ -65,6 +67,7 @@ class Workbench {
             runs: context.workspaceState.get("runs", []).map(entry =>
                 entry.status === "running" ? { ...entry, status: "unknown" } : entry),
             plan,
+            error: "",
             actions: [],
             aiResults: {},
             explorationHistory: [],
@@ -81,8 +84,10 @@ class Workbench {
         this.projectRuntime = new ProjectRuntime(vscode, context, () => this.language, () =>
             this.runtimeOperation || this.state.recording || this.networks.activeCapture || this.closingRuntime);
         context.subscriptions.push(this.projectRuntime.onDidChange((next, previous) => {
+            if (this.deviceLookup?.runtime) this.cancelDeviceLookup();
             this.state.device = undefined;
             this.state.devices = [];
+            this.state.deviceLookupError = undefined;
             this.state.page = this.state.liveImage = undefined;
             this.state.actions = [];
             if (this.state.error === previous.error || previous.runtime || next.runtime) this.state.error = "";
@@ -167,22 +172,12 @@ class Workbench {
                 this.publish();
                 if (!initialized) {
                     initialized = true;
-                    // A direct entry may already be opening its tab.
-                    if (!this.state.draft) await this.pendingAction?.catch(() => {});
-                    if (!this.state.draft && this.panel === panel) await this.perform(async () => {
-                        await this.refreshCases();
-                        if (this.state.plan) await this.refreshPlanSummary();
-                        else if (this.state.tool === "recordings" && this.state.mode === "recordings" && this.state.cases.length)
-                            await this.setPlan(vscode.Uri.parse(this.state.cases[0].uri));
-                        try { await this.listDevices(); }
-                        catch (error) {
-                            if (this.projectRuntime.current.kind !== "settings" ||
-                                (!["network","exploration"].includes(this.state.mode) && !recordingViews.has(this.state.mode))) throw error;
-                        }
-                    });
+                    if (!this.state.draft) await Promise.all([this.loadTestLibrary(panel), this.listDevices()]);
                 }
             } else if (message.type === "workspaceTab") {
                 await this.openTool(message.view);
+            } else if (message.type === "devices") {
+                await this.listDevices();
             } else if (message.type.startsWith("exploration")) {
                 if (["explorationReport","explorationNew","explorationFromCase"].includes(message.type) &&
                     this.state.tool === "recordings" && !this.state.caseReview && !this.state.draft)
@@ -199,7 +194,7 @@ class Workbench {
                 try { await this.networks.handle(message); }
                 catch (error) { this.networks.showError(error); }
             } else if (message.type.startsWith("network")) {
-                await this.perform(() => this.networks.handle(message));
+                await this.perform(() => this.networks.handle(message), { runtime: !["networkClearTraffic", "networkUndoClearTraffic"].includes(message.type) });
             } else if (message.type.startsWith("flowDebug")) {
                 await this.flowDebugger.handle(message);
             } else if (message.type === "stopRun") {
@@ -235,7 +230,7 @@ class Workbench {
             } else if (message.type === "view") {
                 await this.revealView(message.view);
             } else {
-                await this.perform(() => this.dispatch(message));
+                await this.perform(() => this.dispatch(message), { runtime: !localCaseActions.has(message.type) || Boolean(message.fromRun) });
             }
         });
         panel.onDidChangeViewState(() => {
@@ -245,6 +240,7 @@ class Workbench {
         panel.onDidDispose(() => {
             if (this.panel !== panel) return;
             this.panel = this.livePanel = undefined;
+            this.cancelDeviceLookup();
             this.planRead = undefined;
             this.planWatch?.dispose();
             this.planWatch = this.watchedUri = undefined;
@@ -293,7 +289,7 @@ class Workbench {
     async chooseProjectRuntime() {
         try {
             if (await this.projectRuntime.choose() && this.panel && !this.state.busy && !this.state.recording && !this.networks.activeCapture)
-                await this.perform(() => this.listDevices());
+                await this.listDevices();
         }
         catch (error) { void vscode.window.showErrorMessage(this.errorMessage(error)); }
     }
@@ -447,19 +443,21 @@ class Workbench {
         return error.code ? error.code + " · " + message : message;
     }
 
-    async perform(action) {
+    async perform(action, { runtime = true } = {}) {
         if (this.state.busy) return this.text.deviceBusy;
         this.state.busy = true;
         this.state.error = "";
         this.publish();
         // A newly reopened editor may still be releasing the previous display and recorder.
         const sync = async () => {
-            await this.projectRuntime.ready(Boolean(this.panel), true);
-            this.runtimeOperation = true;
+            if (runtime) {
+                await this.projectRuntime.ready(false, true);
+                this.runtimeOperation = true;
+            }
             await action();
-            await this.elements.sync();
+            if (runtime) await this.elements.sync();
         };
-        const operation = Promise.resolve(this.closingLive).then(sync);
+        const operation = Promise.resolve(runtime ? this.closingLive : undefined).then(sync);
         this.pendingAction = operation;
         try {
             await operation;
@@ -477,7 +475,7 @@ class Workbench {
 
     async dispatch(message) {
         if (this.state.tool === "recordings" && this.state.caseReview &&
-            !["caseBoundary","caseSave","caseCancel","caseEdit","caseMoveStep","caseTargets","devices","device"].includes(message.type)) return;
+            !["caseBoundary","caseSave","caseCancel","caseEdit","caseMoveStep","caseTargets","device"].includes(message.type)) return;
         switch (message.type) {
             case "caseReview":
                 if (message.id && !message.fromRun && !this.state.draft) await this.openCase(message.id);
@@ -506,10 +504,6 @@ class Workbench {
             case "repairSuggest": await this.caseRepair.suggest(message); break;
             case "repairVerify": await this.caseRepair.verify(message); break;
             case "repairApply": await this.caseRepair.apply(message); break;
-            case "devices":
-                if (this.livePanel) this.livePanel.error = undefined;
-                await this.listDevices();
-                break;
             case "device": await this.selectDevice(message.device); break;
             case "observe": await this.observe(); break;
             case "detach":
@@ -552,8 +546,11 @@ class Workbench {
         const tab = this.pendingTool;
         if (tab === "network") {
             this.pendingTool = undefined;
+            this.state.networkLoading = true;
+            this.publish();
             try { await this.networks.init(); }
             catch (error) { this.networks.showError(error); }
+            finally { this.state.networkLoading = false; this.publish(); }
             return;
         }
         if (this.state.busy) return;
@@ -563,10 +560,7 @@ class Workbench {
         } else if (tab === "inspect" && this.state.devices.includes(this.state.device)) {
             if (!this.elements.canReuseSnapshot()) await this.perform(() => this.refreshInspector());
         } else if (tab === "recordings" && !this.state.draft) {
-            await this.perform(async () => {
-                await this.refreshCases();
-                await this.refreshPlanSummary();
-            });
+            void this.loadTestLibrary(this.panel);
         }
     }
 
@@ -577,8 +571,8 @@ class Workbench {
         this.state.tool = "recordings";
         this.state.mode = view;
         this.publish();
-        if (view === "recordings") await this.perform(() => this.refreshCases());
-        if (view === "workflow") await this.perform(() => this.refreshPlanSummary());
+        if (view === "recordings") await this.loadTestLibrary(this.panel);
+        if (view === "workflow") await this.refreshPlanSummary();
         if (view === "history") await this.perform(() => this.explorations.history());
     }
 
@@ -634,15 +628,47 @@ class Workbench {
         await this.act({command,ref:node.ref,direction,text:input.text,frameId:this.state.page.frameId},locator);
     }
 
-    async listDevices() {
-        const { devices } = await this.agent.call("devices");
+    cancelDeviceLookup() {
+        this.deviceLookup?.controller.abort();
+        this.deviceLookup = undefined;
+        this.state.discoveringDevices = false;
+    }
+
+    listDevices() {
+        if (this.deviceLookup) return this.deviceLookup.done;
+        const job = this.deviceLookup = { panel: this.panel, controller: new AbortController() };
+        this.state.discoveringDevices = true;
+        this.state.deviceLookupError = undefined;
+        if (this.livePanel) this.livePanel.error = undefined;
+        job.done = this.probeDevices(job).catch(error => {
+            if (this.deviceLookup === job) this.state.deviceLookupError = this.errorMessage(error);
+        }).finally(() => {
+            if (this.deviceLookup !== job) return;
+            this.deviceLookup = undefined;
+            this.state.discoveringDevices = false;
+            this.publish();
+        });
+        this.publish();
+        return job.done;
+    }
+
+    async probeDevices(job) {
+        await this.closingLive;
+        await this.projectRuntime.ready(Boolean(job.panel), true);
+        if (this.deviceLookup !== job || this.panel !== job.panel) return;
+        job.runtime = this.projectRuntime.current;
+        const { devices } = await this.agent.call("devices", {}, { signal: job.controller.signal, timeout: 20000 });
+        while (this.deviceLookup === job && this.pendingAction) await this.pendingAction.catch(() => {});
+        const current = () => this.deviceLookup === job && this.panel === job.panel && this.projectRuntime.current === job.runtime;
+        if (!current()) return;
         this.state.devices = devices.map(device => device.id);
         await this.networks.devicesChanged(this.state.devices);
+        if (!current()) return;
         if (!this.state.draft && !this.networks.activeCapture && !this.state.devices.includes(this.state.device)) {
             this.state.device = devices.length === 1 ? devices[0].id : undefined;
             this.state.page = this.state.liveImage = undefined;
             this.state.actions = [];
-            await this.refreshInspector();
+            if (this.state.tool === "inspect" && !this.state.busy) await this.perform(() => this.refreshInspector(current));
         }
     }
 
@@ -878,8 +904,36 @@ class Workbench {
         this.state.draft = undefined;
     }
 
-    async refreshCases() {
-        this.state.cases = await this.caseLibrary.list(this.state.runs);
+    async refreshCases(panel = this.panel) {
+        const request = this.caseListRead = Symbol();
+        const cases = await this.caseLibrary.list(this.state.runs);
+        if (this.caseListRead === request && this.panel === panel) this.state.cases = cases;
+    }
+
+    loadTestLibrary(panel) {
+        if (!panel) return;
+        if (this.caseLoad?.panel === panel) return this.caseLoad.done;
+        const job = this.caseLoad = { panel };
+        this.state.casesLoading = true;
+        job.done = (async () => {
+            try {
+                await this.refreshCases(panel);
+                if (this.panel !== panel || this.state.draft || this.state.busy) return;
+                if (this.state.plan) await this.refreshPlanSummary();
+                else if (this.state.tool === "recordings" && this.state.mode === "recordings" && this.state.cases.length)
+                    await this.setPlan(vscode.Uri.parse(this.state.cases[0].uri));
+            } catch (error) {
+                if (this.panel === panel && !this.state.busy) this.state.error = this.errorMessage(error);
+            } finally {
+                if (this.caseLoad === job) {
+                    this.caseLoad = undefined;
+                    this.state.casesLoading = false;
+                    this.publish();
+                }
+            }
+        })();
+        this.publish();
+        return job.done;
     }
 
     async openCase(id) {
@@ -1411,7 +1465,7 @@ function activate(context) {
         vscode.commands.registerCommand("harmonyAgent.openAIChat", () => workbench.openAI()),
         vscode.commands.registerCommand("harmonyAgent.openPlan", async () => {
             await workbench.openTool("recordings");
-            await workbench.perform(() => workbench.choosePlan());
+            await workbench.perform(() => workbench.choosePlan(), { runtime: false });
         }),
         vscode.commands.registerCommand("harmonyAgent.openEvidence", async () => {
             try { await openProblemClip(workbench,vscode); }

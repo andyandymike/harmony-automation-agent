@@ -37,6 +37,7 @@ function deviceStub({visible=true,final=false,autoEnd=false,flushPending=false,m
             return final || ended || (autoEnd && stats>1)?String(remoteSize):"0";
         }
         if(args[1]==="od")return [...archive.subarray(8,56)].join(" ");
+        if(args[1].startsWith("command -v strings"))return final || ended || (autoEnd && stats>1)?"ended":"active";
         if(args[1]==="recv"){transferTimeout=timeout;await fs.writeFile(args[3],archive);return "";}
         if(args[1].startsWith("if [ -f "))return startLog;
         if(args[1]==="hilog" || args[1]==="rm" || args[1].startsWith("for p in") || args[1].startsWith("set -- "))return "";
@@ -113,8 +114,9 @@ test("unconfirmed manual launch never stops another profiler; closed traces and 
     assert.equal(missing.calls.some(c=>c[2]==="stop"),false);assert.ok(missing.calls.length<40);await missing.cleaned();
     for(const alreadyFinal of [false,true]){
         const mock=deviceStub({final:alreadyFinal,autoEnd:!alreadyFinal}), stop=new AbortController();
-        await captureDevice({device:"D",bundle,mode:"manual",stopSignal:stop.signal,onReady(){if(alreadyFinal)stop.abort();}},
+        const result=await captureDevice({device:"D",bundle,mode:"manual",stopSignal:stop.signal,onReady(){if(alreadyFinal)stop.abort();}},
             {hdc:mock.hdc,pause:async()=>{}});
+        assert.equal(result.endedBy,alreadyFinal?"user":"device");
         assert.equal(mock.calls.some(c=>c[2]==="stop"),false);await mock.cleaned();
     }
 });
@@ -122,7 +124,8 @@ test("legacy captures accept a validated duration and interrupt only the invocat
     for(const val of ["","12.5","1e2","3601","-1"])assert.equal(timedSeconds(val),undefined);
     assert.equal(timedSeconds(" 45 "),45);
     const mock=deviceStub(), seen=[];
-    await captureDevice({device:"D",bundle,mode:"timed",seconds:45,onReading:()=>seen.push("reading")},{hdc:mock.hdc,pause:async()=>{}});
+    const result=await captureDevice({device:"D",bundle,mode:"timed",seconds:45,onReading:()=>seen.push("reading")},{hdc:mock.hdc,pause:async()=>{}});
+    assert.equal(result.endedBy,"timer");
     const command=mock.calls.find(c=>c[1]==="hiprofiler_cmd");
     assert.equal(command[command.indexOf("-t")+1],"45");assert.deepEqual(seen,["reading"]);await mock.cleaned();
     const close=new AbortController(), ended=deviceStub({timed:async signal=>{close.abort();signal.throwIfAborted();}});
@@ -165,6 +168,9 @@ test("legacy timed capture is opt-in and a cancelled duration picker preserves t
         actual=opts;opts.onReading(100);return {records:[],count:0,logs:[],end:100,start:20,unreadable:2};}};
     startNative(host,{timed:true},services);await host.activeCapture;assert.equal(host.captureInfo,prior);
     startNative(host,{},services);await host.activeCapture;
+    assert.equal(host.captureInfo.status,"timedOnly");assert.equal(prompts,1);assert.equal(actual,undefined);
+    host.vscode.window.showQuickPick=async choices=>choices[0];
+    startNative(host,{choose:true},services);await host.activeCapture;
     assert.equal(host.captureInfo.status,"timedOnly");assert.equal(prompts,1);assert.equal(actual,undefined);
     host.vscode.window.showInputBox=async()=>"75";
     startNative(host,{timed:true},{...services,probe:async()=>true});await host.activeCapture;
@@ -230,6 +236,8 @@ test("the same capture button starts the current app and ends an active run",asy
     assert.match(oldDevice,/class="button" data-net="nativeChoose"[^>]*>Capture another app/);
     assert.match(oldDevice,/class="button" data-net="nativeTimed"[^>]*>Timed capture/);
     assert.match(view(n,w,{device:"other",devices:["D","other"]}),/Start capture/);
+    n.capture={status:"finished",device:"D",count:2,endedBy:"device"};
+    assert.match(view(n,w,model),/The device ended capture[\s\S]*2 HTTP/);
 });
 test("a gesture finishing after stop is associated only if it overlapped this phone's capture",()=>{
     const mock={captureInfo:{status:"finished",device:"D",startedAt:20,endedAt:80},bench:{state:{device:"D"}},net:{},markers:[],changed(){}};
@@ -256,6 +264,42 @@ function archiveOf(count,damaged=false) {
     if(damaged)blocks.push(u32(4096),Buffer.from([0]));
     const archive=Buffer.concat([trace(),...blocks]);archive.writeBigUInt64LE(BigInt(archive.length),8);return archive;
 }
+test("manual capture waits past a matching trace length and a complete header while its own profiler is still active",async()=>{
+    const archive=archiveOf(2),mock=deviceStub({archive}),stop=new AbortController();
+    const provisional=Buffer.from(archive.subarray(8,56));
+    provisional.fill(0,16);
+    let waited=0,inspections=0;
+    const hdc=async(args,...rest)=>{
+        const value=await mock.hdc(args,...rest);
+        if(mock.calls.some(call=>call[2]==="stop"))return value;
+        if(args[1]==="stat")return String(archive.length);
+        if(args[1]==="od" && inspections++===0)return [...provisional].join(" ");
+        return value;
+    };
+    const result=await captureDevice({device:"D",bundle,stopSignal:stop.signal},{hdc,pause:async ms=>{
+        assert.equal(ms,3000);
+        waited+=ms;
+        if(waited===15000)stop.abort();
+    }});
+    assert.equal(waited,15000);
+    assert.equal(result.endedBy,"user");
+    assert.equal(result.count,2);
+    assert.equal(mock.calls.filter(c=>c[2]==="stop").length,1);
+    const launch=mock.calls.find(c=>c[2]==="start");
+    assert.ok(!launch.includes("-t"));
+    await mock.cleaned();
+});
+test("explicitly stopping a manual capture still reads non-empty archives without a digest",async()=>{
+    const archive=archiveOf(1),stop=new AbortController();
+    archive.fill(0,24,56);
+    const mock=deviceStub({archive});
+    const result=await captureDevice({device:"D",bundle,stopSignal:stop.signal,onReady(){stop.abort();}},
+        {hdc:mock.hdc,pause:async()=>{}});
+    assert.equal(result.endedBy,"user");
+    assert.equal(result.count,1);
+    assert.equal(mock.calls.filter(c=>c[2]==="stop").length,1);
+    await mock.cleaned();
+});
 test("large batches retain the last 500 in order, count all decoded HTTP events and commit once after complete validation",async()=>{
     const host=fakeHost();host.net=new NetworkSession();
     host.net.append([{id:"old-1"},{id:"old-2"}]);

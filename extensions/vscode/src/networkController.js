@@ -421,6 +421,8 @@ class NetworkController {
             }
             case "networkDeleteCapture": this.net.removeRecord(m.id);break;
             case "networkUndoCapture": this.net.undoRecordRemoval(m.id);break;
+            case "networkClearTraffic": this.net.clearRecords();await this.persist();return;
+            case "networkUndoClearTraffic": this.net.undoClearRecords(m.id);await this.persist();return;
             case "networkCopyRetained":
                 if (this.net.findRecord(m.id) && typeof m.text==="string" && m.text.length<=256*1024)
                     await vscode.env.clipboard.writeText(m.text);

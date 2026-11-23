@@ -132,6 +132,45 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
     };
 }
 
+test("opening a local workflow does not wait for startup case indexing or phone detection", async () => {
+    const discovery = latch(), index = latch(), probeStarted = latch(), indexStarted = latch();
+    const plan = { version: "1", steps: [{ command: "back", input: {} }] };
+    let signal;
+    const bench = openWorkbench(async (command, _input, options) => {
+        assert.equal(command, "devices");
+        signal = options.signal;
+        probeStarted.resolve();
+        return discovery.promise;
+    }, {}, undefined, undefined, [], vscode => {
+        const root = vscode.Uri.file("/fixture");
+        root.scheme = "file";
+        vscode.workspace.workspaceFolders = [{ name: "slow project", uri: root }];
+        vscode.workspace.findFiles = async () => { indexStarted.resolve(); return index.promise; };
+        vscode.window.showOpenDialog = async () => [vscode.Uri.file("/fixture/recording.json")];
+        vscode.workspace.fs.readFile = async () => Buffer.from(JSON.stringify(plan));
+    });
+    const initializing = bench.send("ready");
+    try {
+        await Promise.all([probeStarted.promise, indexStarted.promise]);
+        assert.equal(bench.state.discoveringDevices, true);
+        assert.equal(bench.state.casesLoading, true);
+        assert.equal(Boolean(bench.state.busy), false);
+        await bench.send("openPlan");
+        assert.equal(bench.state.plan.name, "recording.json");
+        assert.equal(bench.state.planSummary.stepCount, 1);
+        assert.equal(bench.state.discoveringDevices, true);
+        assert.equal(bench.state.casesLoading, true);
+    } finally {
+        bench.close();
+        assert.equal(signal?.aborted, true);
+        index.resolve([]);
+        discovery.resolve({ devices: [{ id: "late-device" }] });
+        await initializing;
+        await bench.deactivate();
+    }
+    assert.deepEqual(bench.state.devices, []);
+});
+
 test("recording and existing workflow actions generate editable pytest cases and keep a cancelled draft", async t => {
     const fs = require("node:fs/promises");
     const os = require("node:os");

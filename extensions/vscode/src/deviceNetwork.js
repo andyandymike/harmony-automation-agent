@@ -118,19 +118,30 @@ function checkProfiler(text) {
     if(/(?:^|\n)\s*(?:fail(?:ed|ure)?\b|error\b|usage:|unknown (?:option|command)|invalid (?:option|command)|.*already (?:started|running))/i.test(text))
         throw new Error("Network profiler: "+text.slice(-600));
 }
-async function isFinalTrace(hdc,file,size) {
+async function isFinalTrace(hdc,file,size,requireDigest=false) {
     if(size<1024)return false;
     const value=await hdc(["shell","od","-An","-v","-j","8","-N","48","-t","u1",file],2000);
     const bytes=value.trim().split(/\s+/).map(Number);
     if(bytes.length!==48 || !bytes.every(b=>Number.isInteger(b)&&b>=0&&b<256))return false;
     const header=Buffer.from(bytes);
-    // A live empty file already reports length 1024. Its digest is populated only at Finish().
-    return header.readBigUInt64LE()===BigInt(size) && (size>1024 || header.subarray(16,48).equals(emptyTraceDigest));
+    const digest=header.subarray(16,48);
+    // A matching length during capture is insufficient. Once stopped, retain compatibility with non-empty traces without a digest.
+    return header.readBigUInt64LE()===BigInt(size) &&
+        (size===1024 ? digest.equals(emptyTraceDigest) : !requireDigest || digest.some(byte=>byte!==0));
 }
-async function manualTraceFinished(hdc,file) {
+async function manualTraceFinished(hdc,file,requireDigest) {
     const size=await hdc(["shell","stat","-c","%s",file],3000);
     if(!/^\d+$/.test(size))throw new Error("Capture no longer present on this phone. / 设备上找不到本次采集。");
-    return isFinalTrace(hdc,file,Number(size));
+    return isFinalTrace(hdc,file,Number(size),requireDigest);
+}
+
+async function ownedManualRunning(hdc,config) {
+    const script=`command -v strings >/dev/null || exit 0; for p in $(pidof hiprofiler_cmd); do `+
+        `argv=$(strings -n 4 "/proc/$p/cmdline" 2>/dev/null) || exit 0; `+
+        `if printf '%s\\n' "$argv" | grep -Fxq 'start' && printf '%s\\n' "$argv" | grep -Fxq '${config}'; `+
+        `then printf active; exit 0; fi; done; printf ended`;
+    const state=await hdc(["shell",script],3000).catch(()=>"");
+    return state==="active" ? true : state==="ended" ? false : undefined;
 }
 async function interruptTimed(hdc,config) {
     // Only the command whose argv contains this capture's generated UUID is ours.
@@ -176,7 +187,7 @@ async function readFinalTrace(hdc,remote,trace,pid,offset,pause,manual,disconnec
     }
     throw new Error("The device has not finalized the trace file. / 设备尚未完成采集文件的写入。");
 }
-async function captureDevice({device,hdcPath,bundle,mode="timed",seconds,stopSignal,closeSignal,disconnectSignal,onReady,onReading},
+async function captureDevice({device,hdcPath,bundle,mode="manual",seconds,stopSignal,closeSignal,disconnectSignal,onReady,onReading},
     {hdc=transport(device,hdcPath),pause=delay,now=Date.now}={}) {
     if (typeof bundle!=="string" || !bundleName.test(bundle)) throw new Error("Select a running application. / 请选择正在运行的应用。");
     if(mode!=="manual" && (mode!=="timed" || timedSeconds(seconds)===undefined))
@@ -200,7 +211,7 @@ async function captureDevice({device,hdcPath,bundle,mode="timed",seconds,stopSig
         const offset=(before+dispatched)/2-deviceTime;
         closeSignal?.throwIfAborted();
         const options=["-s","-c",remoteConfig,"-o",remoteTrace];
-        let start=dispatched,ready=false,commandEnded=false;
+        let start=dispatched,ready=false,commandEnded=false,endedBy=mode==="timed"?"timer":"user";
         const observeOutput=async()=>{
             disconnectSignal?.throwIfAborted();
             const size=await hdc(["shell","stat","-c","%s",remoteTrace],2000).catch(()=>"");
@@ -230,8 +241,11 @@ async function captureDevice({device,hdcPath,bundle,mode="timed",seconds,stopSig
                     catch(e){if(!stopSignal?.aborted)throw e;}
                     if(stopSignal?.aborted)break;
                     disconnectSignal?.throwIfAborted();
-                    finalized=await manualTraceFinished(hdc,remoteTrace).catch(()=>false);
-                    if(finalized)break;
+                    if(await manualTraceFinished(hdc,remoteTrace,true).catch(()=>false) && await ownedManualRunning(hdc,remoteConfig)===false){
+                        finalized=true;
+                        if(!stopSignal?.aborted)endedBy="device";
+                        break;
+                    }
                 }
             } finally {
                 if(!disconnectSignal?.aborted){
@@ -240,9 +254,10 @@ async function captureDevice({device,hdcPath,bundle,mode="timed",seconds,stopSig
                         onReading?.(now());
                         if(!finalized) {
                             const final=await manualTraceFinished(hdc,remoteTrace).catch(()=>undefined);
+                            const running=final===true ? await ownedManualRunning(hdc,remoteConfig) : undefined;
                             disconnectSignal?.throwIfAborted();
-                            if(final===false)checkProfiler(await hdc(["shell","hiprofiler_cmd","stop"],15000));
-                            if(final===undefined)await stopUnconfirmedManual(hdc,remoteConfig);
+                            if(final===false || running===true)checkProfiler(await hdc(["shell","hiprofiler_cmd","stop"],15000));
+                            else if(running===undefined)await stopUnconfirmedManual(hdc,remoteConfig);
                         }
                     }
                 }
@@ -274,7 +289,7 @@ async function captureDevice({device,hdcPath,bundle,mode="timed",seconds,stopSig
         let logs=[], logsAvailable=true;
         try { logs=logMetadata(await hdc(["shell","hilog","-t","app","-P",String(pid),"-v","epoch","-z","500"]),pid,start,end,offset); }
         catch { logsAvailable=false; }
-        return {...decoded,logs,logsAvailable,start,end,bundle};
+        return {...decoded,logs,logsAvailable,start,end,bundle,endedBy:closeSignal?.aborted?"closed":endedBy};
     } catch(error) {
         failure=error;
         throw error;

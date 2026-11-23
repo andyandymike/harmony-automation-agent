@@ -79,8 +79,7 @@ class LiveDevicePanel {
         const bench = this.workbench;
         switch (message.type) {
             case "refresh":
-                this.error = undefined;
-                await this.select(() => bench.listDevices());
+                await bench.listDevices();
                 break;
             case "device":
                 await this.select(() => bench.selectDevice(message.device));

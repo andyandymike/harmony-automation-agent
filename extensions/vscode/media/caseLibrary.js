@@ -79,7 +79,7 @@ export function caseLibraryView(model, language) {
         <header class="case-library-head"><h2>${w("Cases", "用例")}</h2>
             ${actionButton(w("Open file…","打开文件…"),{quiet:true,className:"case-open-file",attrs:{"data-type":"openPlan"},disabled:locked})}</header>
         ${rows || pending || temporary ? `<ul class="case-files" id="case-files">${pending}${rows}${temporary}</ul>` :
-            `<p class="case-library-empty">${w("No saved cases","尚未保存用例")}</p>`}
+            `<p class="case-library-empty" role="status">${model.casesLoading ? w("Loading cases…","正在读取用例…") : w("No saved cases","尚未保存用例")}</p>`}
         ${model.removedCase ? `<p class="case-removal" role="status">${html(model.removedCase.name)} · ${w("Removed","已移除")}
             ${actionButton(w("Undo","撤销"),{quiet:true,disabled:locked,attrs:{"data-type":"caseRestore","data-id":model.removedCase.uri}})}</p>` : ""}
         ${showAllRuns ? caseRunHistory(allRuns,language,{id:"case-all-runs",label:w("All runs","全部运行"),open:model.testView==="history",

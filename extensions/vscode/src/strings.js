@@ -184,6 +184,7 @@ const entries = {
     workbench: ["Harmony Agent", "Harmony Agent"],
     devices: ["Devices", "设备"],
     refreshDevices: ["Refresh devices", "刷新设备"],
+    DEVICE_DISCOVERY_TIMEOUT: ["Device discovery took too long. Refresh devices to try again.", "设备检测超时，可点击刷新设备重试。"],
     selectDevice: ["Select a device", "选择设备"],
     noDevices: ["Connect and authorize a HarmonyOS device, then refresh.", "连接并授权 HarmonyOS 设备后刷新。"],
     workflows: ["Workflow", "工作流"],

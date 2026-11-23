@@ -225,12 +225,15 @@ function devicePicker() {
     const blocked = model.busy || Boolean(model.draft || model.caseReview);
     const captureActive = model.nativeCaptureActive || model.network?.capturing;
     const options = model.devices.map(id => `<option value="${h(id)}" ${id === model.device ? "selected" : ""}>${h(id)}</option>`).join("");
+    const lookupLabel = model.discoveringDevices ? t.stationCheckingDevices : model.deviceLookupError ? t.stationDeviceLookupFailed : t.stationUnconnected;
     const device = options ? `<select data-field="device" aria-label="${h(t.selectDevice)}"
         title="${h(t.selectDevice)}" ${disabled(blocked || captureActive)}>
         ${model.devices.includes(model.device) ? "" : `<option value="">${h(t.selectDevice)}</option>`}${options}</select>` :
-        `<span class="station-device-status">${h(t.stationUnconnected)}</span>`;
+        `<span class="station-device-status" role="status" title="${h(model.deviceLookupError || lookupLabel)}">${h(lookupLabel)}</span>`;
+    const refreshLabel = model.discoveringDevices ? t.stationCheckingDevices : t.refreshDevices;
     return `<div class="station-device">${artIcon("device")}${device}
-        <button class="station-tool" type="button" data-type="devices" aria-label="${h(t.refreshDevices)}" title="${h(t.refreshDevices)}" ${disabled(model.busy)}>${artIcon("refresh")}</button></div>`;
+        <button class="station-tool" type="button" data-type="devices" aria-label="${h(refreshLabel)}" title="${h(model.deviceLookupError || refreshLabel)}"
+            ${disabled(model.busy || model.discoveringDevices)}>${artIcon("refresh")}</button></div>`;
 }
 
 function toolBack(surface) {

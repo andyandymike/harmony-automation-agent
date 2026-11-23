@@ -191,18 +191,23 @@ export function trafficView(model,n,w,lang,renderEditor) {
     const switchCollection=!batch && (favoritesOnly || favorites.size || n.records.length) ? button("favoritesOnly",
         favoritesOnly?w("All requests","返回全部请求"):w("Favorites","收藏")+" · "+favorites.size,
         {pressed:favoritesOnly,className:"net-favorites-filter"}) : "";
+    const historyView = !favoritesOnly;
+    const clear = historyView && (n.records.length || n.omittedRecords) ? button("clearTraffic",w("Clear request history","清空请求历史"),
+        {quiet:true,className:"net-text-action",disabled:model.busy,title:w("Clear all request history. Saved favorites are kept.","清空全部请求历史，保留收藏。")}) : "";
     const undos=[n.deletedCapture && button("undoCapture",w("Undo removal from history","撤销移除历史请求"),{id:n.deletedCapture,quiet:true}),
+        historyView && n.clearedHistory && `<span>${w("Request history cleared","请求列表已清空")}</span>` +
+            button("undoClearTraffic",w("Undo clear","撤销清空"),{id:n.clearedHistory,quiet:true,disabled:model.busy}),
         n.removedFavorite && !favorites.has(n.removedFavorite) && button("undoFavorite",w("Undo removal from favorites","撤销取消收藏"),{id:n.removedFavorite,quiet:true})].filter(Boolean);
     const context = batch ? `<div class="net-context">${html(batch.label)} · ${w("Requests in this batch","本次请求")}
         ${button("previousList",w("Back to previous list","返回之前的列表"),{id:previousList.entryBatchId})}</div>` : scopeNotes(n,w,lang);
     const notes = sourceReceipts(n,retained,batch,w) + context + (undos.length?`<aside class="net-undo" role="status">${undos.join("")}</aside>`:"");
     if (!scope.length) {
         currentResults = {hits:[]};
-        if(batch)return notes+`<p class="net-empty">${w("No requests from this batch remain in history or favorites.","历史和收藏中已没有这批请求。")}</p>`;
+        if(batch)return notes+clear+`<p class="net-empty">${w("No requests from this batch remain in history or favorites.","历史和收藏中已没有这批请求。")}</p>`;
         if(favoritesOnly) return notes+`<div class="net-empty"><h3>${w("No favorites here","这里还没有收藏")}</h3>
             <p>${w("Use the star on a request to keep its response.","点请求旁的星标即可保留这次请求和响应。")}</p>${switchCollection}</div>`;
-        if (!n.stepLabel) return notes + switchCollection + captureSources(model,n,w,true);
-        return notes + `<div class="net-empty"><h3>${n.range ? w("No requests in this step","本步骤时段没有请求") :
+        if (!n.stepLabel) return notes + switchCollection + clear + captureSources(model,n,w,true);
+        return notes + clear + `<div class="net-empty"><h3>${n.range ? w("No requests in this step","本步骤时段没有请求") :
             w("No timestamp for this step","此步骤没有可用于关联请求的时间戳")}</h3></div>`;
     }
     const previousHit = currentResults.hits[find.cursor];
@@ -222,7 +227,7 @@ export function trafficView(model,n,w,lang,renderEditor) {
         if (!scope.some(row=>row.id===selected)) selected = record.id;
     }
     return `${notes}
-        <div class="net-traffic-head"><div class="net-collection-heading"><h2>${favoritesOnly?w("Saved requests","收藏的请求"):w("Traffic","请求列表")} <span class="net-count">${rows.length}${rows.length !== scope.length ? " / "+scope.length : ""}</span></h2>${switchCollection}</div>
+        <div class="net-traffic-head"><div class="net-collection-heading"><h2>${favoritesOnly?w("Saved requests","收藏的请求"):w("Traffic","请求列表")} <span class="net-count">${rows.length}${rows.length !== scope.length ? " / "+scope.length : ""}</span></h2>${switchCollection}${clear}</div>
         ${captureSources(model,n,w,false)}</div>
         ${filtersBar(scope,failures.length,w)}${findBar(currentResults,w)}
         ${record ? `<div class="net-grid" data-reading="${reading}">${recordList(rows,record,currentResults,favorites,w,model.busy)}${detailView(record,retained,detail,hit?.id===record.id ? hit : undefined,w,lang,

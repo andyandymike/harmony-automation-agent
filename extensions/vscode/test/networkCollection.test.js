@@ -76,6 +76,37 @@ test("deleting history preserves its snapshot and undo restores arrival order",(
     assert.equal(net.collection.recordsWithHistory(net.records).length,4);
 });
 
+test("clearing the request list persists an empty history, preserves favorites and merges new arrivals on undo",async t=>{
+    const dir=await fs.mkdtemp(path.join(os.tmpdir(),"harmony-clear-history-"));
+    const bench={storage:{fsPath:dir},language:"en",state:{tool:"network"},context:{workspaceState:{get:(_k,fallback)=>fallback}},publish(){}};
+    const controller=new NetworkController(bench,{});
+    t.after(async()=>{await controller.close();await fs.rm(dir,{recursive:true,force:true});});
+    await controller.init();
+    const {net}=controller;
+    importRows(net,[sample(),sample()]);
+    const previous=net.records.map(row=>row.id);
+    net.collection.save(net.findRecord(previous[0]));
+    const rules=net.scenario;
+    net.omittedRecords=4;
+    await controller.handle({type:"networkClearTraffic"});
+    const undoId=net.snapshot().clearedHistory;
+    assert.ok(undoId);
+    const stored=JSON.parse(await fs.readFile(controller.file,"utf8"));
+    assert.deepEqual(stored.records,[]);
+    assert.equal(stored.omittedRecords,0);
+    assert.equal(stored.favorites[0].record.id,previous[0]);
+    assert.equal(net.scenario,rules);
+    assert.equal(net.findRecord(previous[1]),undefined);
+    importRows(net,[sample()]);
+    const later=net.records[0].id;
+    await controller.handle({type:"networkUndoClearTraffic",id:"outdated"});
+    assert.deepEqual(net.records.map(row=>row.id),[later]);
+    await controller.handle({type:"networkUndoClearTraffic",id:undoId});
+    assert.deepEqual(net.records.map(row=>row.id),[...previous,later]);
+    assert.equal(net.omittedRecords,4);
+    assert.equal(net.snapshot().clearedHistory,undefined);
+});
+
 test("field actions preserve array index types and duplicate query positions, omitting redacted values",async()=>{
     const {fieldSeed,jsonFields,queryFields}=await loadWebview("networkFieldActions");
     const net=new NetworkSession();

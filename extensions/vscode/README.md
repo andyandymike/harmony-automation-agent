@@ -6,7 +6,7 @@ Operate a connected HarmonyOS phone, inspect the controls on its current screen,
 
 ## Install
 
-Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.13` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
+Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.14` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
 
 To build from source, clone the [project repository](https://github.com/andyandymike/harmony-automation-agent), install Node.js 22+, and run the following from its root on Windows.
 
@@ -15,7 +15,7 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.13.vsix
+code --install-extension ./harmony-agent-workbench-0.20.14.vsix
 ```
 
 On macOS and Linux, use `.venv/bin/python` and `cd extensions/vscode`. If you already have the wheel and VSIX, use `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl` in your chosen environment and install the VSIX with **Extensions → Install from VSIX…**. Node.js is only needed to develop or build the extension.

@@ -26,8 +26,10 @@ class AgentClient {
         this.stateDir = stateDir;
     }
 
-    async call(command, input = {}) {
+    async call(command, input = {}, { signal, timeout } = {}) {
+        signal?.throwIfAborted();
         await this.verify?.();
+        signal?.throwIfAborted();
         const requests = path.join(this.stateDir, "requests");
         await fs.mkdir(requests, { recursive: true });
         const request = path.join(requests, randomUUID() + ".json");
@@ -41,9 +43,12 @@ class AgentClient {
             let stdout;
             try {
                 ({ stdout } = await runExecutable(this.executable, args, {
-                    encoding: "utf8", windowsHide: true, maxBuffer: 32 * 1024 * 1024, env: this.env,
+                    encoding: "utf8", windowsHide: true, maxBuffer: 32 * 1024 * 1024, env: this.env, signal, timeout,
                 }));
             } catch (error) {
+                signal?.throwIfAborted();
+                if (command === "devices" && timeout && error.killed)
+                    throw new AgentError({ code: "DEVICE_DISCOVERY_TIMEOUT", message: "Device discovery timed out." });
                 if (!error.stdout) {
                     if (this.prefix.length) throw new Error(error.stderr?.trim() || error.message);
                     throw error;

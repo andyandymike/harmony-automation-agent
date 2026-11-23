@@ -86,10 +86,11 @@ export function ruleGroupMenuItems(owner,model,lang,send,render) {
 
 export function networkView(model,lang) {
     const w=words(lang), n=model.network;
+    const loading = model.busy || model.networkLoading;
     if(!n) return `<section class="net-view"><header class="net-heading"><h1>${w("Network","网络调试")}</h1></header>
-        <div class="net-empty"><p role="status">${model.busy ? w("Loading requests and rule groups…","正在读取请求和规则组…") :
+        <div class="net-empty"><p role="status">${loading ? w("Loading requests and rule groups…","正在读取请求和规则组…") :
             w("Could not open network data.","无法打开网络调试数据。")}</p>
-        ${model.busy ? "" : `<button type="button" class="button vscode-button secondary" data-type="networkOpen">${w("Try again","重试")}</button>`}</div></section>`;
+        ${loading ? "" : `<button type="button" class="button vscode-button secondary" data-type="networkOpen">${w("Try again","重试")}</button>`}</div></section>`;
     observeStudio(n);
     if(n.filterVersion && filterVersion!==n.filterVersion){
         filterVersion=n.filterVersion; pendingExchange=undefined; showRequests(); resetTraffic();
@@ -167,6 +168,11 @@ export function networkClick(el,model,send,render) {
         showRequests();inspectBatch(n,lookup(el.dataset.id)?.batch?.id || el.dataset.id);
         focusAfter='[data-net="previousList"]';
     }
+    else if(id==="clearTraffic"){
+        showRequests();resetTraffic();
+        send({type:"networkClearTraffic"});
+        return true;
+    }
     else if(id==="inspectRequest" || id==="inspectResponse" || id==="filterPath"){
         const record=lookup(el.dataset.id);
         if(!record)return true;
@@ -234,7 +240,7 @@ export function networkClick(el,model,send,render) {
         const type={native:"networkNative",nativeChoose:"networkNativeChoose",nativeTimed:"networkNativeTimed",
             arkweb:"networkArkWeb",har:"networkImportHar",all:"networkAll",from:"networkFrom",
             favorite:"networkSaveFavorite",unfavorite:"networkRemoveFavorite",renameFavorite:"networkRenameFavorite",undoFavorite:"networkUndoFavorite",
-            deleteCapture:"networkDeleteCapture",undoCapture:"networkUndoCapture",
+            deleteCapture:"networkDeleteCapture",undoCapture:"networkUndoCapture",undoClearTraffic:"networkUndoClearTraffic",
             server:"networkServer",map:"networkMap",try:"networkTry",reset:"networkResetHits",bind:"networkBind",unbind:"networkBind",
             marker:"networkMarker",saveCase:"networkSaveCase"}[id];
         if(id==="nativeStop"){

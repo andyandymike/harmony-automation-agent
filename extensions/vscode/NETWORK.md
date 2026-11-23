@@ -5,6 +5,8 @@
 1. 打开工作台的「网络调试」。在已选手机上打开调试签名的应用，然后点「开始采集」。插件会识别当前前台 App。指定其他应用时，展开「更多采集选项」。
 2. 等到「采集中」再重现问题。复现结束后在原位置点「结束采集」。需要指定时长时，在「更多采集选项」中选择「定时采集…」。
 3. 等待读取结束后点「查看本次请求」。可以从这一批请求返回之前的列表。若结果为零，在所选应用中准备一个会触发 Network Kit 请求的操作，再次采集。
+
+请求列表的「清空请求历史」会清除已保留的全部请求，可撤销。收藏的请求仍可在「收藏」中打开。设备提前结束手动采集时，插件会显示「设备提前结束了采集」并读取设备已保存的结果。华为文档列出的手动采集上限为 3600 秒。 [华为 hiprofiler 文档](https://developer.huawei.com/consumer/cn/doc/HarmonyOS-Guides/hiprofiler/)
 4. 点列表旁的异常数量可筛出失败记录。输入 `status:503` 可查指定状态码，也可组合 `method:GET host:catalog.test`。要查正文，打开「查找内容」，选择「响应正文」，输入文字或正则，用上下箭头逐个查看命中。
 5. 选择一条记录阅读请求、响应或耗时，用上下方向键切换记录，Home、End 到达列表首尾。窄窗口可从详情返回原来的列表位置。在「对比请求」中选基准记录。经过网关的请求还可查看改写前后的差异，并从命中的规则名称进入编辑器。
 
@@ -13,6 +15,8 @@
 1. Open **Network**. Open the debug-signed app on the selected phone and choose **Start capture**. The plugin uses the foreground app. To choose another app, open **More capture options**.
 2. Wait for **Capturing**, reproduce the interaction, then choose **End capture** in the same toolbar. To set a duration, choose **Timed capture…** in **More capture options**.
 3. After the trace has been read, choose **View this capture** to inspect just its requests. **Back to previous list** restores the earlier view. If the result is empty, prepare an action that triggers a Network Kit request in the selected app and capture again.
+
+Choose **Clear request history** to remove the retained requests, with Undo available in the list. Saved requests stay in Favorites. If the phone ends a manual capture, the workbench labels it and reads the saved results. Huawei documents a 3,600-second device limit for manual capture. [Huawei hiprofiler documentation](https://developer.huawei.com/consumer/en/doc/HarmonyOS-Guides/hiprofiler/)
 4. Filter by `status:503` or `method:GET host:catalog.test`. To find an error message, search the response body and step through the highlighted matches. **Compare** compares exchanges. **Rule changes** shows what changed during a single gateway exchange.
 
 ## 留下一条失败请求，再改一个字段
