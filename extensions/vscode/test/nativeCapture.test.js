@@ -228,6 +228,8 @@ test("the same capture button starts the current app and ends an active run",asy
     n.capture={status:"recording",mode:"manual",id:"C",bundle,device:"D",startedAt:Date.now()};n.capturing=true;
     assert.match(view(n,w,model),/id="network-native-button" data-net="nativeStop" data-id="C"[^>]*>End capture/);
     assert.match(view(n,w,model),/org\.example\.debug/);
+    assert.match(view(n,w,model),/requests will appear when capture ends/);
+    assert.match(view(n,w,{device:"other",devices:["D","other"]}),/>D · org\.example\.debug</);
     assert.doesNotMatch(view(n,w,model),/Start capture/);
     n.capturing=false;n.capture={status:"timedOnly",mode:"timed",device:"D"};
     const oldDevice=view(n,w,model);

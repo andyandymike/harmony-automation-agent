@@ -1,5 +1,7 @@
 "use strict";
 
+const {randomUUID}=require("node:crypto");
+
 // Only the host's retained, redacted record enters the durable collection.
 // An item's identity is the originating exchange, even after history evicts it.
 class NetworkCollection {
@@ -23,17 +25,21 @@ class NetworkCollection {
         if (item && value) item.name = value;
     }
 
-    remove(id) {
-        const item = this.items.get(id);
-        if (!item) return;
-        this.removed = item;
-        this.items.delete(id);
+    remove(id) { this.removeMany([id]); }
+
+    removeMany(ids) {
+        const items=[...new Set(ids)].map(id=>this.items.get(id)).filter(Boolean);
+        if (!items.length) return;
+        this.removed={id:items.length===1 ? items[0].record.id : randomUUID(),items};
+        for (const item of items) this.items.delete(item.record.id);
     }
 
     undoRemoval(id) {
-        if (this.removed?.record.id !== id) return;
-        if (!this.items.has(id)) this.items.set(id,this.removed);
-        this.removed = undefined;
+        if (!this.removed || this.removed.id !== id) return;
+        for (const item of this.removed.items) {
+            if (!this.items.has(item.record.id)) this.items.set(item.record.id,item);
+        }
+        this.removed=undefined;
     }
 
     recordsWithHistory(records) {

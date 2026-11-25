@@ -20,7 +20,7 @@ export function nativeCaptureStatus(n,w,model) {
     const c=n.capture;
     const connected=model.devices.includes(model.device);
     const active=Boolean(n.capturing),sameDevice=c?.device===model.device;
-    const timed=c?.mode==="timed" && sameDevice,recording=c?.status==="recording";
+    const timed=c?.mode==="timed",recording=c?.status==="recording";
     const canStop=active && recording && c.mode==="manual";
     const deviceEnded=c?.endedBy==="device" && ["finished","empty"].includes(c.status);
     const deviceEndedLabel=w("The device ended capture early","设备提前结束了采集");
@@ -35,14 +35,21 @@ export function nativeCaptureStatus(n,w,model) {
         data-seconds="${Number(c.seconds)||0}" data-lang="${w("en","zh")}">${timeLabel(c.startedAt,c.seconds,c.mode,w)}</span>` : "";
     if(clock && typeof document!=="undefined" && !timer)updateClock();
     else if(!clock){clearInterval(timer);timer=undefined;}
-    const target=active && c?.bundle ? c.bundle : w("Current app","当前 App");
+    const app=active && c?.bundle ? c.bundle : w("Current app","当前 App");
+    const target=active && c?.device && !sameDevice ? c.device+" · "+app : app;
     const note=c?.status==="error"?html(c.error):deviceEnded?html(c.count||0)+" HTTP":c?.status==="empty"?
         w("Operate the app during capture to generate a Network Kit request.","请在采集期间操作应用，触发 Network Kit 请求。"):
         c?.status==="timedOnly"?w("Set a duration in More capture options.","请在「更多采集选项」设置时长。"):
         c?.status==="finished"&&c.count>0?html(c.count)+" HTTP":"";
-    const detail=c && !active ? `<div class="net-native-result"><span id="network-native-phase" tabindex="-1" role="status">
-        <strong>${labels[c.status]||html(c.status)}</strong>
-        ${[c.bundle,!sameDevice && c.device].filter(Boolean).map(html).join(" · ")} ${note}
+    const issue=c && !active && (c.status!=="finished" || deviceEnded || c.unreadable);
+    const details=c && [c.bundle,!sameDevice && c.device].filter(Boolean).join(" · ");
+    const previous=c?.status==="finished" && !active && !issue ?
+        w("Last capture","上次采集")+(Number.isFinite(c.count) ? " · "+c.count+w(" HTTP"," 条请求") : "") : "";
+    const result=previous ? retained ? button("captureResults",previous,{id:c.batch.id,quiet:true,className:"net-last-capture",
+        title:w("View this capture","查看本次请求")+(details?" · "+details:"")}) :
+        `<span class="net-last-capture" title="${html(details)}">${html(previous)}</span>` : "";
+    const notice=issue ? `<div class="net-native-result"><span id="network-native-phase" tabindex="-1" role="status">
+        <strong>${labels[c.status]||html(c.status)}</strong> ${html(details)} ${note}
         ${c.unreadable ? html(c.unreadable)+" "+w("unsupported events","条未识别事件"):""}</span>
         ${retained?button("captureResults",w("View this capture","查看本次请求"),{id:c.batch.id}):""}</div>` : "";
     const mainAction=!active || canStop ? button(canStop ? "nativeStop" : "native",
@@ -52,12 +59,13 @@ export function nativeCaptureStatus(n,w,model) {
         }) : "";
     const options=!active && connected ? `<details id="network-native-options" class="net-native-options">
         <summary>${w("More capture options","更多采集选项")}</summary><div class="net-native-options-menu">
-            ${button("nativeChoose",w("Capture another app…","采集其他 App…"),{quiet:true,disabled:model.busy})}
-            ${button("nativeTimed",w("Timed capture…","定时采集…"),{quiet:true,disabled:model.busy})}
+            ${button("nativeChoose",w("Capture another app","采集其他 App"),{quiet:true,disabled:model.busy})}
+            ${button("nativeTimed",w("Timed capture","定时采集"),{quiet:true,disabled:model.busy})}
         </div></details>` : "";
-    return `<section id="network-native-status" class="net-native" aria-labelledby="net-native-title">
-        <div class="net-native-bar"><div class="net-native-context"><strong id="net-native-title">${w("Native HTTP capture","原生 HTTP 采集")}</strong>
-            <span class="net-native-app">${html(connected || active ? target : w("Connect a phone","请连接手机"))}</span>
+    return `<section id="network-native-status" class="net-native" data-capturing="${active}" data-recording="${active && recording}" aria-labelledby="net-native-title">
+        <div class="net-native-bar"><div class="net-native-context"><strong id="net-native-title">${w("Native HTTP","原生 HTTP")}</strong>
+            <span class="net-native-app" title="${html(active ? [c?.device,app].filter(Boolean).join(" · ") : model.device)}">${html(connected || active ? target : w("Connect a phone","请连接手机"))}</span>
             ${active ? `<span id="network-native-phase" tabindex="-1" role="status">${labels[c?.status] || labels.starting}</span>` : ""}${clock}
-        </div><div class="net-native-actions">${mainAction}${options}</div></div>${detail}</section>`;
+        </div><div class="net-native-actions">${result}${mainAction}${options}</div></div>
+        ${recording ? `<p class="net-native-note">${w("This capture’s requests will appear when capture ends.","结束采集后显示本次请求。")}</p>` : ""}${notice}</section>`;
 }

@@ -3,6 +3,16 @@
 const {targetCommands} = require("./caseLocators");
 const {validateGesture} = require("./deviceRecorder");
 
+const point = {x:0,y:0};
+const motion = {...point,toX:0,toY:0};
+const gestureInputs = {click:point,doubleClick:point,longClick:point,swipe:motion,drag:motion,fling:motion,
+    pinch:{fingers:[motion,{...motion}]},back:{},home:{},recents:motion,typeText:{text:""}};
+
+function newGesture(kind) {
+    if (typeof kind==="string" && Object.hasOwn(gestureInputs,kind))
+        return {command:"deviceGesture",input:{kind,...gestureInputs[kind]}};
+}
+
 const commands = ["press","fill","scroll","back","wait","open","find","observe"];
 const mutations = new Set(["press","fill","scroll","back","open"]);
 const directions = ["up","down","left","right"];
@@ -101,7 +111,14 @@ function gestureDefinition(step) {
     return {kind,fields,delay:step.delayMs ?? 0};
 }
 
+function gestureOptions() {
+    return Object.keys(gestureInputs).map(kind=>gestureDefinition(newGesture(kind)));
+}
+
 function buildGesture(previous, fields, w) {
+    const creating = !previous;
+    previous ||= newGesture(fields.kind);
+    if (!previous) return;
     const gesture = gestureDefinition(previous);
     if (!gesture) return;
     const input = structuredClone(previous.input);
@@ -114,7 +131,7 @@ function buildGesture(previous, fields, w) {
         else input[field]=value;
     }
     const delay = integer(fields.delay,0,2147483647,w("Enter a non-negative step delay.","请输入非负的步骤间隔。"));
-    if (input.kind==="typeText" && fields.replaceInput===true) input.text=fields.text;
+    if (input.kind==="typeText" && (creating || fields.replaceInput===true)) input.text=fields.text;
     validateGesture(input);
     const changed = JSON.stringify(input)!==JSON.stringify(previous.input);
     const next = {...previous,input,...((delay || previous.delayMs!==undefined) && {delayMs:delay})};
@@ -122,4 +139,4 @@ function buildGesture(previous, fields, w) {
     return next;
 }
 
-module.exports = {editableCommands,actionDefinition,buildAction,gestureDefinition,buildGesture};
+module.exports = {editableCommands,actionDefinition,buildAction,gestureDefinition,gestureOptions,buildGesture};

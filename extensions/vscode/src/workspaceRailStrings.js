@@ -1,7 +1,7 @@
 "use strict";
 
 module.exports = {
-    railOpenAnother: ["Open another workflow…", "打开其他流程…"],
+    railOpenAnother: ["Open another workflow", "打开其他流程"],
     railSteps: ["View steps", "查看步骤"],
     railPlanNotReady: ["Open the steps to check this file before replay.", "查看流程步骤，确认文件可供回放。"],
     railLastPlayback: ["Last run", "上次运行"],

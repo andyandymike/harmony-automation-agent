@@ -15,19 +15,32 @@ function routeShape(path) {
         .map(part => !part || routeWords.has(part.toLowerCase()) ? part.toLowerCase() : "{…}").join("/");
 }
 
-async function localRequests(controller, window, filter = "all") {
+async function requestRecords(controller, window, {filter="all",runId}={}) {
     if (!window || !Number.isFinite(window.start) || !Number.isFinite(window.end) || window.end < window.start) {
-        return {kind:"http",status:"missingTime",filter,records:[]};
+        return;
     }
     await controller.init();
     const retained = controller.net.collection.recordsWithHistory(controller.net.snapshot().records);
-    const matches = retained.filter(record => {
+    return retained.filter(record => {
         const at = Date.parse(record.startedAt);
         const elapsed = Number.isFinite(record.durationMs) && record.durationMs >= 0 ? record.durationMs : 0;
-        return at <= window.end && at + elapsed >= window.start &&
+        return (!runId || !record.caseRunId || record.caseRunId===runId) &&
+            at <= window.end && at + elapsed >= window.start &&
             (filter === "all" || record.status === 0 || record.status >= 400);
     }).sort((a,b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+}
+
+async function localRequests(controller, window, filter = "all", runId) {
+    const matches = await requestRecords(controller,window,{filter,runId});
+    if (!matches) return {kind:"http",status:"missingTime",filter,records:[]};
     return {kind:"http",status:"read",window,filter,total:matches.length,records:matches.slice(0,8).map(requestSummary)};
+}
+
+function gatewayIssue(record) {
+    if (record.source==="fixture" && record.status===404 && !record.ruleId && !record.originalResponse &&
+        (record.error==="NO_TEST_UPSTREAM" || record.response?.body?.error==="No fixture rule matches this request."))
+        return "NO_TEST_UPSTREAM";
+    return record.source==="gateway" && ["UPSTREAM_FAILED","RULE_ERROR"].includes(record.error) ? record.error : undefined;
 }
 
 function requestSummary(r) {
@@ -35,6 +48,8 @@ function requestSummary(r) {
     return {
         id:r.id, at:Number.isFinite(at) ? new Date(at).toISOString() : undefined, source:sources.has(r.source) ? r.source : "other",
         method:methods.has(r.method) ? r.method : "HTTP", route:routeShape(r.path), status:r.status,
+        gatewayIssue:gatewayIssue(r),
+        ...(Number.isInteger(r.originalResponse?.status) && {upstreamStatus:r.originalResponse.status}),
         ...(Number.isFinite(r.durationMs) && {durationMs:r.durationMs}),
         ...(Number.isInteger(r.ruleHit) && r.ruleHit > 0 && {ruleHit:r.ruleHit}),
     };
@@ -54,6 +69,8 @@ function httpReceiptText(result, local) {
             result.filter === "errors" ? local("errors", "错误请求") : local("all", "全部请求"),result.records.length + "/" + result.total);
     }
     return [header.join(" · "), ...result.records.map(r => [r.at,r.method,r.route,String(r.status),r.source,
+        r.gatewayIssue==="NO_TEST_UPSTREAM" && local("no test upstream","未配置测试上游"),
+        r.upstreamStatus && local("upstream","上游")+" "+r.upstreamStatus,
         r.durationMs != null && r.durationMs+" ms",r.ruleHit && local("rule hit #","规则命中 #")+r.ruleHit,r.id].filter(Boolean).join(" · "))].join("\n");
 }
 
@@ -71,4 +88,4 @@ async function explainExchange({controller,id,ask,signal,onEvent,language}) {
     onEvent({type:"answer",text:text.trim()});
 }
 
-module.exports = {localRequests,explainExchange,httpReceiptText};
+module.exports = {localRequests,requestRecords,requestSummary,gatewayIssue,explainExchange,httpReceiptText};

@@ -1,6 +1,9 @@
 "use strict";
 
 const { deviceRecordingFormat, pageView, targetLabel } = require("./model");
+const {expectation} = require("./caseBdd");
+const {stepEntries} = require("./casePresentation");
+const {restrictedInput} = require("./explorationScope");
 
 const simpleCommands = new Set(["press", "back", "scroll", "fill", "observe", "find", "wait"]);
 const names = {
@@ -17,19 +20,22 @@ function isStable(selector) {
 }
 
 function labelStep(step, language) {
-    const command = step.command || "assert";
-    const target = targetLabel(step.input?.target || step.assert?.selector);
-    return [words(language, ...names[command]), target].filter(Boolean).join(" · ");
+    const command = step.command;
+    const action = names[command] || (step.assert ? names.assert : step.read ? ["Read value","读取值"] :
+        step.if ? ["Conditional steps","条件步骤"] : step.repeat ? ["Repeat steps","循环步骤"] :
+        step.ruleGroup ? ["Rule group","规则组"] : [command || "Step",command || "步骤"]);
+    const target = targetLabel(step.input?.target || step.assert?.selector || step.read?.selector);
+    return [words(language, ...action), target].filter(Boolean).join(" · ");
 }
 
-// This describes selectable boundaries. The native runner validates the entire
-// original definition, including non-executed branches, before baseline input.
-function prepareFlow(value, language = "en") {
-    let plan = value;
-    if (typeof value === "string") {
-        try { plan = JSON.parse(value.replace(/^\uFEFF/, "")); }
-        catch { throw new Error(words(language, "Enter a valid workflow JSON object.", "请输入有效的工作流 JSON。")); }
-    }
+function parseFlow(value,language) {
+    if (typeof value!=="string") return value;
+    try { return JSON.parse(value.replace(/^\uFEFF/, "")); }
+    catch { throw new Error(words(language, "Enter a valid workflow JSON object.", "请输入有效的工作流 JSON。")); }
+}
+
+function prepareFlow(value, language = "en", stepNames = {}, positions, {trustedCase=false}={}) {
+    const plan=parseFlow(value,language);
     if (plan?.format === deviceRecordingFormat) throw new Error(words(language,
         "A coordinate recording needs a control-based checkpoint. Use a control recording or describe this route.",
         "坐标录制需要可核对的控件检查点。请选择按控件录制的流程，或描述这条路线。"));
@@ -39,11 +45,63 @@ function prepareFlow(value, language = "en") {
     }
     const linear = plan.version === "1" && plan.steps.every(step =>
         step && (simpleCommands.has(step.command) || Boolean(step.assert)));
-    const checkpoints = linear ? plan.steps.map((step, index) => ({ index, label: labelStep(step, language) })) :
-        [{ index: plan.steps.length - 1, label: words(language, "After the complete workflow", "整个流程执行后") }];
-    const firstAction = linear ? plan.steps.findIndex(s => ["press", "scroll", "fill", "back"].includes(s.command)) : -1;
-    return { plan, kind: linear ? "linear" : "endpoint", checkpoints,
-        defaultCheckpoints: [firstAction >= 0 ? firstAction : checkpoints.at(-1).index] };
+    const w = (en, zh) => words(language,en,zh);
+    const checkpoints = [{index:-1,position:0,label:w("Case start","用例起点")}];
+    let unavailable;
+    for (const [index,row] of plan.steps.entries()) {
+        const label = stepNames[index] || labelStep(row,language);
+        if (!unavailable) {
+            for (const {step} of stepEntries([row])) {
+                const restriction=restrictedInput(step);
+                if (step.ruleGroup) unavailable=w("The script reaches a network rule group. Choose an earlier position.",
+                    "前置脚本会操作网络规则组，请选择规则组之前的位置。");
+                else if (restriction==="app") unavailable=w("The script opens an app. Choose an earlier position.",
+                    "前置脚本会打开应用，请选择更早的位置。");
+                else if (!trustedCase && restriction==="data") unavailable=w("This step changes data or an account. Choose an earlier position.",
+                    "这一步会更改数据或账号，请选择更早的位置。");
+                else if ("stop" in step || "yield" in step)
+                    unavailable=w("The script can stop before reaching this position. Choose an earlier position.",
+                        "脚本可能在到达这个位置前停止，请选择更早的位置。");
+                else if (step.command==="deviceGesture" || step.gesture) {
+                    const guardedTyping=trustedCase && step.input?.kind==="typeText" && step.before?.some(check=>
+                        check.property==="focused" && check.equals===true && isStable(check.selector));
+                    if (!guardedTyping) unavailable=step.input?.kind==="typeText" ?
+                        w("This input has no verified focused control. Choose an earlier position.",
+                            "这次键入缺少可核对的焦点控件，请选择更早的位置。") :
+                        w("This device gesture has no control-based target. Choose an earlier position.",
+                            "这次设备手势没有控件定位，请选择更早的位置。");
+                }
+                if (unavailable) break;
+            }
+        }
+        if (!positions || positions[index]) checkpoints.push({index,label,position:positions?.[index] || index+1,
+            ...(unavailable && {blockedReason:unavailable})});
+    }
+    const checkText = check => expectation(check,w);
+    const goalChecks = Array.isArray(plan.goals) ? plan.goals.map(checkText) : [];
+    const stepChecks = [];
+    for (const [index,step] of plan.steps.entries()) {
+        const input = step.input || {};
+        const checks = [...(Array.isArray(step.before) ? step.before : [])];
+        if (step.assert) checks.push(step.assert);
+        if (step.command === "wait") checks.push({selector:input.target,property:input.property,equals:input.equals});
+        if (input.expect) checks.push(input.expect);
+        for (const check of checks) stepChecks.push({index,text:checkText(check)});
+    }
+    const firstAction = plan.steps.findIndex(s => ["press", "scroll", "fill", "back"].includes(s.command));
+    const available=checkpoints.filter(point=>!point.blockedReason);
+    const initial = available.find(point=>point.index>=Math.max(0,firstAction)) || available.at(-1);
+    return { plan, kind: linear ? "linear" : "endpoint", checkpoints, goalChecks, stepChecks,
+        startChecks:(plan.preconditions || []).map(checkText),
+        stepCount:positions ? Math.max(0,...Object.values(positions)) : plan.steps.length,
+        defaultCheckpoints: [initial.index] };
+}
+
+function checkpointDetails(flow, selected) {
+    return flow.checkpoints.filter(point=>selected.includes(point.index)).map(point=>({
+        ...point, nextLabel:flow.checkpoints.find(next=>next.index>point.index)?.label,
+        checks:[...new Set([...(flow.startChecks || []), ...flow.stepChecks.filter(check=>check.index<=point.index).map(check=>check.text)])],
+    }));
 }
 
 function draftNodes(observation) {
@@ -118,4 +176,4 @@ function regressionPlan(finding) {
     return structuredClone(finding.plan);
 }
 
-module.exports = { prepareFlow, draftFlow, modelJson, regressionPlan };
+module.exports = { parseFlow, prepareFlow, draftFlow, modelJson, regressionPlan, checkpointDetails };

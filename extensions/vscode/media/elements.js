@@ -1,6 +1,10 @@
 import {vscode} from "./bridge.js";
 import {showItemMenu} from "./ui/itemActions.js";
+import {ListSelection} from "./ui/listSelection.js";
 import "./elementsLocator.js";
+
+const watchSelection = new ListSelection("element-watches");
+const elementStepSelection = new ListSelection("element-steps");
 const {ancestors,hitsAt,parseLocator,selectNodes,suggestLocator} = globalThis.harmonyElementLocators;
 
 const escape = value => String(value ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -25,7 +29,7 @@ const words = {
     bad:["Invalid locator. Use a JSON object with native selector fields.","定位器无效，请输入包含原生定位字段的 JSON 对象。"],
     watch:["Watched properties","固定观察的属性"], unpin:["Unwatch","取消观察"], saved:["Open snapshot","查看快照"],
     sample:["Switch to the live phone to update watched properties automatically.","切回实时操作后，固定观察的属性会自动刷新。"],
-    steps:["Workflow draft","流程草稿"], remove:["Remove","移除"], save:["Save workflow…","保存流程…"],
+    steps:["Workflow draft","流程草稿"], remove:["Remove","移除"], save:["Save workflow","保存流程"],
     unknown:["Unavailable","未采集"], absent:["matches","个匹配"], attrsHint:["Select a control in the picture or list.","点击手机画面或从列表选择控件。"],
     busy:["Reading screen","正在读取画面"], pic:["Screen snapshot","画面快照"], copyDone:["Locator copied.","已复制定位器。"],
 };
@@ -38,7 +42,8 @@ const send=(type,extra={})=>vscode.postMessage({type,...extra});
 const validNode=()=>tested.matches?.length===1 && model?.page?.complete ? tested.matches[0] : undefined;
 const casePicker=()=>{
     const picker = model?.caseReview?.stepTargets;
-    if (model?.tool==="recordings" && picker?.picture && picker.picture.device===model.device && model.devices.includes(model.device)) return picker;
+    if (!picker?.picture || model.deviceDisconnected || picker.picture.device!==model.device || !model.devices.includes(model.device)) return;
+    if (model.tool==="recordings") return picker;
 };
 
 export function bindElements(onRender,onSelect,{selectCaseTarget,endCasePick}={}) {
@@ -83,12 +88,12 @@ export function bindElements(onRender,onSelect,{selectCaseTarget,endCasePick}={}
         }
     });
     $("case-pick-exit").addEventListener("click",()=>{
-        if (endCasePick?.()) $("bdd-pick-screen")?.focus();
+        if (endCasePick?.()) ($("bdd-pick-screen") || $("case-check-picture"))?.focus();
     });
     $("live-device").addEventListener("keydown",event=>{
         if (event.key==="Escape" && !event.isComposing && casePicker() && endCasePick?.()) {
             event.preventDefault();
-            $("bdd-pick-screen")?.focus();
+            ($("bdd-pick-screen") || $("case-check-picture"))?.focus();
         }
     });
     $("element-photo").addEventListener("load",()=>{
@@ -100,7 +105,8 @@ export function bindElements(onRender,onSelect,{selectCaseTarget,endCasePick}={}
         if (casePicker()) $("element-picker-message").textContent=w("casePhotoError");
     });
     setInterval(()=>{
-        if (!document.hidden && model?.tool==="inspect" && !model.busy && !model.elements?.picking && model.elements?.watches.length)
+        if (!document.hidden && model?.tool==="inspect" && !model.busy && !model.deviceDisconnected &&
+            !model.elements?.picking && model.elements?.watches.length)
             send("elementSample");
     },2500);
 }
@@ -124,7 +130,8 @@ export function updateElements(next,lang,t) {
     if (switched) { selected=edit=hover=undefined; tested={}; }
     model=next;language=lang;
     const pick=$("element-pick-mode"),operate=$("element-operate-mode");
-    const inspect=next.tool==="inspect" && next.devices.includes(next.device), picking=inspect && !!next.elements?.picking;
+    const inspect=next.tool==="inspect" && !next.deviceDisconnected && next.devices.includes(next.device);
+    const picking=inspect && !!next.elements?.picking;
     const casePick = casePicker();
     $("case-pick-controls").hidden=!casePick;
     $("case-pick-instructions").textContent=w("casePick");
@@ -217,7 +224,12 @@ function validate() {
 }
 
 export function selectElement(node,manual=false) {
-    if (!node) { selected=undefined;return; }
+    if (!node) {
+        selected=edit=undefined;
+        tested={};
+        paint();
+        return;
+    }
     if(manual || !selected || selected.ref!==node.ref && selected.frameId===model.page.frameId) {
         const suggestion=suggestLocator(model.page.nodes,node);
         edit=suggestion ? JSON.stringify(suggestion,null,2) : "{}";
@@ -242,17 +254,21 @@ export function elementControls(node,actions) {
     const disabled=Boolean(model.busy);
     const copied=model.elements?.copied;
     const sameCopy=copied && copied.frameId===model.page.frameId && copied.key===JSON.stringify(tested.locator);
-    return '<section class="el-locator"><div class="el-locator-head"><label for="el-locator">'+w("locator")+'</label>'+
+    return (chain.length?'<nav class="el-crumbs">'+chain.join(' › ')+'</nav>':'')+
+      '<section class="el-locator"><div class="el-locator-head"><label for="el-locator">'+w("locator")+'</label>'+
       '<button type="button" class="el-inline-action" data-el="copy" '+(disabled||!tested.locator?'disabled':'')+'>'+w("copy")+'</button></div>'+
       '<textarea id="el-locator" spellcheck="false" rows="3" aria-describedby="el-locator-result">'+escape(edit)+'</textarea>'+
-      '<div class="el-result-line"><span id="el-locator-result" role="status">'+escape(outcome())+'</span>'+
+      '<div class="el-result-line"><span id="el-locator-result" role="status" data-result="'+locatorState()+'">'+escape(outcome())+'</span>'+
       '<span id="el-copy-result" role="status">'+(sameCopy?w("copyDone"):'')+'</span></div></section>'+
-      (chain.length?'<nav class="el-crumbs">'+chain.join(' › ')+'</nav>':'')+
       '<section class="el-observable"><h2>'+w("props")+'</h2><div id="el-observable">'+propertyRows()+'</div></section>'+
       '<details id="el-attributes"><summary>'+w("attrs")+'</summary>'+
       '<dl class="el-properties">'+props.join("")+'</dl></details>'+
       (node.pressable?'<div class="el-step">'+btn("step","step",disabled||!validNode()?.pressable)+'</div>':'')+
       (actions?'<details id="el-device-actions"><summary>'+w("operateSelected")+'</summary><div class="node-actions">'+actions+'</div></details>':'');
+}
+function locatorState() {
+    if (!tested.matches) return "invalid";
+    return selected && validNode()?.ref === selected.ref ? "matched" : "unresolved";
 }
 function outcome() {
     const matches=tested.matches;
@@ -291,21 +307,57 @@ function shown(result) {
     return result?.state==="partial"?w("partial"):w("unknown");
 }
 
-export function elementsFooter() {
-    const view=model?.elements;if(!view) return "";
-    const watches=view.watches.map(watch=>'<li><div><strong>'+escape(watch.label)+'</strong> · <code>'+escape(watch.property)+'</code> = '+escape(shown(watch.current))+
-        ' '+btn("unpin","unwatch",model.busy,'data-id="'+escape(watch.id)+'"')+'</div><ol>'+watch.history.map(change=>
-          '<li><time>'+escape(new Date(change.time).toLocaleTimeString(language))+'</time> '+escape(shown(change.previous))+' → '+escape(shown(change.current))+
-          (change.picture?.src?'<details id="el-snapshot-'+escape(watch.id+change.frameId)+'"><summary>'+w("saved")+'</summary><img class="el-snapshot" alt="'+w("pic")+'" src="'+escape(change.picture.src)+'"></details>':'')+'</li>').join("")+'</ol></li>').join("");
-    const steps=view.steps.map((step,i)=>'<li><code>'+escape(JSON.stringify(step))+'</code> '+btn("remove","remove",model.busy,'data-index="'+i+'"')+'</li>').join("");
-    return (watches?'<section class="el-group"><h2>'+w("watch")+'</h2><p>'+w("sample")+'</p><ul>'+watches+'</ul></section>':'')+
-        (steps?'<section class="el-group"><h2>'+w("steps")+'</h2><ol>'+steps+'</ol>'+btn("save","save",model.busy)+'</section>':'');
+export function elementsFooter(onPreviewNode,inspection="") {
+    const view=model?.elements;if(!view) return inspection;
+    const pair=(en,zh)=>/^zh/i.test(language) ? zh : en;
+    const previewLocator=locator=>{
+        if (!onPreviewNode) return;
+        const matches=locator ? selectNodes(model.page?.nodes || [],locator) : [];
+        onPreviewNode(matches.length===1 ? matches[0] : undefined);
+    };
+    watchSelection.update(model.device,view.watches.map(watch=>watch.id),model.busy);
+    const tools=watchSelection.tools(pair,[{id:"remove",label:pair("Unwatch selected","取消观察所选"),
+        message:ids=>({type:"elementUnwatchSelected",ids})}],{
+        onPreview:id=>previewLocator(view.watches.find(item=>item.id===id)?.locator),
+    });
+    const watches=view.watches.map(watch=>{
+        const preview=watchSelection.previewId===watch.id;
+        const history=(!watchSelection.active || preview) && watch.history.length ? '<div class="el-watch-history" data-selection-ignore data-selection-detail><h3>'+pair("Property changes","属性变化")+'</h3><ol>'+watch.history.map(change=>
+            '<li><time>'+escape(new Date(change.time).toLocaleTimeString(language))+'</time><span class="el-watch-change"><code>'+escape(shown(change.previous))+'</code><span> → </span><code>'+escape(shown(change.current))+'</code></span>'+
+            (change.picture?.src?'<details id="el-snapshot-'+escape(watch.id+change.frameId)+'"><summary>'+w("saved")+'</summary><img class="el-snapshot" alt="'+w("pic")+'" src="'+escape(change.picture.src)+'"></details>':'')+'</li>').join("")+'</ol></div>' : '';
+        return '<li'+watchSelection.row(watch.id)+'><div class="el-watch-head">'+
+            watchSelection.checkbox(watch.id,pair("Select ","选择 ")+watch.label+" · "+watch.property)+'<strong>'+escape(watch.label)+'</strong>'+
+            (watchSelection.active ? '' : ' '+btn("unpin","unwatch",model.busy,'data-id="'+escape(watch.id)+'"'))+'</div>'+
+            '<div class="el-watch-readout" data-state="'+escape(watch.current?.state)+'"><code>'+escape(watch.locator?.id ? watch.locator.id+"."+watch.property : watch.property)+'</code><strong>'+escape(shown(watch.current))+'</strong></div>'+
+            (preview ? '<div class="el-watch-locator" data-selection-detail><small>'+w("locator")+'</small> <code>'+escape(JSON.stringify(watch.locator))+'</code></div>' : '')+history+'</li>';
+    }).join("");
+    const revision=view.stepsRevision || 0;
+    elementStepSelection.update(revision,view.steps.map((_,i)=>i),model.busy || Boolean(model.draft));
+    const stepTools=elementStepSelection.tools(pair,[{id:"remove",label:pair("Delete selected","删除所选"),
+        message:ids=>({type:"elementRemoveSelected",indices:ids.map(Number),revision})}],{
+        onPreview:id=>{
+            const step=view.steps[id];
+            previewLocator(step?.assert?.selector || step?.input?.target);
+        },
+    });
+    const steps=view.steps.map((step,i)=>'<li'+elementStepSelection.row(i)+'>'+
+        elementStepSelection.checkbox(i,pair("Select step ","选择步骤 ")+(i+1))+
+        '<code>'+escape(JSON.stringify(step))+'</code> '+
+        (elementStepSelection.active ? '' : btn("remove","remove",model.busy,'data-index="'+i+'"'))+'</li>').join("");
+    const undo=view.removedSteps?.length ? '<button type="button" class="button" data-el="undoRemoval"'+
+        (model.busy || model.draft ? ' disabled' : '')+'>'+pair("Undo deletion","撤销删除")+'</button>' : "";
+    const watchPanel=watches ? '<section class="el-group el-watch-panel"><h2>'+w("watch")+'</h2>'+(view.picking ? '<p>'+w("sample")+'</p>' : '')+tools+'<ul>'+watches+'</ul></section>' : '';
+    return (view.picking ? inspection+watchPanel : watchPanel+inspection)+
+        (steps || undo ? '<section class="el-group"><h2>'+w("steps")+'</h2>'+stepTools+undo+'<ol>'+steps+'</ol>'+
+            (steps ? btn("save","save",model.busy) : "")+'</section>' : '');
 }
 
 export function elementInput(input) {
     if(input.id!=="el-locator") return false;
     edit=input.value;validate();
-    $("el-locator-result").textContent=outcome();
+    const result=$("el-locator-result");
+    result.textContent=outcome();
+    result.dataset.result=locatorState();
     $("el-copy-result").textContent="";
     $("el-observable").innerHTML=propertyRows();
     for(const [action,bad] of [["copy",!tested.locator],["step",!validNode()?.pressable]]) {
@@ -317,6 +369,7 @@ export function elementInput(input) {
 export function elementClick(button) {
     const action=button.dataset.el;if(!action) return false;
     const type="element"+action[0].toUpperCase()+action.slice(1);
-    send(type,{frameId:model.page?.frameId,locator:tested.locator,property:button.dataset.property,id:button.dataset.id,index:Number(button.dataset.index)});
+    send(type,{frameId:model.page?.frameId,locator:tested.locator,property:button.dataset.property,
+        id:button.dataset.id,index:Number(button.dataset.index),...(action==="undoRemoval" && {revision:model.elements?.stepsRevision || 0})});
     return true;
 }

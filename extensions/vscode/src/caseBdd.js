@@ -1,8 +1,10 @@
 "use strict";
 
 const {targetLabel, deviceRecordingFormat} = require("./model");
-const {stepRoles, restorePresentation} = require("./casePresentation");
+const {stepRoles, restorePresentation, caseDescription, descriptionText} = require("./casePresentation");
 const {referenceStatus} = require("./caseComposition");
+const {ruleGroupsByPosition,overlapsPreviousRuleEnable} = require("./caseRuleSteps");
+const {ruleGroupName} = require("./network");
 
 const secret = /pass(?:word|code)|secret|token|密码|口令|验证码/i;
 const properties = {visible: ["visible", "可见", "不可见"], enabled: ["enabled", "可用", "不可用"],
@@ -75,6 +77,12 @@ function createBdd(plan, language = "en", ruleGroup, presentation, composition) 
     const w = (...pair) => pair[index];
     const checks = values => Array.isArray(values) ? values.map(check => expectation(check, w)) : [];
     const coordinate = plan.format === deviceRecordingFormat;
+    const positions = ruleGroupsByPosition(plan,ruleGroup);
+    const ruleClosures = {};
+    for (const [path,{before,after}] of positions) {
+        if (before?.active.size || after?.active.size)
+            ruleClosures[path] = {before:Boolean(before?.active.size),after:Boolean(after?.active.size)};
+    }
     function rows(steps, path = "steps", depth = 0) {
         if (!Array.isArray(steps) || depth > 8) return [];
         return steps.map((step, i) => {
@@ -82,8 +90,16 @@ function createBdd(plan, language = "en", ruleGroup, presentation, composition) 
             const input = step?.input || {};
             const display = presentation?.get(step);
             const receiptPath = composition?.paths?.get(location);
+            const editNote = descriptionText(step?.editNote);
             const row = {area:"step", index:i, path:location, ...(receiptPath && receiptPath!==location && {receiptPath}),
-                ...(display?.name && {name:display.name}), ...(display?.group && {group:display.group})};
+                ...(display?.name && {name:display.name}), ...(display?.group && {group:display.group}),
+                ...(display?.description && {displayDescription:display.description}),...(editNote && {editNote})};
+            const description = caseDescription(step);
+            if (description) {
+                const implemented = Array.isArray(description.steps) && description.steps.length>0;
+                return {...row,role:display?.role || stepRoles(step)[0],text:description.text,description:{id:description.id,implemented},
+                    ...(implemented && {branches:[{steps:rows(description.steps,location+".description.steps",depth+1)}]})};
+            }
             if (step?.useCase) {
                 const ref = referenceStatus(step.useCase,composition?.sources);
                 const preview = createBdd(ref.plan,language,undefined,restorePresentation(ref.plan,ref.presentation));
@@ -92,11 +108,27 @@ function createBdd(plan, language = "en", ruleGroup, presentation, composition) 
                     return {...child,path:location+".linked."+child.path,receiptPath:layout?.map(child.path),
                         ...(child.branches && {branches:child.branches.map(branch=>({...branch,steps:branch.steps.map(linked)}))})};
                 }
-                return {...row,role:w("Use case","引用"),text:ref.name,
+                return {...row,role:display?.role || stepRoles(step)[0],text:ref.name,
                     reference:{caseId:ref.caseId,status:ref.status,digest:ref.digest?.slice(0,8)},
                     branches:[{steps:preview?.steps?.map(linked) || [],readOnly:true}]};
             }
-            if (coordinate) return {...row, text: gesture(input, w)};
+            if (step.ruleGroup) {
+                const {action,scenario,name:target} = step.ruleGroup;
+                const before = positions.get(location)?.before;
+                const enable = action==="enable";
+                const legacyTarget = before?.possible.size===1 && before.active.size===1 ? before.active.values().next().value : undefined;
+                const name = enable ? ruleGroupName(scenario) : target ?? legacyTarget;
+                const label = name===undefined ? undefined : name || w("Unnamed rule group","未命名规则组");
+                const unavailable = !enable && Boolean(before) &&
+                    (typeof target==="string" ? !before.active.has(target) : !before.possible.size);
+                const repeated = enable && overlapsPreviousRuleEnable(before,name,location);
+                return {...row,role:display?.role || stepRoles(step)[0],ruleGroup:{action,name:label,unavailable,repeated,
+                    editable:enable || Boolean(before?.active.size)},
+                    text:enable ? w("Enable rule group ","启用规则组 ")+label :
+                        label!==undefined ? w("Turn off rule group ","关闭规则组 ")+label :
+                            w("Turn off the most recently enabled rule group","关闭最近启用的规则组")};
+            }
+            if (coordinate || step?.command==="deviceGesture") return {...row,role:display?.role || "When",text:gesture(input,w)};
             row.role = display?.role || stepRoles(step)[0];
             if (step?.if) {
                 const branches = [{label: w("If true", "满足时"), steps: rows(step.then, location + ".then", depth + 1)}];
@@ -118,10 +150,17 @@ function createBdd(plan, language = "en", ruleGroup, presentation, composition) 
                 ...(input.expect && {after: expectation(input.expect, w)})};
         });
     }
-    const boundaries = (list, area, path, role) => checks(list).map((text,index)=>({text,area,index,path:path+"["+index+"]",role}));
-    const setup = ruleGroup?.name ? [{area:"setup",role:"Given",text:w("Use rule group ","使用规则组 ")+ruleGroup.name}] : [];
-    return {steps:[...setup, ...boundaries(plan.preconditions,"start","preconditions","Given"),
+    const boundaries = (list, area, path, role) => checks(list).map((text,index)=>{
+        const display=presentation?.get(list[index]);
+        return {text,area,index,path:path+"["+index+"]",role:display?.role || role,
+            ...(display?.name && {name:display.name}),...(display?.description && {displayDescription:display.description}),
+            ...(display?.group && {group:display.group})};
+    });
+    const setup = ruleGroup ? [{area:"setup",role:"Given",text:w("Use rule group ","使用规则组 ")+
+        (ruleGroup.name || w("Unnamed rule group","未命名规则组"))}] : [];
+    return {...(descriptionText(plan.editNote) && {editNote:plan.editNote}),
+        ...(Object.keys(ruleClosures).length && {ruleClosures}),steps:[...setup, ...boundaries(plan.preconditions,"start","preconditions","Given"),
         ...rows(plan.steps), ...boundaries(plan.goals,"goal","goals","Then")]};
 }
 
-module.exports = {createBdd};
+module.exports = {createBdd, expectation};

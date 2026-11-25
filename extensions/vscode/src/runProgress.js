@@ -5,6 +5,30 @@ const path = require("node:path");
 
 const journalPath = (directory, id) => path.join(directory,"runs",id,"run.json");
 
+// The summary uses recorded outcomes. Full reports also verify every frozen frame.
+async function readSummaryRecord(directory, entry, loadFullReport) {
+    if (/^[\w-]+$/.test(entry.id)) {
+        try {
+            const record = JSON.parse(await fs.readFile(journalPath(directory,entry.id),"utf8"));
+            if (record?.schema==="harmony-run/1" && record.runId===entry.id &&
+                Array.isArray(record.receipts) && Array.isArray(record.frames) &&
+                typeof record.result?.status==="string" && record.result.status!=="running" &&
+                (entry.cleanup || record.result.sessionCleanup?.status)) return record;
+        } catch { /* Older or incomplete archives are interpreted by their runtime. */ }
+    }
+    return loadFullReport();
+}
+
+async function withRunReceipts(directory,id,result) {
+    if (Array.isArray(result.receipts) || result.runId!==id || !/^[a-zA-Z0-9_-]+$/.test(id)) return result;
+    try {
+        const journal = JSON.parse(await fs.readFile(journalPath(directory,id),"utf8"));
+        if (journal.runId===id && journal.result?.status===result.status && Array.isArray(journal.receipts))
+            return {...result,receipts:journal.receipts};
+    } catch { /* Keep the run result available when the journal cannot be read. */ }
+    return result;
+}
+
 function watchRunJournal(locate, onUpdate) {
     let stopped = false;
     let reading = false;
@@ -35,4 +59,4 @@ function watchRunJournal(locate, onUpdate) {
     return () => { stopped = true; clearInterval(timer); };
 }
 
-module.exports = {journalPath, watchRunJournal};
+module.exports = {journalPath,readSummaryRecord,withRunReceipts,watchRunJournal};

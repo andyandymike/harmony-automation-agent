@@ -2,6 +2,67 @@
 
 const {scopePlan} = require("./explorationEngine");
 const {prepareFlow} = require("./explorationFlow");
+const {checkpointAfterRow,compileCase} = require("./caseComposition");
+const {storePresentation} = require("./casePresentation");
+const {isDeepStrictEqual} = require("node:util");
+const {timelineRows,timelineSteps,timelinePrefix} = require("./caseExplorationTimeline");
+
+function forkSourceSnapshot(document, checkpoint, layout) {
+    if (layout==="rows") {
+        const rows=timelineRows(document.execution,document);
+        if (checkpoint!==-1 && !rows.some(row=>row.index===checkpoint)) return;
+        const prefix={...document.plan,preconditions:[],steps:[],goals:[]};
+        const display=new Map(document.presentation);
+        for (const {field,step,index} of rows) {
+            if (index>checkpoint) break;
+            if (field==="goals") {
+                const check={assert:step};
+                prefix.steps.push(check);
+                if (display.has(step)) display.set(check,display.get(step));
+            } else prefix[field].push(step);
+        }
+        const compiled=compileCase(prefix);
+        if (compiled.pending?.length || !isDeepStrictEqual(timelineSteps(compiled.plan),timelineSteps(document.execution).slice(0,checkpoint+1))) return;
+        return {checkpoint,steps:structuredClone(prefix.steps),preconditions:structuredClone(prefix.preconditions),
+            presentation:storePresentation(prefix,display)};
+    }
+    const row = checkpoint === -1 ? -1 : document.plan.steps.findIndex((_, i)=>
+        checkpointAfterRow(document,`steps[${i}]`) === checkpoint);
+    if (checkpoint !== -1 && row < 0) return;
+    const prefix = {...document.plan,steps:document.plan.steps.slice(0,row+1),goals:[]};
+    const compiled = compileCase(prefix);
+    if (compiled.pending?.length) return;
+    const executed=document.execution.steps.slice(0,checkpoint+1);
+    // A reference at the end of a compiled prefix can promote its own exit checks to goals.
+    // In the full script those same checks are inline unless the reference also ends the full case.
+    const exitChecks=compiled.plan.goals || [];
+    const inline=[...compiled.plan.steps,...exitChecks.map(assert=>({assert}))];
+    let replayExitChecks;
+    if (!isDeepStrictEqual(inline,executed)) {
+        if (row!==document.plan.steps.length-1 || !exitChecks.length || document.plan.goals?.length ||
+            !isDeepStrictEqual(compiled.plan.steps,executed) || !isDeepStrictEqual(exitChecks,document.execution.goals)) return;
+        replayExitChecks=exitChecks;
+    }
+    return {checkpoint,steps:structuredClone(prefix.steps),presentation:storePresentation(prefix,document.presentation),
+        ...(replayExitChecks && {replayExitChecks}),...(row>=0 && !prefix.preconditions?.length &&
+            compiled.plan.preconditions?.length && {referenceProvidesStart:true})};
+}
+
+function recordedFork(report, branch) {
+    if (branch?.kind !== "variant" || !["completed","passed"].includes(branch.status)) return;
+    const index = branch.checkpoint;
+    const length=report.checkpointLayout==="rows" ? timelineSteps(report.plan).length : report.plan.steps.length;
+    if (!Number.isInteger(index) || index < -1 || index >= length) return;
+    const prefix = report.branches.find(item=>item.kind === "prefix");
+    if (prefix?.status !== "completed" || prefix.checkpoint !== index) return;
+    const start = report.steps.find(step=>step.key === "prefix" && step.runId && step.status === "completed");
+    const end = report.steps.find(step=>step.key === branch.id+"/act" && step.status === "completed");
+    if (!start || start.runId !== prefix.runId || !end?.runId || end.runId !== branch.runId || !end.replayStep ||
+        !end.toStateId || !start.toStateId || start.toStateId !== end.fromStateId) return;
+    const receipt = end.receipts?.find(row=>row.path === "steps[0]" && row.command === end.replayStep.command);
+    if (receipt?.status !== "completed" || receipt.dispatched !== "acknowledged") return;
+    return {start,end,index};
+}
 
 function acknowledgedFreeStep(report, step) {
     if (step.phase !== "free" || step.status !== "completed" || !step.runId || !step.toStateId || !step.fromStateId) return;
@@ -15,7 +76,9 @@ function acknowledgedFreeStep(report, step) {
         return {command:entry.command,input:entry.input};
 }
 
-function completedBranch(report,branch) {
+function branchDifference(report,branch) {
+    if (report.routeMode==="fork") return;
+    if (!branch || !["replace","detour"].includes(branch.choice?.strategy)) return;
     if (!["completed","passed"].includes(branch.status) || !branch.choice?.step || !report.plan?.steps?.length) return;
     const act = report.steps.find(s=>s.key===branch.id+"/act" && s.status==="completed");
     const end = report.steps.find(s=>s.key===branch.id+"/suffix" && s.status==="completed");
@@ -32,12 +95,19 @@ function completedBranch(report,branch) {
         if (next.refresh) varied.refresh = true;
         if (next.input?.expect) varied.input = {...varied.input,expect:next.input.expect};
     }
-    // Restore the original path to this checkpoint. Exploration's navigation between
-    // branches is not part of the independent case. Preserve verified baseline goals at an endpoint.
-    const route = linear ? plan.steps.slice(0,i+1) : [...plan.steps,...(plan.goals || []).map(assert=>({assert}))];
-    route.push(varied);
-    if (report.steps.some(s=>s.key===branch.id+"/return" && s.status==="completed")) route.push({command:"back"});
-    if (linear) route.push(...plan.steps.slice(i+(replaced?2:1)));
+    if (!linear && (i!==plan.steps.length-1 || replaced)) return;
+    // On endpoint runs the baseline's final checks establish the starting state of the detour.
+    const steps = linear ? [] : (plan.goals || []).map(assert=>({assert}));
+    steps.push(varied);
+    if (report.steps.some(s=>s.key===branch.id+"/return" && s.status==="completed")) steps.push({command:"back"});
+    return {index:i+1,remove:replaced?1:0,steps};
+}
+
+function completedBranch(report,branch) {
+    const edit = branchDifference(report,branch);
+    if (!edit) return;
+    const plan = report.plan, route = [...plan.steps];
+    route.splice(edit.index,edit.remove,...edit.steps);
     return {...plan,steps:route};
 }
 
@@ -51,10 +121,14 @@ function caseRoutes(report) {
         }
     }
     const baseline = report.steps.find(step=>step.key==="baseline" && step.runId && ["completed","failed"].includes(step.status));
-    const branchIds = (report.branches || []).filter(branch=>
+    const branchIds = (report.branches || []).filter(branch=> report.routeMode==="fork" ? recordedFork(report,branch) :
         (branch.id==="baseline" && baseline && report.plan?.steps?.length) || completedBranch(report,branch)).map(b=>b.id);
-    const findingIds = report.findings.filter(f=>f.plan?.steps?.length && f.kind==="failure" || f.kind==="review" && stepIds.includes(f.stepId)).map(f=>f.id);
-    return {stepIds,branchIds,findingIds, main:stepIds.length>0 || branchIds.includes("baseline")};
+    const findingIds = report.routeMode==="fork" ? [] : report.findings.filter(f=>
+        f.plan?.steps?.length && f.kind==="failure" || f.kind==="review" && stepIds.includes(f.stepId)).map(f=>f.id);
+    const source = report.sourceCase;
+    const diffBranchIds = report.routeMode!=="fork" && report.status!=="paused" && report.mode==="flow" && source?.uri && source.digest && source.editable!==false ?
+        branchIds.filter(id=>id!=="baseline") : [];
+    return {stepIds,branchIds,findingIds,diffBranchIds,main:stepIds.length>0 || branchIds.includes("baseline")};
 }
 
 function explorationCandidate(report, request) {
@@ -63,6 +137,31 @@ function explorationCandidate(report, request) {
     let {stepId,branchId,findingId} = request;
     const finding = findingId && report.findings.find(f=>f.id===findingId);
     if (findingId && !routes.findingIds.includes(findingId)) return;
+    if (report.routeMode==="fork" && branchId) {
+        const branch=report.branches.find(item=>item.id===branchId);
+        const fork=recordedFork(report,branch);
+        if (!fork) return;
+        const {start,end,index}=fork;
+        const source=report.forkSource?.checkpoint===index ? report.forkSource : undefined;
+        const script=report.checkpointLayout==="rows" ? timelinePrefix(report.plan,index) : undefined;
+        const prefix=source?.steps || (script ? [...script.steps,...(script.goals || []).map(assert=>({assert}))] : report.plan.steps.slice(0,index+1));
+        const name=branch.choice?.label || branch.label;
+        const plan=structuredClone({...report.plan,steps:[...prefix,end.replayStep]});
+        if (script) {
+            const conditions=source?.preconditions ?? script.preconditions;
+            if (conditions?.length) plan.preconditions=structuredClone(conditions); else delete plan.preconditions;
+        } else if (source?.referenceProvidesStart) delete plan.preconditions;
+        delete plan.goals;
+        delete plan.goal;
+        delete plan.editNote;
+        const point=report.checkpointDetails?.find(item=>item.index===index);
+        return {name:[report.source,name].filter(Boolean).join(" · "),source:"exploration",plan,
+            presentationData:source?.presentation,bundle:report.bundle,
+            origin:{reportId:report.id,branchId,stepId:end.id,outcome:"observed",label:report.goal,
+                parentCaseId:report.sourceCase?.id,parentCaseDigest:report.sourceCase?.digest,
+                parentCaseName:report.source,forkPosition:point?.position ?? index+1},
+            frames:{start:start.before && {runId:start.runId,frame:start.before},goal:end.after && {runId:end.runId,frame:end.after}}};
+    }
     let plan, first, last, outcome, stepEvidence, name = report.goal;
     if (finding?.kind==="failure") {
         plan = finding.plan;
@@ -100,4 +199,4 @@ function explorationCandidate(report, request) {
         frames:{start:first?.before && {runId:first.runId,frame:first.before},goal:last?.after && {runId:last.runId,frame:last.after}}};
 }
 
-module.exports = {caseRoutes,explorationCandidate};
+module.exports = {caseRoutes,explorationCandidate,branchDifference,forkSourceSnapshot};

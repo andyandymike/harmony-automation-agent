@@ -4,12 +4,14 @@ const {projectHdc}=require("./projectRuntime");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const {randomUUID} = require("node:crypto");
-const {NetworkSession,exampleScenario,scenarioFromRecord,validateScenario} = require("./network");
+const {NetworkSession,scenarioFromRecord,validateScenario} = require("./network");
 const {reverseFixture} = require("./deviceNetwork");
 const {startNative,stopNative,finishNative,closeNative,nativeDevicesChanged}=require("./nativeCaptureController");
 const {discoverArkWeb,attachArkWeb} = require("./arkwebNetwork");
-const {readWorkflow,workflowWithScenario} = require("./workflowFile");
+const {readWorkflow,workflowForSave} = require("./workflowFile");
 const {ScenarioLibrary} = require("./networkScenarioLibrary");
+
+const emptyRules = {version:1,rules:[]};
 
 function during(records,logs,range) {
     if (!range) return {records:[],logs:[]};
@@ -36,7 +38,7 @@ class NetworkController {
         this.groupVersions=new Map();
         this.connectPhone=connectPhone;
         this.retiredMappings=new Map();
-        this.net=new NetworkSession({onChange:()=>this.changed(),scenarioId:()=>this.activeScenarioId});
+        this.net=new NetworkSession({onChange:()=>this.changed(),scenarioId:()=>this.activeScenarioId,scenario:emptyRules});
     }
     word(en,zh) { return /^zh/i.test(this.bench.language)?zh:en; }
     get bindings() { return this.bench.context.workspaceState.get("network.scenarios",{}); }
@@ -58,6 +60,7 @@ class NetworkController {
         return this.library.get(id);
     }
     editSession(id) {
+        if (id===undefined && !this.library.entries.size) return this.net;
         const scenario=this.ruleGroup(id);
         if (id===this.activeScenarioId) return this.net;
         const editor=new NetworkSession({onChange:snapshot=>this.library.entries.set(id,snapshot.scenario)});
@@ -90,17 +93,19 @@ class NetworkController {
             }
             if(data.upstream) this.net.setUpstream(data.upstream);
         }
-        this.library = new ScenarioLibrary(data?.scenarioLibrary,data?.scenario || exampleScenario(),
-            this.word("Untitled rule group","未命名规则组"));
-        this.net.setScenario(this.library.active);
+        const previous = data?.scenario && (data.scenario.name || data.scenario.rules?.length) ? data.scenario : undefined;
+        this.library = new ScenarioLibrary(data?.scenarioLibrary,previous,this.word("Untitled rule group","未命名规则组"));
+        this.net.rulesEnabled = Boolean(this.library.active && data?.rulesEnabled===true);
+        this.net.setScenario(this.library.active || emptyRules);
     }
     changed() {
-        if (this.disposed) return;
+        // Restoring the upstream can notify before the rule library has been validated.
+        if (this.disposed || !this.library) return;
         const snapshot=this.net.snapshot();
         if (this.lastScenario !== snapshot.scenario) {
             this.lastScenario = snapshot.scenario;
             this.scenarioVersion = this.nextGroupVersion();
-            if (this.library) this.library.entries.set(this.activeScenarioId,snapshot.scenario);
+            if (this.activeScenarioId) this.library.entries.set(this.activeScenarioId,snapshot.scenario);
         }
         const scope=this.bench.state.plan?.uri, binding=scope&&this.bindings[scope];
         const capturing=Boolean(this.activeCapture);
@@ -114,11 +119,11 @@ class NetworkController {
             sequenceTest:this.sequenceTest,
             returnTo:this.returnTo,originStep:this.originStep,lastImport:this.lastImport,webStatus:this.webStatus,
             filterVersion:this.filterVersion,evidenceRecord:this.evidenceRecord,
-            removedRule:this.removedRules.get(this.activeScenarioId)?.rule.id,
+            removedRule:this.removedRules.get(this.activeScenarioId)?.id,
             operation:this.operation,scenarioVersion:this.scenarioVersion,scenarioReceipt:this.scenarioReceipt,
             activeScenarioId:this.activeScenarioId,scenarioLibrary:this.library?.listing() || [],
             viewedGroup:detached ? {id:viewed,scenario:detached,version:this.groupVersion(viewed),
-                removedRule:this.removedRules.get(viewed)?.rule.id,boundMatches:!!binding&&JSON.stringify(binding)===JSON.stringify(detached)} : undefined};
+                removedRule:this.removedRules.get(viewed)?.id,boundMatches:!!binding&&JSON.stringify(binding)===JSON.stringify(detached)} : undefined};
         if(captureStateChanged || this.bench.state.tool==="network" || this.bench.state.mode==="run") this.bench.publish();
         clearTimeout(this.timer);
         this.timer=setTimeout(()=>this.persist().catch(e=>this.showError(e)),200);
@@ -126,8 +131,8 @@ class NetworkController {
     showError(e) { this.bench.state.error=this.bench.errorMessage(e);this.bench.publish(); }
     persist() {
         clearTimeout(this.timer);
-        const {records,favorites,scenario,omittedRecords,upstream}=this.net.snapshot();
-        const body=JSON.stringify({records,favorites,scenario,scenarioLibrary:this.library?.serialize(),omittedRecords,upstream,logs:this.logs,markers:this.markers,capture:this.captureInfo,lastImport:this.lastImport});
+        const {records,favorites,scenario,omittedRecords,upstream,rulesEnabled}=this.net.snapshot();
+        const body=JSON.stringify({records,favorites,scenario,rulesEnabled,scenarioLibrary:this.library?.serialize(),omittedRecords,upstream,logs:this.logs,markers:this.markers,capture:this.captureInfo,lastImport:this.lastImport});
         this.writes=this.writes.catch(()=>{}).then(async()=>{
             await fs.mkdir(path.dirname(this.file),{recursive:true});
             const tmp=this.file+"."+randomUUID()+".tmp";
@@ -187,6 +192,7 @@ class NetworkController {
             }
             if(!wasRunning) await this.net.start();
             if(!this.mapping || this.mapping.device!==this.bench.state.device) await this.mapDevice();
+            this.net.rulesEnabled = true;
             this.net.setScenario(this.library.forFlow(validated),savedHits);
         } catch(error) {
             try {
@@ -199,6 +205,70 @@ class NetworkController {
         }
         return bound;
     }
+    async beginCaseRules(scenario,id,{prepare=false,upstream}={}) {
+        prepare ||= upstream!==undefined;
+        if (!scenario && !prepare && !this.net.baseUrl) return;
+        await this.init();
+        const group = scenario && validateScenario(scenario);
+        const scope = this.net.useCaseRules(group,{runId:id,upstream});
+        const wasRunning = Boolean(this.net.baseUrl);
+        let closing;
+        const close = () => closing ??= (async()=>{
+            try { if (!wasRunning) await this.stopServer(); }
+            finally { scope.close(); }
+        })();
+        let snapshot;
+        try {
+            if (group && id) {
+                const dir = path.join(path.dirname(this.file),"scenarios");
+                await fs.mkdir(dir,{recursive:true});
+                const target = path.join(dir,id+".json");
+                const file = await fs.open(target,"wx",0o600);
+                snapshot = target;
+                try { await file.writeFile(JSON.stringify(group)); }
+                finally { await file.close(); }
+            }
+            if (group || prepare) {
+                if (!wasRunning) await this.net.start();
+                if (!this.mapping || this.mapping.device!==this.bench.state.device) await this.mapDevice();
+            }
+            return {apply:scope.apply,close};
+        } catch (error) {
+            try { if (snapshot) await fs.rm(snapshot,{force:true}); }
+            finally { await close(); }
+            throw error;
+        }
+    }
+
+    async saveCaseUpstream(origin,previous) {
+        await this.init();
+        if (this.net.upstream!==previous) throw new Error(this.word(
+            "The saved test upstream changed. Verify against the current configuration first.",
+            "测试上游已被修改。请基于当前配置重新试跑。"));
+        this.net.setUpstream(origin);
+        try { await this.persist(); }
+        catch (error) {
+            this.net.setUpstream(previous);
+            throw error;
+        }
+    }
+
+    addRuleGroup(scenario,browse) {
+        if (browse && this.activeScenarioId) this.browsedGroup=this.library.create(scenario);
+        else {
+            this.browsedGroup=undefined;
+            this.net.rulesEnabled=false;
+            this.net.setScenario(this.library.add(scenario));
+        }
+    }
+
+    async clearCaseBinding(uri) {
+        if (!Object.hasOwn(this.bindings,uri)) return;
+        const bindings = {...this.bindings};
+        delete bindings[uri];
+        await this.bench.context.workspaceState.update("network.scenarios",bindings);
+    }
+
     async mapDevice() {
         const snap=this.net.snapshot(), {device,devices}=this.bench.state;
         if(!snap.running || !devices.includes(device)) throw new Error(this.word("Start the test gateway and select a phone first.","请先启动测试网关并选择手机。"));
@@ -288,7 +358,13 @@ class NetworkController {
 
     editRule(message) {
         const {type,originalRule,id}=message;
-        if (!message.scenarioId) throw new Error(this.word("Choose a rule group first.","请先选择规则组。"));
+        if (!message.scenarioId) {
+            if (type!=="networkUpsertRule" || originalRule!==null || this.library.entries.size)
+                throw new Error(this.word("Choose a rule group first.","请先选择规则组。"));
+            const name=this.library.named(message.newGroupName);
+            this.addRuleGroup({version:1,name,rules:[message.rule]},true);
+            return;
+        }
         const net=this.editSession(message.scenarioId);
         if (message.scenarioVersion!==undefined && message.scenarioVersion!==this.groupVersion(message.scenarioId))
             throw new Error(this.word("The rule list changed. Check the current order and try again.","规则列表已更新，请核对当前顺序后重试。"));
@@ -297,10 +373,22 @@ class NetworkController {
             return;
         }
         const state=net.snapshot();
+        if (type==="networkRulesChange") {
+            const ids=new Set(Array.isArray(message.ids) ? message.ids : []);
+            const entries=state.scenario.rules.flatMap((rule,index)=>ids.has(rule.id) ?
+                [{rule,index,hits:state.hits.find(hit=>hit.ruleId===rule.id)?.count}] : []);
+            if (!entries.length || entries.length!==ids.size)
+                throw new Error(this.word("The rules changed. Select them again.","规则已变化，请重新选择。"));
+            if (message.action==="remove") {
+                this.removedRules.set(message.scenarioId,{id:randomUUID(),entries});
+                net.removeRules(ids);
+            } else if (["enable","disable"].includes(message.action)) net.setRulesEnabled(ids,message.action==="enable");
+            return;
+        }
         if(type==="networkRuleUndo"){
             const removed=this.removedRules.get(message.scenarioId);
-            if(!removed || removed.rule.id!==id) return;
-            net.restoreRemovedRule(removed);
+            if(!removed || removed.id!==id) return;
+            net.restoreRemovedRules(removed.entries);
             this.removedRules.delete(message.scenarioId);
             return;
         }
@@ -309,7 +397,7 @@ class NetworkController {
         if(!rule || !originalRule || JSON.stringify(rule)!==JSON.stringify(originalRule))
             throw new Error(this.word("The rule changed. Check the current list and try again.","规则已变更，请核对当前列表后重试。"));
         if(type==="networkRuleRemove"){
-            this.removedRules.set(message.scenarioId,{rule,index,hits:state.hits.find(item=>item.ruleId===id)?.count});
+            this.removedRules.set(message.scenarioId,{id,entries:[{rule,index,hits:state.hits.find(item=>item.ruleId===id)?.count}]});
             net.removeRule(id);
         } else if(type==="networkRuleToggle") net.upsertRule({...rule,enabled:rule.enabled===false});
         else if(type==="networkRuleOrder") net.moveRule(id,message.direction);
@@ -331,23 +419,24 @@ class NetworkController {
         const receipt={type:message.type,revision:message.revision};
         try {
             const id=message.scenarioId ?? this.activeScenarioId;
-            this.ruleGroup(id);
-            const create=scenario=>{
-                if (message.browse) this.browsedGroup=this.library.create(scenario);
-                else {
-                    this.browsedGroup=undefined;
-                    this.net.setScenario(this.library.add(scenario));
-                }
-            };
+            const create=scenario=>this.addRuleGroup(scenario,message.browse);
             if(message.type==="networkApply"){
                 if(message.scenarioVersion!==undefined && message.scenarioVersion!==this.groupVersion(id))
                     throw new Error(this.word("The rule group changed. Reopen it before applying edits.","规则组已更新，请重新打开后再应用修改。"));
                 const name=this.library.named(message.scenario.name || this.library.untitled,id);
-                this.editSession(id).setScenario({...message.scenario,name});
+                if (id===undefined && !this.library.entries.size) create({...message.scenario,name});
+                else this.editSession(id).setScenario({...message.scenario,name});
             } else if(message.type==="networkScenarioCreate"){
                 create({version:1,name:this.library.named(message.name),rules:[]});
             } else if(message.type==="networkScenarioSelect"){
-                if (message.id!==this.activeScenarioId) this.net.setScenario(this.library.select(message.id));
+                const group=this.library.get(message.id);
+                if (!group.rules.some(rule=>rule.enabled!==false))
+                    throw new Error(this.word("Enable at least one rule before using the group.","请先启用组内至少一条规则。"));
+                const changed=message.id!==this.activeScenarioId;
+                this.library.select(message.id);
+                this.net.rulesEnabled=true;
+                if (changed) this.net.setScenario(group.paused ? {...group,paused:false} : group);
+                else if (group.paused) this.net.setScenarioPaused(false);
                 this.browsedGroup=undefined;
             } else if(message.type==="networkScenarioDuplicate"){
                 const original=this.library.get(message.id);
@@ -369,7 +458,10 @@ class NetworkController {
                 this.library.remove(message.id);
                 this.removedRules.delete(message.id);
                 this.groupVersions.delete(message.id);
-                if(active) this.net.setScenario(this.library.active);
+                if (active) {
+                    this.net.rulesEnabled=false;
+                    this.net.setScenario(this.library.active || emptyRules);
+                }
             } else if(message.type==="networkLoadScenario"){
                 const [uri]=await vscode.window.showOpenDialog({canSelectMany:false,filters:{JSON:["json"]}})||[];
                 if(uri){
@@ -378,7 +470,7 @@ class NetworkController {
                     create(doc.getText().replace(/^\uFEFF/,""));
                 } else receipt.cancelled=true;
             } else {
-                const scenario=this.ruleGroup(id);
+                const scenario=this.library.get(id);
                 const folder=vscode.workspace.workspaceFolders?.[0]?.uri;
                 const uri=await vscode.window.showSaveDialog({defaultUri:folder&&vscode.Uri.joinPath(folder,"network.rule-group.json"),filters:{JSON:["json"]}});
                 if(uri) await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify(scenario,null,2)+"\n"));
@@ -407,6 +499,20 @@ class NetworkController {
                 bench.state.mode="network";
                 bench.state.tool="network";
                 break;
+            }
+            case "networkSelectedRequests": {
+                const ids=[...new Set(Array.isArray(m.ids) ? m.ids : [])];
+                if (!ids.length) break;
+                if (m.action==="favorite") {
+                    const records=ids.map(id=>this.net.findRecord(id));
+                    if (records.some(record=>!record))
+                        throw new Error(this.word("The request history changed. Select requests again.","请求记录已变化，请重新选择。"));
+                    for (const record of records) this.net.collection.save(record);
+                } else if (m.action==="unfavorite") this.net.collection.removeMany(ids);
+                else if (m.action==="remove") this.net.removeRecords(ids);
+                this.changed();
+                await this.persist();
+                return;
             }
             case "networkSaveFavorite": this.net.collection.save(this.net.findRecord(m.id));break;
             case "networkRemoveFavorite": this.net.collection.remove(m.id);break;
@@ -440,6 +546,11 @@ class NetworkController {
                     const records=this.net.collection.recordsWithHistory(this.net.records);
                     return {preview:{...net.previewRule(m.rule,records,m.seedId,originalId),scenarioVersion:this.groupVersion(m.scenarioId ?? this.activeScenarioId)}};
                 });
+            case "networkRulesChange":
+                this.editRule(m);
+                this.changed();
+                await this.persist();
+                return;
             case "networkUpsertRule": case "networkRuleOrder": case "networkRuleRemove":
             case "networkRuleUndo": case "networkRuleToggle": case "networkRuleCopy": case "networkRuleRename":
                 return this.studioAction(m, () => this.editRule(m));
@@ -521,23 +632,28 @@ class NetworkController {
                 const folder=vscode.workspace.workspaceFolders?.[0]?.uri;
                 const uri=await vscode.window.showSaveDialog({title:this.word("Export workflow with ","导出流程与规则组 · ")+(chosen.name||"—"),
                     defaultUri:folder && vscode.Uri.joinPath(folder,"workflow-with-mock.json"),filters:{JSON:["json"]}});
-                if(uri) await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify(workflowWithScenario(workflow,chosen),null,2)+"\n"));
+                if(uri) await vscode.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify(workflowForSave(workflow,chosen),null,2)+"\n"));
                 break;
             }
             case "networkFrom": {
                 const record=this.net.findRecord(m.id);
                 if(record) {
-                    const scenario=structuredClone(snap().scenario), rule=scenarioFromRecord(record).rules[0];
+                    const owner=m.scenarioId ?? this.viewedScenarioId;
+                    const scenario=structuredClone(owner ? this.ruleGroup(owner) : this.net.scenario);
+                    const rule=scenarioFromRecord(record).rules[0];
                     const base=record.method+" "+record.path, ids=new Set(scenario.rules.map(item=>item.id));
                     rule.id=base;
                     for(let index=2;ids.has(rule.id);index++) rule.id=base+" ("+index+")";
                     scenario.rules.unshift(rule);
-                    this.browsedGroup=undefined;
                     bench.state.networkDraft={revision:randomUUID(),scenario,focusRuleId:rule.id,sourceId:record.id,
-                        scenarioId:this.activeScenarioId,scenarioVersion:this.scenarioVersion};
+                        scenarioId:owner,scenarioVersion:owner ? this.groupVersion(owner) : this.scenarioVersion};
                 }
                 break;
             }
+            case "networkManualRulesOff":
+                this.net.rulesEnabled=false;
+                await this.persist();
+                break;
             case "networkServer": if(snap().running) await this.stopServer();else await this.net.start();break;
             case "networkMap": await this.mapDevice();break;
             case "networkBind": {
@@ -557,7 +673,7 @@ class NetworkController {
             case "networkResetHits": this.net.resetHits();break;
             case "networkTry": {
                 const state=snap(),groupId=this.activeScenarioId,rule=state.scenario.rules.find(r=>r.id===m.id && r.enabled!==false);
-                if(this.activeSequenceTest || (m.scenarioId && m.scenarioId!==groupId) || !state.running || state.scenario.paused || !rule?.steps) return;
+                if(this.activeSequenceTest || (m.scenarioId && m.scenarioId!==groupId) || !state.running || !state.rulesEnabled || state.scenario.paused || !rule?.steps) return;
                 const receipt=this.sequenceTest={groupId,id:rule.id,pending:true};
                 this.changed();
                 this.activeSequenceTest=this.net.testSequence(rule);

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0a11 — recorded gestures in workflows
+
+- Accept validated recorded gestures inside version 1 and 2 plans. Execute them in the same device session as control actions and assertions, preserving the recorded delay and the workflow's cancellation and receipt handling.
+
 ## 0.1.0a10 — interactive workflow debugging
 
 - Add an optional in-process step callback for interactive debugging. The VS Code workbench can pause and resume the original plan runner while retaining variables, branches and loop state.

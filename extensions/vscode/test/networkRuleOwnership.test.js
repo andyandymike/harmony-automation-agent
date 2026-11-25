@@ -17,6 +17,7 @@ test("rule writes are scoped to the original scenario and rule, including rename
     const send=(type,payload={})=>host.handle({type,revision:crypto.randomUUID(),...payload});
     const net=()=>bench.state.network;
     await send("networkOpen");
+    await send("networkScenarioCreate",{name:"First"});
     const a=net().activeScenarioId;
     await send("networkUpsertRule",{rule:rule("fr"),scenarioId:a,originalRule:null});
     const original=net().scenario.rules[0];
@@ -40,6 +41,16 @@ test("rule writes are scoped to the original scenario and rule, including rename
     const renamed=net().scenario.rules[1];
     await send("networkRuleRemove",{scenarioId:a,id:renamed.id,originalRule:renamed});assert.equal(net().removedRule,renamed.id);
     await send("networkRuleUndo",{scenarioId:a,id:renamed.id});assert.deepEqual(net().scenario.rules[1],renamed);
+    const ids=net().scenario.rules.map(item=>item.id);
+    const version=net().scenarioVersion;
+    await send("networkRulesChange",{scenarioId:a,scenarioVersion:version,ids,action:"disable"});
+    assert.ok(net().scenario.rules.every(item=>item.enabled===false));
+    await assert.rejects(send("networkRulesChange",{scenarioId:a,scenarioVersion:version,ids,action:"remove"}),/changed/);
+    await send("networkRulesChange",{scenarioId:a,scenarioVersion:net().scenarioVersion,ids,action:"remove"});
+    assert.equal(net().scenario.rules.length,0);
+    await send("networkRuleUndo",{scenarioId:a,id:net().removedRule});
+    assert.deepEqual(net().scenario.rules.map(item=>item.id),ids);
+    assert.ok(net().scenario.rules.every(item=>item.enabled===false));
 });
 
 test("switching workspaces parks the rule draft and restores it only for its owner",async()=>{

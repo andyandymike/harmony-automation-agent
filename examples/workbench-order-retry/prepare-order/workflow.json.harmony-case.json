@@ -1,0 +1,33 @@
+{
+  "format": "harmony-agent.case",
+  "version": 1,
+  "id": "d883d53b-d531-4bcb-bb61-68f562017822",
+  "name": "准备测试订单",
+  "source": "workflow",
+  "section": true,
+  "presentation": {
+    "version": 1,
+    "steps": {
+      "steps[0]": {
+        "fingerprint": "feae51d8728153cd85c66c10b5ece77a1c029bf7d5feb1a69639089284c20895",
+        "name": "重置页面"
+      },
+      "steps[1]": {
+        "fingerprint": "c19d1100fbe8065c68dfb45fa90252cbc37019fbd4744090965322754d4bc1ab",
+        "name": "读取当前订单编号"
+      },
+      "steps[2]": {
+        "fingerprint": "5ed0d1db4a92247e76be66ab881498f03c51d161e1e044b54abb2419f99b2113",
+        "name": "聚焦订单输入框"
+      },
+      "steps[3]": {
+        "fingerprint": "112d9dfd21c4e619235c53399c82f23e0c473d02f7c5375630a4fcb4971a0412",
+        "name": "键入测试订单号 QA-042"
+      },
+      "steps[4]": {
+        "fingerprint": "958899d6c7fb3723c026059d718ce934b1bf63e1df7f38f0ed4f3af6691cf9f1",
+        "name": "确认订单并核对页面编号"
+      }
+    }
+  }
+}

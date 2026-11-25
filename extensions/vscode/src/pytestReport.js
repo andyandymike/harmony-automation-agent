@@ -79,7 +79,7 @@ async function finishPytest({directory, invocation, plan, device, time, code, sh
     return {code:exitCode, entry};
 }
 
-async function loadPytestRun(entry, language, presentationData) {
+async function loadPytestRun(entry, language, presentationData, projectRun) {
     const info = entry.pytest;
     const session = await readJson(path.join(info.directory, "pytest.json"));
     let record, cleanup, executedPlan, executionError;
@@ -110,7 +110,7 @@ async function loadPytestRun(entry, language, presentationData) {
     const plan = executedPlan || (wrapped ? source.workflow : source);
     const bdd = createBdd(plan,language,wrapped ? source.scenario : undefined,restorePresentation(plan,presentationData));
     return {
-        ...(record ? withAuthoredTargets(runView(record), executedPlan) : {steps:[], selected:0}),
+        ...(record ? (projectRun ? projectRun(record,plan) : withAuthoredTargets(runView(record),executedPlan)) : {steps:[],selected:0}),
         ...(executionError && !record?.result?.error && !record?.error && {error:executionError.message,errorCode:executionError.code}),
         status:entry.status, entry, bdd, ...(cleanup && {cleanup}),
         pytest: {code:info.code, phases:session?.phases || [], elapsedMs:session?.elapsedMs,

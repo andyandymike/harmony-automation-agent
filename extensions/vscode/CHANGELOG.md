@@ -1,5 +1,50 @@
 # Harmony Agent for VS Code changelog
 
+## 0.20.33
+
+- Start a recording from one button. The first phone touch or preview action selects the input source. Save stable control matches as locators and other supported gestures by screen position.
+- Select multiple case steps using the selection button or a mouse hold. Save the selected steps as a section or delete them as one undoable edit.
+- Use the same mouse hold, right-click and select-all controls across batch-action lists. Switching views, changing filters or using another control exits selection mode.
+- Open apps and take screenshots from Settings in Elements. Disconnect and reconnect the workbench device session from the phone preview.
+- Choose a rule group in the case's Given. Run once with it off from run settings, or turn off manual mocking from the test gateway. New workspaces start with an empty rule-group library.
+
+## 0.20.32
+
+- Enter step feedback, then review the proposed actions and assertions in AI Exploration. Manual operation and locator editing is available from the same step.
+- Explore case feedback, step revisions and pending insertions together in workflow order. Each description can produce multiple executable steps.
+- Review the combined draft and replay the exact candidate from the case’s starting state before saving it as a runnable version.
+
+## 0.20.31
+
+- Write a step description or insert a saved case reference at any position. Start a new case in Tests or extend an existing recording.
+- Save descriptions as a case draft. Generate and review executable actions and checks in AI Exploration, then apply them to the original row.
+- Replay the available preceding steps or start from the current phone screen. Finish pending descriptions before running the whole case or exporting it to pytest.
+
+## 0.20.30
+
+- Insert Given, When, or Then at any step boundary. A Given can check a condition, prepare the device state, or reuse a saved case.
+- Combine recorded gestures and control steps in one workflow and report using runtime 0.1.0a11. Legacy coordinate-only recordings retain their native replay.
+- Keep the workflow's explicit starting and final assertions in run settings.
+
+## 0.20.29
+
+- Choose an action, a check, or a reusable case from the same insertion point. Coordinate recordings can add gestures at any step boundary.
+- Search for a reusable case first, then choose between a reference and independent steps. Preview the selected case on demand.
+
+## 0.20.28
+
+- Insert saved coordinate recordings into another coordinate replay case. References keep their saved gestures and delays.
+- Choose **Insert reference** or **Copy as local steps** directly from inline search results.
+
+## 0.20.27
+
+- Search for a reusable case at the selected step boundary. Accept the highlighted reference with Enter, open a preview when needed, or undo the insertion from the draft.
+
+## 0.20.26
+
+- Choose the insertion point from a step’s context menu or from the case-step header. Browse the case library and preview the chosen source in the main Tests area.
+- Open step-specific exploration in the AI Exploration tab, with separate views for an AI task, a control check, and past results. Return to the same case to review and save edits.
+
 ## 0.20.25
 
 - Insert a saved case or a reusable section at a step boundary, including inside a branch or loop. A reference uses the version saved in the calling case.

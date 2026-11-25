@@ -2,7 +2,7 @@
 
 function workspaceRailMarkup(icon) {
     return `<section id="live-task-pane" hidden>
-            <details id="ai-assistant" hidden><summary>${icon("chat")}<strong id="task-heading"></strong><span id="assistant-status"></span>${icon("down")}</summary>
+            <details id="ai-assistant" hidden><summary>${icon("chat")}<strong id="task-heading"></strong><span id="assistant-status"></span></summary>
                 <form id="task-form"><label id="goal-label" for="task-goal"></label>
                     <div class="task-compose"><textarea id="task-goal" rows="2"></textarea>
                         <div class="task-actions"><button type="button" id="task-read" class="rail-link">${icon("read")}<span></span></button>

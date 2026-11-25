@@ -1,6 +1,7 @@
 "use strict";
 
 const { deviceRecordingFormat, targetLabel } = require("./model");
+const { caseExplorationCheckpoints } = require("./caseExplorationMenu");
 
 const commands = new Set(["observe", "find", "press", "fill", "scroll", "back", "wait", "open"]);
 const gestures = new Set(["click", "doubleClick", "longClick", "swipe", "drag", "fling", "pinch", "back", "home",
@@ -9,6 +10,7 @@ const operations = ["assert", "read", "if", "repeat", "transform", "yield", "sto
 
 function stepKind(step, coordinates) {
     if (!step || typeof step !== "object") return "unknownStep";
+    if (step.ruleGroup) return step.ruleGroup.action==="enable" ? "enableRuleGroup" : "disableRuleGroup";
     if (coordinates) {
         return step.command === "deviceGesture" && gestures.has(step.input?.kind) ? step.input.kind : "unknownStep";
     }
@@ -53,6 +55,7 @@ function point(x, y) {
 
 function describeStep(step, kind, coordinates) {
     const input = step?.input || {};
+    if (step?.ruleGroup) return step.ruleGroup.scenario?.name || step.ruleGroup.name || "";
     if (coordinates) return kind === "recents" ? "" :
         [point(input.x, input.y), point(input.toX, input.toY)].filter(Boolean).join(" → ");
     const check = kind === "wait" ? {selector: input.target, property: input.property, equals: input.equals} :
@@ -80,4 +83,4 @@ function summarizePlan(plan) {
     };
 }
 
-module.exports = { summarizePlan };
+module.exports = { summarizePlan, caseExplorationCheckpoints };

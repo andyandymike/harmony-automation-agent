@@ -92,7 +92,7 @@ export function updateWorkspaceRail(next) {
     const switchedDevice = state?.device !== next.device;
     state = next;
     const connected = next.devices.includes(next.device);
-    el("live-task-pane").hidden = next.tool !== "exploration" || !connected;
+    el("live-task-pane").hidden = next.tool !== "exploration" || next.caseExploration || !connected;
     if (switchedDevice) {
         el("task-goal").value = goals.get(next.device) || "";
         el("ai-assistant").open = false;
@@ -100,8 +100,11 @@ export function updateWorkspaceRail(next) {
     }
     updateAssistant();
     if (next.focusTask && next.device && !next.draftLocation) {
-        el("ai-assistant").open = true;
-        el("task-goal").focus();
+        if (next.caseExploration) (document.querySelector('[data-compose-field="goal"]') || el("case-task-back"))?.focus();
+        else {
+            el("ai-assistant").open = true;
+            el("task-goal").focus();
+        }
     }
 }
 

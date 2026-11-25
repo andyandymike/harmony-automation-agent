@@ -63,6 +63,19 @@ function validateGesture(input, bounds) {
     }
 }
 
+function validateRecording(plan, {invalid="Invalid coordinate recording.",unsupported="This recorded gesture cannot be replayed."}={}) {
+    if (plan.version !== 1 || !Array.isArray(plan.steps) || !plan.steps.length ||
+        plan.preconditions?.length || plan.goals?.length) throw new Error(invalid);
+    for (const step of plan.steps) {
+        if (step?.ruleGroup) continue;
+        if (step?.command !== "deviceGesture" || !step.input) throw new Error(invalid);
+        if (step.input.kind === "unsupported") throw new Error(unsupported);
+        validateGesture(step.input);
+        if (step.delayMs !== undefined && (!Number.isSafeInteger(step.delayMs) ||
+            step.delayMs < 0 || step.delayMs > 2_147_483_647)) throw new Error(invalid);
+    }
+}
+
 function unsupported(event) {
     const type = typeof event === "string" && /^[a-z][a-zA-Z0-9_-]{0,24}$/.test(event) ? event : "unrecognized";
     return { command: "deviceGesture", input: { kind: "unsupported", event: type }, label: type };
@@ -73,7 +86,32 @@ function fingerPath(finger) {
         toX: coordinate(finger?.X2_POSI), toY: coordinate(finger?.Y2_POSI) };
 }
 
-function parseRecordLine(line) {
+const boundsEdges = ["left", "top", "right", "bottom"];
+
+function recordedBounds(value) {
+    if (typeof value === "string") {
+        const rect = /^\s*\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]\s*$/.exec(value);
+        if (rect) return Object.fromEntries(boundsEdges.map((edge, index) => [edge, Number(rect[index + 1])]));
+        try { value = JSON.parse(value); } catch { return; }
+    }
+    if (boundsEdges.every(edge => Number.isFinite(value?.[edge]))) {
+        return Object.fromEntries(boundsEdges.map(edge => [edge, value[edge]]));
+    }
+}
+
+function touchStartControl(row, finger) {
+    const attributes = {id:finger.W1_ID, text:finger.W1_Text, type:finger.W1_Type, bundleName:row.BUNDLE};
+    const control = Object.fromEntries(Object.entries(attributes).filter(([, value]) =>
+        typeof value === "string" && value.trim()));
+    if (!control.id && !control.text) return;
+    if (finger.W1_BOUNDS != null && finger.W1_BOUNDS !== "") {
+        control.bounds = recordedBounds(finger.W1_BOUNDS);
+        if (!control.bounds) return;
+    }
+    return control;
+}
+
+function parseRecordLine(line, withControls = false) {
     if (!line.trim() || line.startsWith("windowBounds,")) return undefined;
     let row;
     try { row = JSON.parse(line); } catch { return unsupported("unrecognized"); }
@@ -102,7 +140,8 @@ function parseRecordLine(line) {
         label += " → " + input.toX + ", " + input.toY;
     }
     try { validateGesture(input); } catch { return unsupported(kind); }
-    return { command: "deviceGesture", input, label };
+    const control = withControls && kind === "click" && touchStartControl(row, finger);
+    return { command: "deviceGesture", input, label, ...(control && {control}) };
 }
 
 function shellArgument(value) {
@@ -166,7 +205,7 @@ async function replayGesture(target, input) {
 
 // The foreground shell owns its child and the two known native output paths.
 // It sends whole JSON rows, then restores any preexisting files before completion.
-function recordingShell(token) {
+function recordingShell(token, withControls) {
     return `umask 077
 lock=${lock}
 own=$lock/${token}
@@ -199,7 +238,7 @@ trap 'exit 1' HUP INT TERM PIPE
 if ps -A -o ARGS | grep -Eq '^([^ ]*/)?uitest uiRecord record( |$)'; then echo HA_BUSY; exit 1; fi
 if [ -e "$primary" ]; then mv "$primary" "$own/primary" || exit 1; fi
 if [ -e "$legacy" ]; then mv "$legacy" "$own/legacy" || exit 1; fi
-uitest uiRecord record -W false -c false > "$own/log" 2>&1 &
+uitest uiRecord record -W ${withControls ? "true" : "false"} -c false > "$own/log" 2>&1 &
 native=$!
 sent=0
 drain() {
@@ -248,13 +287,14 @@ function deferred() {
     return { promise, resolve };
 }
 
-async function startRecorder({ device, hdcPath, onStep, onError }) {
+async function startRecorder({ device, hdcPath, withControls = false, onStep, onError }) {
     if (!device) throw recorderError("DEVICE_REQUIRED", "Select a device.");
     const executable = hdcExecutable(hdcPath);
     const token = randomUUID();
     const own = lock + "/" + token;
     const shell = command => ["-t", device, "shell", command];
-    const child = spawn(executable, shell(recordingShell(token)), { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn(executable, shell(recordingShell(token, withControls)),
+        { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     const started = deferred();
     const closed = deferred();
     let ready = false;
@@ -275,8 +315,12 @@ async function startRecorder({ device, hdcPath, onStep, onError }) {
         } else if (line === "HA_DONE") {
             done = true;
         } else if (ready && line !== "HA_EXITED") {
-            const step = parseRecordLine(line);
-            if (step) onStep(step);
+            const record = parseRecordLine(line, withControls);
+            if (record) {
+                // Touch metadata is used only to resolve the step in memory.
+                const {control, ...step} = record;
+                onStep(step, control);
+            }
         }
     });
     child.on("error", error => { failure = error.code === "ENOENT" ?
@@ -318,4 +362,4 @@ async function startRecorder({ device, hdcPath, onStep, onError }) {
     return { stop, dispose: stop };
 }
 
-module.exports = { startRecorder, validateGesture, replayGesture, parseRecordLine, hdcExecutable };
+module.exports = { startRecorder, validateGesture, validateRecording, replayGesture, parseRecordLine, hdcExecutable };

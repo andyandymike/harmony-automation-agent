@@ -104,15 +104,16 @@ test("pytest setup can be diagnosed without a device run and the recommendation 
     assert.match(result.next,/conftest.py/);
 });
 
-test("the failure section states the next check with its own evidence action and describes the optional HTML export", async () => {
+test("the failure section keeps evidence inline and describes the optional HTML export", async () => {
     const { failureView } = await loadWebview("caseFailure");
     const { evidenceExport } = await loadWebview("flowDebug");
     const locator=failureView({kind:"locator",index:1,code:"TARGET_NOT_FOUND"},entry.id,"zh-CN",
-        {stepTitle:"点按提交"});
+        {stepTitle:"点按提交",evidence:"<p>失败页面</p>"});
     assert.match(locator,/失败排查/);
     assert.match(locator,/到达预期页面/);
-    assert.match(locator,/data-type="diagnoseFailure"[^>]*>用 AI 生成修复方案/);
-    assert.match(locator,/data-type="showFailureStep"[^>]*data-index="1"/);
+    assert.match(locator,/data-type="diagnoseFailure"[^>]*>用 AI 分析失败/);
+    assert.match(locator,/<summary>原失败证据<\/summary>[\s\S]*失败页面/);
+    assert.doesNotMatch(locator,/showFailureStep|data-type="report"/);
     const missing=failureView({kind:"locator",index:1},entry.id,"zh-CN",{canReadLive:true,
         ai:{recommendation:"insufficientEvidence",reason:"missingPage",answer:"无法读取失败页面。",next:"打开付款页。"}});
     assert.match(missing,/data-phase="live"[^>]*>用手机当前画面补充分析/);
@@ -123,9 +124,8 @@ test("the failure section states the next check with its own evidence action and
     const runner=failureView({kind:"runner",phase:"setup"},entry.id,"zh-CN",{runner:"pytest",
         ai:{recommendation:"keepCase",answer:"缺少 session_data fixture。",next:"检查 conftest.py。"}});
     assert.match(runner,/测试准备/);
-    assert.match(runner,/先保留原用例/);
     assert.match(runner,/检查 conftest\.py/);
     assert.match(runner,/data-runner="pytest"[^>]*>重跑原用例/);
     assert.doesNotMatch(runner,/showFailureStep/);
-    assert.match(evidenceExport({run:{entry,steps:[{status:"failed"}]}},"zh-CN","run"),/导出运行证据…[\s\S]*保存为 HTML…/);
+    assert.match(evidenceExport({run:{entry,steps:[{status:"failed"}]}},"zh-CN","run"),/导出运行证据[\s\S]*保存为 HTML/);
 });

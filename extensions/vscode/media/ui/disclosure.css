@@ -1,0 +1,27 @@
+/* Native summaries and button-based folds use the same two states in each workbench surface. */
+:where(details > summary, [aria-expanded]) { --disclosure-angle:-45deg; }
+:where(details[open] > summary, [aria-expanded="true"]) { --disclosure-angle:45deg; }
+
+:where(#workbench, #live-task-pane, .run-report, .overview-page, .problem-clip) details > summary {
+    list-style:none; cursor:pointer;
+}
+:where(#workbench, #live-task-pane, .run-report, .overview-page, .problem-clip) details > summary::-webkit-details-marker {
+    display:none;
+}
+
+:where(#workbench details:not(.case-tools), #live-task-pane details:not(#ai-assistant), .overview-page details, .problem-clip details, .run-report .stats-inner) > summary::before,
+:where(.report-raw, #ai-assistant) > summary::after,
+:where(.case-step-status, .x-trace-row)[aria-expanded]::after,
+.sc-rule-select[aria-expanded] .sc-rule-line::after,
+[data-net="field-fold"]::before, [data-tree-toggle]::before, .fold-arrow {
+    content:""; display:inline-block; box-sizing:border-box; flex:none;
+    width:7px; height:7px; border:solid currentColor; border-width:0 1.5px 1.5px 0;
+    transform:rotate(var(--disclosure-angle)); vertical-align:.12em;
+}
+:where(#workbench details:not(.case-tools), #live-task-pane details:not(#ai-assistant), .overview-page details, .problem-clip details, .run-report .stats-inner) > summary::before,
+[data-net="field-fold"]::before { margin-inline:1px 7px; }
+.case-step-status[aria-expanded]::after, .sc-rule-select[aria-expanded] .sc-rule-line::after { margin-inline:7px 2px; }
+:where(.report-raw, #ai-assistant) > summary::after { margin-inline:auto 4px; }
+.fold-arrow, .x-trace-row[aria-expanded]::after, .sc-rule-select[aria-expanded] .sc-rule-line::after {
+    color:var(--muted); align-self:center;
+}

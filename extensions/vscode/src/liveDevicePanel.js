@@ -25,13 +25,14 @@ class LiveDevicePanel {
         if (this.device !== state.device) {
             this.device = state.device;
             this.error = undefined;
-            this.paused = false;
         }
         const connected = state.devices.includes(this.device);
-        const casePicture = state.caseReview?.stepTargets?.picture;
-        const casePicking = connected && state.tool==="recordings" && casePicture?.device===this.device;
-        const picking = casePicking || (connected && state.tool==="inspect" && state.elements?.picking===true);
-        const wanted = this.panel.visible && !this.paused && !this.error && connected ? this.device : undefined;
+        const available = connected && !state.deviceDisconnected;
+        const caseTargets = state.caseReview?.stepTargets;
+        const caseExploration = state.tool==="exploration" && state.caseComposition?.mode==="explore";
+        const casePicking = available && state.tool==="recordings" && caseTargets?.picture?.device===this.device;
+        const picking = casePicking || (available && state.tool==="inspect" && state.elements?.picking===true);
+        const wanted = this.panel.visible && !this.error && available ? this.device : undefined;
         if (this.feed?.device !== wanted) {
             this.retire();
             if (wanted) this.feed = { device: wanted, epoch: this.epoch, geometry: 0 };
@@ -43,10 +44,12 @@ class LiveDevicePanel {
         }
         this.picking = picking;
         void this.panel.webview.postMessage({
-            type: "state", epoch: this.epoch, streaming: Boolean(this.feed && !picking), paused: Boolean(this.paused), error: this.error,
+            type: "state", epoch: this.epoch, streaming: Boolean(this.feed && !picking),
+            disconnected: Boolean(state.deviceDisconnected), error: this.error,
             device: this.device, devices: state.devices, connected, picking, casePicking, tool: state.tool, busy: Boolean(state.busy),
-            caseEditing: Boolean(state.caseReview), focusPreview: Boolean(this.focusPreview),
+            caseEditing: Boolean(state.caseReview), caseExploration, focusPreview: Boolean(this.focusPreview),
             recording: Boolean(state.recording), draftLocation: state.draft?.location, draftFormat: state.draft?.stepFormat,
+            draftAutomatic: Boolean(state.draft?.automatic), phoneRecordingUnavailable: Boolean(state.draft?.phoneUnavailable),
             steps: state.draft?.steps.length, language, text,
             aiProvider: this.workbench.aiProvider, task: state.aiResults.phone?.key === state.device ? state.aiResults.phone : undefined,
             focusTask: Boolean(this.focusTask),
@@ -108,10 +111,8 @@ class LiveDevicePanel {
                     await bench.stopRecording();
                 });
                 break;
-            case "toggle":
-                this.paused = this.error ? false : !this.paused;
-                this.error = undefined;
-                this.sync();
+            case "disconnect": case "reconnect":
+                await this.changeConnection(message);
                 break;
             case "nextFrame":
                 if (this.feed && this.feed.epoch === message.epoch) await this.frame(this.feed);
@@ -126,6 +127,28 @@ class LiveDevicePanel {
                 await this.gesture(message);
                 break;
         }
+    }
+
+    async changeConnection({type, epoch}) {
+        const bench = this.workbench, device = this.device;
+        const {state} = bench;
+        if (epoch !== this.epoch || device !== state.device || !state.devices.includes(device) || state.busy) return;
+        if (type === "disconnect") {
+            if (!state.deviceDisconnected && !state.recording)
+                await bench.perform(() => bench.disconnectDevice(device,this));
+        } else if (state.deviceDisconnected) {
+            await bench.perform(() => bench.reconnectDevice(device,this));
+        } else if (this.error) {
+            this.error = undefined;
+            this.sync();
+        }
+    }
+
+    async detachDeviceSession(device) {
+        const session = this.sessions.get(device);
+        if (!session) return;
+        await session.agent.call("detach",{session:session.id});
+        this.sessions.delete(device);
     }
 
     async select(action) {

@@ -31,6 +31,7 @@ test("a portable clip uses the recorded plan, deduplicates native frames and inc
     assert.equal(noNetwork.mockScenario,undefined);
     assert.ok(!JSON.stringify(clip).includes("private"));
     const html=renderProblemClip(clip,"zh-CN");
+    assert.match(html,/--disclosure-angle:45deg/);
     assert.ok(!html.includes("<img src=x"));
     assert.match(html,/操作后/);
     assert.deepEqual(JSON.parse(JSON.stringify(parseClip(html))),JSON.parse(JSON.stringify(clip)));

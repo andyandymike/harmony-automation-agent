@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>订单回归测试</title>
+    <link rel="icon" href="data:,">
+    <style>
+        body { margin: 0; color: #19242b; background: #f2f5f6; font: 16px/1.5 system-ui, sans-serif; }
+        main { box-sizing: border-box; max-width: 480px; margin: auto; padding: 16px; }
+        h1 { margin: 0 0 10px; font-size: 23px; }
+        p { margin: 7px 0; }
+        label { display: block; margin: 10px 0 4px; }
+        input, button { box-sizing: border-box; min-height: 42px; border: 1px solid #68777e; border-radius: 6px; font: inherit; }
+        input { width: 100%; padding: 6px 10px; background: white; color: inherit; }
+        button { padding: 6px 12px; background: #fff; color: #1d3039; }
+        button:disabled { opacity: .5; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+        .primary { background: #184a61; color: white; border-color: #184a61; }
+        .results { border-top: 1px solid #c5ced1; margin-top: 12px; padding-top: 4px; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>订单回归测试</h1>
+    <p id="order-number">订单编号 QA-042</p>
+    <label for="order-input">输入订单号</label>
+    <input id="order-input" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="actions">
+        <button id="confirm" class="primary">确认订单</button>
+        <button id="reset">重置用例</button>
+    </div>
+    <p id="order-status">订单状态 待确认</p>
+    <div class="actions">
+        <button id="payment" disabled>提交付款</button>
+        <button id="stock" disabled>查询库存</button>
+    </div>
+    <div class="results">
+        <p id="payment-result">付款结果 待提交</p>
+        <p id="stock-result">库存结果 待查询</p>
+    </div>
+</main>
+<script>
+    const input = document.getElementById('order-input');
+    const orderStatus = document.getElementById('order-status');
+    const payment = document.getElementById('payment');
+    const stock = document.getElementById('stock');
+    const paymentResult = document.getElementById('payment-result');
+    const stockResult = document.getElementById('stock-result');
+    const orderPrefix = '订单编号 ';
+    let run = 0;
+
+    document.getElementById('reset').addEventListener('click', () => {
+        run += 1;
+        input.value = '';
+        orderStatus.textContent = '订单状态 待确认';
+        payment.disabled = stock.disabled = true;
+        paymentResult.textContent = '付款结果 待提交';
+        stockResult.textContent = '库存结果 待查询';
+    });
+
+    document.getElementById('confirm').addEventListener('click', () => {
+        const order = document.getElementById('order-number').textContent.slice(orderPrefix.length);
+        const ready = input.value.trim() === order;
+        input.blur();
+        payment.disabled = stock.disabled = !ready;
+        orderStatus.textContent = ready ? `订单状态 已确认 ${order}` : '订单状态 订单号不匹配';
+    });
+
+    async function requestResult(endpoint, label, result, button) {
+        const requestRun = run;
+        button.disabled = true;
+        result.textContent = `${label}结果 请求中`;
+        try {
+            const response = await fetch(`/api/workbench-order/${endpoint}`, {cache: 'no-store'});
+            const {label: detail} = await response.json();
+            if (requestRun === run) result.textContent = `${label}结果 ${response.status} ${detail}`;
+        } catch {
+            if (requestRun === run) result.textContent = `${label}结果 请求失败`;
+        } finally {
+            if (requestRun === run) button.disabled = false;
+        }
+    }
+
+    payment.addEventListener('click', () => requestResult('payment', '付款', paymentResult, payment));
+    stock.addEventListener('click', () => requestResult('stock', '库存', stockResult, stock));
+</script>
+</body>
+</html>

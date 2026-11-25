@@ -5,10 +5,9 @@ import { installLiveGestures } from "./liveGestures.js";
 const byId = id => document.getElementById(id);
 const postLive = message => vscode.postMessage({ ...message, channel: "live" });
 const screenCanvas = byId("screen");
+const connection = byId("preview-connection");
 const context = screenCanvas.getContext("2d", { alpha: false });
 const navigation = ["back", "home", "recents"].map(byId);
-const locationGroup = byId("record-location");
-const formatGroup = byId("record-format");
 const keyboard = byId("phone-keyboard");
 const textForm = byId("phone-text-form");
 const textField = byId("phone-text");
@@ -17,14 +16,13 @@ let state;
 let frame;
 let requestPending = false;
 let sending;
-let recordLocation = "preview";
-let previewStepFormat = "controls";
-
-const isControlRecording = () => state?.recording && state.draftFormat === "controls";
+let lastTap;
+const isControlRecording = () => state?.recording && state.draftLocation === "preview" &&
+    state.draftFormat === "controls" && !state.draftAutomatic;
 
 function canTouch() {
     return frame?.epoch === state?.epoch && state?.streaming && !state.picking && !state.busy && !sending &&
-        (!state.draftLocation || (state.recording && state.draftLocation === "preview"));
+        (!state.draftLocation || (state.recording && state.draftLocation !== "phone"));
 }
 
 function buttonText(id, text) {
@@ -49,40 +47,24 @@ function updateKeyboard() {
     sendText.disabled = !editable || !textField.value;
 }
 
-const canOfferRecording = () => state?.tool==="recordings" && !state.caseEditing && !state.draftLocation && !state.recording;
-
-function updateRecordingOptions() {
-    const t = state.text;
-    const location = state.draftLocation || recordLocation;
-    const phone = location === "phone";
-    const format = state.draftFormat || (phone ? "coordinates" : previewStepFormat);
-    locationGroup.querySelector('[value="'+location+'"]').checked = true;
-    formatGroup.querySelector('[value="'+format+'"]').checked = true;
-    const controlChoice = formatGroup.querySelector('[value=controls]');
-    controlChoice.disabled = phone;
-    controlChoice.parentElement.title = phone ? t.recordPhoneCoordinateOnly : t.recordControlsHint;
-    formatGroup.querySelector('[value=coordinates]').parentElement.title = t.recordGestureHint;
-    locationGroup.disabled = formatGroup.disabled =
-        Boolean(!state.connected || state.busy || state.caseEditing || state.draftLocation);
-    const note = byId("record-format-note");
-    byId("record-choices").hidden = !canOfferRecording();
-    note.hidden = !canOfferRecording() || !phone;
-}
+const canOfferRecording = () => state?.tool==="recordings" && !state.disconnected && !state.caseEditing && !state.draftLocation && !state.recording;
+const connectionAction = () => state.disconnected || state.error ? "reconnect" : "disconnect";
 
 function status() {
     const t = state.text;
     const status = byId("status");
-    const recordingHere = state.recording && state.draftLocation === "preview";
+    const recordingHere = state.recording && state.draftLocation !== "phone";
     const recordingControls = isControlRecording();
     const waiting = frame ? t.liveRefreshing : t.liveConnecting;
-    status.textContent = state.picking ? t.stationFrozenScreen : state.error ? t.liveUnavailable : state.paused ? t.livePaused :
+    status.textContent = state.disconnected ? t.liveDisconnected : state.picking ? t.stationFrozenScreen : state.error ? t.liveUnavailable :
         !state.connected ? t.stationNoSignal : frame?.epoch !== state.epoch ? waiting :
+        state.recording && state.draftLocation === "phone" ? t.recordPhoneActive :
         !canTouch() && !sending ? t.liveViewOnly : t.liveOn;
-    status.dataset.live = String(Boolean(frame?.epoch === state.epoch && state.streaming));
+    status.dataset.live = String(Boolean(frame && frame.epoch === state.epoch && state.streaming && !state.picking));
     byId("empty").hidden = Boolean(frame || state.picking);
-    byId("empty-title").textContent = state.error ? t.liveUnavailable : state.paused ? t.livePaused :
+    byId("empty-title").textContent = state.disconnected ? t.liveDisconnected : state.error ? t.liveUnavailable :
         state.connected ? t.liveConnecting : t.stationWaitingScreen;
-    byId("empty-detail").textContent = state.error || (state.paused ? t.stationPauseHelp : "");
+    byId("empty-detail").textContent = state.error || (!state.connected && !state.disconnected ? t.stationConnectCable : "");
     byId("empty").dataset.offline = String(!state.connected && !state.error);
     screenCanvas.hidden = !frame || state.picking;
     screenCanvas.dataset.touch = String(Boolean(canTouch()));
@@ -93,7 +75,7 @@ function status() {
         button.title = coordinateOnly ? t.recordingGestureOnly : button.id === "recents" ? t.stationRecentsHelp : "";
     }
     keyboard.disabled = disabled && textForm.hidden;
-    byId("phone-controls").hidden = !state.connected || state.casePicking;
+    byId("phone-controls").hidden = !state.connected || state.disconnected || state.casePicking;
     updateKeyboard();
     byId("phone-text-help").textContent = recordingControls ? t.stationControlTextHelp :
         recordingHere ? t.stationRecordedTextHelp : t.stationPhoneTextHelp;
@@ -104,12 +86,18 @@ function status() {
     buttonText("record", state.recording ? t.finish : t.beginRecording);
     record.title = state.recording ? t.screenCounter.replace("{n}", state.steps) : "";
     byId("live-preview").dataset.recording = String(state.recording);
+    const notice = byId("recording-notice");
+    notice.textContent = state.phoneRecordingUnavailable ? t.recordPreviewOnly :
+        state.draftLocation === "auto" ? t.recordFirstAction : "";
+    notice.hidden = !state.recording || !notice.textContent || state.casePicking;
     byId("preview-actions").hidden = state.casePicking;
-    byId("toggle").disabled = !state.connected || state.picking;
-    buttonText("toggle", state.error ? t.liveRetry : state.paused ? t.liveResume : t.livePause);
-    byId("toggle").dataset.play = String(Boolean(state.paused || state.error));
+    const reconnect = connectionAction()==="reconnect";
+    connection.disabled = !state.connected || state.busy || (state.recording && !reconnect);
+    buttonText(connection.id, reconnect ? t.liveReconnect : t.liveDisconnect);
     byId("live-preview").dataset.connected = String(state.connected);
+    byId("live-preview").dataset.disconnected = String(Boolean(state.disconnected));
     byId("size").textContent = frame && !state.picking ? `${frame.width} × ${frame.height}` : "";
+    byId("last-tap").textContent = lastTap && !state.picking ? `${t.stationLastTap}  ${lastTap.x}, ${lastTap.y}` : "";
     byId("gesture-help").hidden = !(state.picking || canTouch() || sending);
     byId("gesture-help").textContent = state.picking ? t.stationPickHint :
         recordingControls ? t.stationRecordedControlHint : t.liveGestureHint;
@@ -131,17 +119,17 @@ function request() {
 function update(message) {
     const epochChanged = state?.epoch !== message.epoch;
     const screenChanged = epochChanged || state?.picking !== message.picking ||
-        state?.recording !== message.recording || state?.draftLocation !== message.draftLocation ||
+        state?.disconnected !== message.disconnected || state?.recording !== message.recording || state?.draftLocation !== message.draftLocation ||
         state?.draftFormat !== message.draftFormat;
-    if (!message.connected) frame = undefined;
+    if (!message.connected || message.disconnected) frame = undefined;
     if (epochChanged) {
-        const keepFrame = state?.device === message.device && !message.error &&
-            (message.paused || state?.picking || message.picking);
+        const keepFrame = state?.device === message.device && !message.error && (state?.picking || message.picking);
         if (!keepFrame) frame = undefined;
         requestPending = false;
         resolveSend(false);
     }
     if (screenChanged) {
+        lastTap = undefined;
         feedback();
         gestures.cancel();
         setKeyboardOpen(false);
@@ -151,14 +139,6 @@ function update(message) {
     state = message;
     const t = state.text;
     byId("live-title").textContent = t.stationPreview;
-    byId("record-location-label").textContent = t.recordLocation;
-    byId("record-format-label").textContent = t.recordSaveAs;
-    byId("record-format-note").textContent = t.recordPhoneCoordinateOnly;
-    byId("record-preview-label").textContent = t.recordLocationPreview;
-    byId("record-phone-label").textContent = t.recordLocationPhone;
-    byId("record-controls-label").textContent = t.recordFormatControls;
-    byId("record-coordinates-label").textContent = t.recordFormatCoordinates;
-    updateRecordingOptions();
     buttonText("back", t.phoneBack);
     buttonText("home", t.home);
     buttonText("recents", t.recents);
@@ -188,7 +168,10 @@ async function draw(message) {
         context.drawImage(bitmap, 0, 0);
         bitmap.close();
         const geometryChanged = frame?.epoch !== message.epoch || frame.geometry !== message.geometry;
-        if (geometryChanged) gestures.cancel();
+        if (geometryChanged) {
+            gestures.cancel();
+            lastTap = undefined;
+        }
         frame = { epoch: message.epoch, geometry: message.geometry, width: message.width, height: message.height };
         if (geometryChanged) status();
         requestPending = false;
@@ -202,6 +185,7 @@ window.addEventListener("message", ({ data }) => {
     if (data.type === "state") update(data);
     if (data.type === "frame") void draw(data);
     if (data.type === "gestureResult" && state?.epoch === data.epoch) {
+        if (!data.error && sending?.tap && sending.geometry === frame?.geometry && !state.picking) lastTap = sending.tap;
         resolveSend(!data.error);
         feedback(data.error || state.text.liveSent, Boolean(data.error));
         status();
@@ -233,7 +217,8 @@ function send(input, anchor) {
     if (!canTouch()) return Promise.resolve(false);
     let resolve;
     const done = new Promise(finish => { resolve = finish; });
-    sending = { done, resolve };
+    const tap = ["click","doubleClick","longClick"].includes(input.kind) ? {x:input.x, y:input.y} : undefined;
+    sending = { done, resolve, tap, geometry:frame.geometry };
     feedback(state.text.liveSending);
     status();
     postLive({ type: "gesture", epoch: frame.epoch, geometry: frame.geometry, input, anchor });
@@ -278,21 +263,16 @@ textForm.addEventListener("submit", async event => {
         updateKeyboard();
     }
 });
-byId("toggle").addEventListener("click", () => void afterGestures(() => postLive({ type: "toggle" })));
+connection.addEventListener("click", () => {
+    const type = connectionAction();
+    void afterGestures(() => postLive({type,epoch:state.epoch}));
+});
 byId("preview-zoom").addEventListener("click", () => setPreviewExpanded(byId("live-preview").dataset.expanded !== "true"));
-locationGroup.addEventListener("change", event => {
-    recordLocation = event.target.value;
-    updateRecordingOptions();
-});
-formatGroup.addEventListener("change", event => {
-    if (recordLocation === "preview") previewStepFormat = event.target.value;
-    updateRecordingOptions();
-});
 byId("record").addEventListener("click", () => void afterGestures(() => {
     if (state.recording) {
         postLive({ type: "stopRecord" });
     } else if (canOfferRecording()) {
-        vscode.postMessage({ type: "startRecord", location: recordLocation, stepFormat: recordLocation==="phone"?"coordinates":previewStepFormat });
+        vscode.postMessage({ type: "startRecord" });
     }
 }));
 postLive({ type: "ready" });

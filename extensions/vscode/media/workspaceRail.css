@@ -44,8 +44,6 @@
 #live-task-pane #ai-assistant > summary strong { font-weight: 550; }
 #live-task-pane #ai-assistant > summary:hover,
 #live-task-pane #ai-assistant[open] > summary { color: var(--live-text); }
-#live-task-pane #ai-assistant > summary .live-icon:last-child { margin-inline-start: auto; }
-#live-task-pane #ai-assistant[open] > summary .live-icon:last-child { rotate: 180deg; }
 #live-task-pane #assistant-status { font-size: 12px; }
 #live-task-pane #ai-assistant[open] #assistant-status { display: none; }
 #live-task-pane #goal-label { display: block; color: var(--live-muted); margin: 4px 0 6px; }

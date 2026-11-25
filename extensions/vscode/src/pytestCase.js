@@ -6,6 +6,8 @@ const { randomUUID } = require("node:crypto");
 const {isDeepStrictEqual} = require("node:util");
 const { deviceRecordingFormat } = require("./model");
 const { workflowWithScenario } = require("./workflowFile");
+const { pendingCaseWork } = require("./casePresentation");
+const { hasRuleSteps } = require("./caseRuleSteps");
 const { validateScenario } = require("./network");
 const { finishPytest } = require("./pytestReport");
 const { journalPath } = require("./runProgress");
@@ -13,8 +15,10 @@ const { pythonPath } = require("./projectRuntime");
 
 const templatePath = path.join(__dirname, "templates", "pytest_case.py");
 
-function readiness(plan) {
+function readiness(plan,{runner="pytest"}={}) {
+    if (pendingCaseWork(plan).length) return "description";
     if (plan?.format === deviceRecordingFormat) return "gestures";
+    if (runner==="pytest" && hasRuleSteps(plan)) return "ruleSteps";
     if (!["1", "2"].includes(plan?.version) || !Array.isArray(plan.steps) || !plan.steps.length) return "invalid";
     const start = Array.isArray(plan.preconditions) && plan.preconditions.length;
     const goal = Array.isArray(plan.goals) && plan.goals.length;
@@ -51,7 +55,9 @@ function testFilename(name) {
 
 async function writeCase(parent, name, plan, group) {
     if (!safeCaseName(name)) throw new Error("Invalid case folder name");
-    if (readiness(plan)) throw new Error("The workflow needs a control plan with preconditions and goals");
+    const issue = readiness(plan);
+    if (issue === "description") throw new Error("Generate the remaining case steps before exporting to pytest.");
+    if (issue) throw new Error("The workflow needs a control plan with preconditions and goals");
     const filename = testFilename(name);
     const template = await fs.readFile(templatePath, "utf8");
     const workflow = group ? workflowWithScenario(plan, validateScenario(group)) : plan;
@@ -94,7 +100,7 @@ async function findCase(uri) {
     }
 }
 
-async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} = {}) {
+async function startPytest(vscode, bench, entry, {workflowOverride, repairPlan, skipRuleGroup, onRunning} = {}) {
     const zh = /^zh/i.test(bench.language);
     if (vscode.workspace.isTrusted === false) throw new Error(zh ? "请先在 VS Code 中信任此工作区，再运行项目测试。" : "Trust this workspace in VS Code before running its tests.");
     const device = bench.state.device || process.env.HARMONY_DEVICE;
@@ -106,10 +112,13 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
     const invocation = randomUUID();
     const evidenceRoot = path.resolve(process.env.HARMONY_ARTIFACT_DIR || path.join(bench.storage.fsPath, "pytest-artifacts"));
     const directory = path.join(evidenceRoot, invocation);
+    const repairPlanFile = repairPlan && path.join(directory,"repair-plan.json");
     const plan = bench.state.plan;
     const env = {HARMONY_DEVICE:device, HARMONY_ARTIFACT_DIR:directory,
         HARMONY_PYTEST_RESULT:path.join(directory, "pytest.json"), HARMONY_PYTEST_TARGET:path.join(entry.folder, entry.filename),
-        HARMONY_PYTEST_WORKFLOW_OVERRIDE:workflowOverride || "", HARMONY_PYTEST_PROJECT_PYTHON:runtime?.python || "",
+        HARMONY_PYTEST_WORKFLOW_OVERRIDE:workflowOverride || "", HARMONY_PYTEST_SKIP_RULE_GROUP:skipRuleGroup ? "1" : "",
+        HARMONY_PYTEST_REPAIR_PLAN:repairPlanFile || "",
+        HARMONY_PYTEST_PROJECT_PYTHON:runtime?.python || "",
         PYTHONPATH:pythonPath(runtime, path.dirname(templatePath))};
     if (workflowOverride && !path.isAbsolute(workflowOverride)) throw new Error("Expected an absolute candidate workflow path");
     let candidate;
@@ -146,6 +155,7 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
     if (bench.state.device) await bench.detach();
     await fs.mkdir(evidenceRoot, {recursive:true, mode:0o700});
     await fs.mkdir(directory, {mode:0o700});
+    if (repairPlanFile) await fs.writeFile(repairPlanFile,JSON.stringify(repairPlan),{flag:"wx",mode:0o600});
     const sourceFile = workflowOverride || path.join(entry.folder, "workflow.json");
     const sourceCopy = path.join(directory, "workflow-source.json");
     try { await fs.copyFile(sourceFile, sourceCopy); }
@@ -165,7 +175,7 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
         const {name:id} = dirs[0];
         return {id,file:journalPath(sharedState || path.join(directory,id,"state"),id)};
     };
-    const stopProgress = onRunning?.({id:invocation,source:"pytest",plan,device,time,status:"running"},locate,candidate);
+    const stopProgress = onRunning?.({id:invocation,source:"pytest",plan,device,time,status:"running"},locate,repairPlan || candidate);
     let outcome;
     try {
         await vscode.tasks.executeTask(task);
@@ -182,7 +192,7 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
     const releaseSession = !outcome.launchError && bench.reportAgent && ((id,stateDir)=>
         bench.reportAgent({pytest:{stateDir}}).call("detach",{session:"pytest-"+id}));
     const result = await finishPytest({directory,invocation,plan,time,device,sharedState,sourceFile,releaseSession,...outcome});
-    if (candidate && result.entry.status === "passed") {
+    if (candidate && (result.entry.status === "passed" || repairPlan && result.entry.pytest.deviceRun)) {
         const deviceRun = result.entry.pytest.deviceRun;
         let actual, execution;
         if (deviceRun) {
@@ -193,10 +203,13 @@ async function startPytest(vscode, bench, entry, {workflowOverride, onRunning} =
             }
             catch (error) { if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error; }
         }
+        const expected = repairPlan || candidate;
         const verified = execution?.data?.goalVerification;
-        if (!isDeepStrictEqual(actual, candidate) || !execution?.success || execution.data?.status !== "completed" ||
-            verified?.status !== "passed" || verified.assertions?.length !== candidate.goals.length ||
-            !verified.assertions.every(a => a?.status === "passed")) {
+        const goalCount = expected.goals.length;
+        const complete = execution?.data?.status === "completed" &&
+            verified?.status === (goalCount ? "passed" : "not_requested") &&
+            verified.assertions?.length === goalCount && verified.assertions.every(a => a?.status === "passed");
+        if (!isDeepStrictEqual(actual,expected) || !execution?.success || (result.entry.status==="passed" && !complete)) {
             result.entry.status = "failed";
             result.entry.pytest.launchError = zh ? "未找到本次候选流程的执行证据。" : "This run did not produce evidence for the candidate workflow.";
         }

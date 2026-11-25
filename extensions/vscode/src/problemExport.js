@@ -2,6 +2,7 @@
 
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const {readFileSync} = require("node:fs");
 const { safeValue } = require("./networkEvidence");
 
 const format = "harmony-agent.problem-clip/1";
@@ -156,9 +157,10 @@ function renderProblemClip(clip,language) {
             ${row.imageError?`<p>${word("Image unavailable","截图不可用")} · ${h(row.imageError)}</p>`:""}
             ${block(word("Network & logs in this interval","同时段网络与日志"),row.network)}</article>`).join("")}</section>`).join("");
     const encoded=Buffer.from(JSON.stringify(clip)).toString("base64");
-    return `<!doctype html><html lang="${/^zh/i.test(language)?"zh-CN":"en"}"><head><meta charset="utf-8">
+    const disclosures=readFileSync(path.join(__dirname,"..","media","ui","disclosure.css"),"utf8");
+    return `<!doctype html><html lang="${/^zh/i.test(language)?"zh-CN":"en"}" class="problem-clip"><head><meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-        <meta name="viewport" content="width=device-width, initial-scale=1"><title>${h(clip.title)}</title><style>
+        <meta name="viewport" content="width=device-width, initial-scale=1"><title>${h(clip.title)}</title><style>${disclosures}
         :root{color-scheme:light dark}body{font:15px/1.55 system-ui,sans-serif;max-width:58rem;margin:2rem auto;padding:0 1.5rem}
         h1,h2,h3{line-height:1.3}h2{border-top:1px solid #8888;padding-top:1rem}article{padding:.3rem 1rem;border-left:3px solid #648eaa;margin:1rem 0}
         small{opacity:.8}summary{cursor:pointer;padding:.3rem 0}pre,code{white-space:pre-wrap;overflow-wrap:anywhere}img{max-width:100%;max-height:60vh}
@@ -199,4 +201,4 @@ async function openProblemClip(bench,vscode) {
     panel.webview.html=renderProblemClip(clip,bench.language);
 }
 
-module.exports={createProblemClip,renderProblemClip,parseClip,exportProblemClip,openProblemClip};
+module.exports={createProblemClip,renderProblemClip,parseClip,exportProblemClip,openProblemClip,getScreenshot};

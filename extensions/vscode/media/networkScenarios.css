@@ -1,5 +1,5 @@
 .net-view .sc-overview, .net-view .sc-editor {max-width: 960px; margin: 0; padding: 22px 0; min-width: 0;}
-.sc-workspace {display:grid; grid-template-columns:minmax(185px,23%) minmax(0,1fr); gap:clamp(16px,2.4vw,36px); align-items:start;}
+.sc-workspace {display:grid; grid-template-columns:minmax(185px,23%) minmax(0,1fr); column-gap:clamp(16px,2.4vw,36px); align-items:start;}
 .sc-shelf {min-width:0; margin-block:22px; padding-inline-end:16px; border-inline-end:1px solid var(--line);}
 .sc-shelf header {display:flex; gap:6px; align-items:center; justify-content:space-between;}
 #workbench .sc-shelf h2 {font-size:15px;}
@@ -26,7 +26,17 @@
 }
 .net-view .sc-title, .net-view .sc-sequence li, .net-view .sc-rule-line,
 .net-view .sc-extra, .net-view .sc-file-actions, .net-view .sc-commit {display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;}
-.net-view .sc-title {justify-content: space-between;}
+.net-view .sc-title {grid-column:1/-1; align-items:center; gap:8px clamp(16px,3vw,40px); padding:14px 0 11px; border-bottom:1px solid var(--line);}
+.sc-editing-name {min-width:0;}
+.sc-manual-status {display:flex; align-items:baseline; flex-wrap:wrap; gap:3px 8px; min-width:0; padding-inline-start:14px; border-inline-start:1px solid var(--line);}
+.sc-manual-status > span {font-size:12px; color:var(--muted);}
+.sc-manual-status strong {overflow-wrap:anywhere;}
+.sc-manual-status[data-enabled=true] strong {color:var(--accent);}
+.ns-gateway .sc-manual-status {padding:0; border:0;}
+#workbench .sc-manual-status .button {padding:2px 4px; min-height:23px; font-size:12px; border-color:transparent; color:var(--muted);}
+#workbench .sc-manual-status .button:enabled:hover {color:var(--ink); border-color:var(--line);}
+.sc-title + .sc-shelf {margin-block:15px;}
+.sc-title ~ .sc-overview {padding-top:8px;}
 #workbench .sc-title h2 { font-size:clamp(20px, 1.8vw, 27px); margin-top:3px; overflow-wrap:anywhere;}
 .net-view .sc-caption {color:var(--muted);font-size:12px;}
 .net-view .sc-file-actions {margin-top:9px;}
@@ -53,18 +63,18 @@
 #workbench .sc-rule-switch span { width:12px; height:12px; border-radius:50%; background:var(--muted); }
 #workbench .sc-rule-switch[aria-checked="true"] { justify-content:flex-end; border-color:var(--accent); background:var(--selected); }
 #workbench .sc-rule-switch[aria-checked="true"] span { background:var(--accent); }
-.sc-rule-line strong,.sc-match code,.sc-workflow strong,.sc-workflow h3 {overflow-wrap:anywhere;}
+.sc-rule-line strong,.sc-match code {overflow-wrap:anywhere;}
 .sc-priority {display:grid;justify-items:center;align-content:start;font:12px var(--mono);color:var(--muted);padding-top:2px;text-align:center;}
 .ne-step-head {display:flex;align-items:center;gap:6px;margin-bottom:9px;}
 #workbench .ne-step-head h3 {margin:0;flex:1;}
 .sc-match code {font:13px var(--mono);}
 .sc-test-action {display:grid;justify-items:start;gap:3px;}
 .sc-response-preview {font-size:12px;min-width:0;}
+.sc-rule-effects { display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 10px; margin:6px 0 0; font-size:12px; overflow-wrap:anywhere; }
+.sc-rule-effects dt { color:var(--muted); }
+.sc-rule-effects dd { margin:0; max-height:6em; overflow:auto; white-space:pre-wrap; }
 .sc-response-preview summary {cursor:pointer;overflow-wrap:anywhere;}
 .sc-rules > button {margin-top:8px;}
-.sc-workflow {margin:18px 0 0;padding-top:14px;border-top:1px solid var(--line);}
-.sc-workflow p {margin:5px 0;}
-.sc-workflow .sc-extra {margin-top:8px;}
 .net-view .sc-sequence {display:grid;gap:0;margin:9px 0;}
 .net-view .sc-sequence li {min-height:30px; font-size:12px;}
 .net-view .sc-sequence li code {color:var(--muted);overflow-wrap:anywhere;}

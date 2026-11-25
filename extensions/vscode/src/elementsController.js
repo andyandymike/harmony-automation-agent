@@ -35,7 +35,7 @@ class ElementsController {
             view.copied = undefined;
             this.lastPage = this.snapshot = view.picture = undefined;
         }
-        if ((b.state.tool ?? b.state.mode) !== "inspect" || !page?.elements || page === this.lastPage) return;
+        if ((b.state.tool ?? b.state.mode) !== "inspect" || b.state.deviceDisconnected || !page?.elements || page === this.lastPage) return;
         this.lastPage = page;
         const changes = [];
         for (const watch of view.watches) {
@@ -64,7 +64,8 @@ class ElementsController {
     async handle(message) {
         const b = this.bench, v = this.vscode, state = b.state, view = this.view;
         if ((state.tool ?? state.mode) !== "inspect" || !state.device) return;
-        if (state.draft && !["elementMode","elementSample","elementCopy","elementWatch","elementUnwatch"].includes(message.type)) return;
+        if (state.deviceDisconnected && ["elementMode","elementSample"].includes(message.type)) return;
+        if (state.draft && !["elementMode","elementSample","elementCopy","elementWatch","elementUnwatch","elementCopySelected","elementUnwatchSelected"].includes(message.type)) return;
         if (message.type === "elementMode") {
             if (this.picking === (message.picking === true)) return;
             this.picking = view.picking = message.picking === true;
@@ -80,13 +81,28 @@ class ElementsController {
             }
             return;
         }
-        if (message.type === "elementUnwatch") {
-            view.watches = view.watches.filter(w=>w.id !== message.id);
+        if (message.type === "elementUnwatch" || message.type === "elementUnwatchSelected") {
+            const ids=new Set(message.type==="elementUnwatch" ? [message.id] : Array.isArray(message.ids) ? message.ids : []);
+            view.watches=view.watches.filter(watch=>!ids.has(watch.id));
             return;
         }
-        if (message.type === "elementRemove") {
-            if (Number.isInteger(message.index) && view.steps[message.index]) view.steps.splice(message.index,1);
-            await b.context.workspaceState.update("elements.steps",view.steps);
+        if (["elementRemove","elementRemoveSelected","elementUndoRemoval"].includes(message.type)) {
+            const revision=view.stepsRevision || 0;
+            if (message.type!=="elementRemove" && message.revision!==revision) return;
+            const steps=[...view.steps];
+            let removed;
+            if (message.type==="elementUndoRemoval") {
+                if (!view.removedSteps?.length) return;
+                for (const {index,step} of view.removedSteps) steps.splice(index,0,step);
+            } else {
+                const indices=message.type==="elementRemove" ? [message.index] :
+                    Array.isArray(message.indices) ? [...new Set(message.indices)] : [];
+                if (!indices.length || indices.some(index=>!Number.isInteger(index) || !steps[index])) return;
+                removed=indices.sort((a,b)=>a-b).map(index=>({index,step:steps[index]}));
+                for (const index of indices.toReversed()) steps.splice(index,1);
+            }
+            await b.context.workspaceState.update("elements.steps",steps);
+            Object.assign(view,{steps,removedSteps:removed,stepsRevision:revision+1});
             return;
         }
         if (message.type === "elementSave") {
@@ -98,12 +114,21 @@ class ElementsController {
             await v.workspace.fs.writeFile(uri,Buffer.from(JSON.stringify({version:"1",steps:view.steps},null,2)+"\n"));
             await b.setPlan(uri);
             state.tool = "recordings";
-            view.steps = [];
             await b.context.workspaceState.update("elements.steps",[]);
+            Object.assign(view,{steps:[],removedSteps:undefined,stepsRevision:(view.stepsRevision || 0)+1});
             return;
         }
         const page = state.page;
         if (!page?.elements || page.frameId !== message.frameId) throw new Error(b.text.stalePage);
+        if (message.type === "elementCopySelected") {
+            const refs=[...new Set(Array.isArray(message.refs) ? message.refs : [])];
+            const nodes=new Map(page.nodes.map(node=>[node.ref,node]));
+            if (!refs.length || refs.some(ref=>!nodes.get(ref)?.selector)) throw new Error(b.text.stalePage);
+            const locators=refs.map(ref=>parseLocator(nodes.get(ref).selector));
+            await v.env.clipboard.writeText(JSON.stringify(locators,null,2));
+            view.copiedSelection={frameId:page.frameId,count:locators.length};
+            return;
+        }
         const locator = parseLocator(message.locator);
         if (message.type === "elementCopy") {
             await v.env.clipboard.writeText(JSON.stringify(locator,null,2));
@@ -127,6 +152,8 @@ class ElementsController {
             view.steps.push({command:"press",input:{target:locator}});
         } else return;
         await b.context.workspaceState.update("elements.steps",view.steps);
+        view.removedSteps=undefined;
+        view.stepsRevision=(view.stepsRevision || 0)+1;
     }
 }
 

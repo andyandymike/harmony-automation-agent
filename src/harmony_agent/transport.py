@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 from .errors import AgentError
+from .gestures import gesture_arguments
 
 
 _FAILURE = re.compile(r"(?im)^\s*(?:\[fail\]|\[error\]|error:|hdc:\s*error)")
@@ -338,6 +339,16 @@ class HdcTransport:
             raise AgentError("INVALID_ARGUMENT", "Swipe velocity must be an integer from 200 to 40000.", exit_code=2)
         return self.shell(device, ["uitest", "uiInput", "swipe", *map(_coordinate, (x1, y1, x2, y2)), str(velocity)],
                           mutating=True)
+
+    def gesture(self, device, value):
+        help_text = ""
+        if value["kind"] in ("pinch", "recents"):
+            try:
+                help_text = self.shell(device, ["uinput", "-?"])
+            except AgentError as error:
+                if error.code not in {"DEVICE_COMMAND_FAILED", "HDC_COMMAND_FAILED"}:
+                    raise
+        return self.shell(device, gesture_arguments(value, help_text), mutating=True)
 
     def boot_id(self, device):
         try:

@@ -10,8 +10,74 @@ const {CaseLibrary, createBdd, writeCaseMetadata} = require("../src/caseLibrary"
 const {writeCase} = require("../src/pytestCase");
 const loadWebview = require("../test-support/loadWebview");
 
+test("step rows show editable descriptions for ordinary, generated, linked and boundary steps",async()=>{
+    const {caseBddView,caseStepLabel}=await loadWebview("caseLibrary");
+    const note="Return to the cart <without> paying";
+    const bdd={steps:[
+        {path:"preconditions[0]",area:"start",name:"Cart is ready",text:"cart is visible",role:"Given",displayDescription:"Check setup"},
+        {path:"steps[0]",area:"step",name:"Exit checkout",text:"Go back",role:"When",displayDescription:note},
+        {path:"steps[1]",area:"step",name:"Inspect total",text:"Read the basket total",role:"Then",description:{id:"g",implemented:true},
+            branches:[{readOnly:true,steps:[{text:"Read",name:"Read price",displayDescription:"Check the amount",role:"When"}]}]}
+    ]};
+    const html=caseBddView(bdd,"en",{renderAfterStep:row=>row.area==="start"?"<form>edit boundary</form>":""});
+    assert.match(html,/Cart is ready[\s\S]*Check setup[\s\S]*edit boundary/);
+    assert.match(html,/data-bdd-role="Then"[\s\S]*Inspect total[\s\S]*Read the basket total/);
+    assert.match(html,/Check the amount/);
+    assert.match(html,/Return to the cart &lt;without&gt; paying/);
+    assert.doesNotMatch(html,/Go back|<without>/);
+    assert.equal(caseStepLabel("Tap Buy",{displayDescription:"Tap Buy"}),"Tap Buy");
+});
+
 const check = {selector: {id: "cart"}, property: "visible", equals: true};
 const plan = {version: "1", preconditions: [check], steps: [{command: "press", input: {target: {id: "buy"}}}], goals: [check]};
+
+test("a referenced case keeps its reference label when the displayed BDD role changes", async () => {
+    const {caseBddView} = await loadWebview("caseLibrary");
+    const link = {useCase:{caseId:"cart",name:"Prepare cart",plan}};
+    const parent = {version:"1",steps:[link]};
+    const htmlFor = role => caseBddView(createBdd(parent,"en",undefined,new Map([[link,{name:"Prepare",role}]])),"en");
+    assert.match(htmlFor(),/data-bdd-role="When"[\s\S]*?case-reference-label/);
+    assert.match(htmlFor("Given"),/data-bdd-role="Given"[\s\S]*?title="Referenced case · Prepare cart">Reference</);
+});
+
+test("checked steps preview one definition at a time, expand their branch and never enter an editor", async () => {
+    const {caseBddView}=await loadWebview("caseLibrary");
+    const {caseDefinitions}=require("../src/caseAuthoring");
+    const {ListSelection}=await loadWebview("ui/listSelection");
+    const workflow={version:"2",preconditions:[check],steps:[
+        {if:check,then:[{command:"fill",input:{target:{id:"note"},text:"private-entry",timeout_ms:2400}}]},
+        {command:"back"},
+    ]};
+    const bdd=createBdd(workflow,"en"),definitions=caseDefinitions(workflow);
+    const list=new ListSelection("preview-step-test"),child="steps[0].then[0]",boundary="preconditions[0]";
+    list.update("draft",[boundary,"steps[0]",child,"steps[1]"],false);
+    list.start();
+    const draw=()=>caseBddView(bdd,"en",{definitions,stepSelection:list});
+    list.selectModified(child,false,true);
+    assert.match(draw(),/<details id="case-branch-steps\[0\]" open>/);
+    assert.match(draw(),/selected-step-facts[\s\S]*&quot;note&quot;[\s\S]*2400 ms/);
+    assert.doesNotMatch(draw(),/private-entry|<form/);
+    list.selectModified(boundary,false,true);
+    const other=draw();
+    assert.deepEqual(list.values,[boundary,child]);
+    assert.match(other,/selected-step-facts[\s\S]*&quot;cart&quot;[\s\S]*visible/);
+    assert.doesNotMatch(other,/2400 ms/);
+    list.reset();
+    assert.doesNotMatch(draw(),/selected-step-facts/);
+});
+
+test("recorded step previews show timing and page cues without showing filled text", async () => {
+    const {recordedStepPreview}=await loadWebview("stepPreview");
+    const w=(en)=>en;
+    const text=recordedStepPreview({command:"fill",input:{target:{id:"shipping"},text:"private-entry"},
+        evidence:{from:"Order <List>",to:"Details"}},w);
+    assert.match(text,/Locator[\s\S]*shipping[\s\S]*Order &lt;List&gt;[\s\S]*Details/);
+    assert.doesNotMatch(text,/private-entry|<input/);
+    const gesture=recordedStepPreview({command:"deviceGesture",delayMs:0,input:{kind:"typeText",text:"private-entry"}},w);
+    assert.match(gesture,/typeText[\s\S]*0 ms/);
+    assert.doesNotMatch(gesture,/private-entry/);
+});
+
 const Uri = {
     file: filename => ({scheme: "file", fsPath: filename, toString: () => pathToFileURL(filename).href}),
     parse: address => Uri.file(fileURLToPath(address)),
@@ -43,7 +109,9 @@ test("only explicit case markers and recognized generated tests appear in a fres
     assert.deepEqual((await lib.list()).map(e => [e.name, e.runner]), [["Add to basket", "workbench"], ["checkout", "pytest"]]);
     const copied = path.join(copy, "app");
     await fs.cp(project, copied, {recursive: true});
-    const reopened = await host(copied, paths).list([{id: "run", time: "2026-05-19T12:10:00Z", status: "failed", caseId: rec.id}]);
+    const reopened = await host(copied, paths).list([
+        {id:"trial",time:"2026-05-19T12:11:00Z",status:"passed",caseId:rec.id,repairOf:"run",repairTarget:"steps[0]",repairApplied:true},
+        {id:"run",time:"2026-05-19T12:10:00Z",status:"failed",caseId:rec.id}]);
     assert.equal(reopened[0].id, rec.id);
     assert.equal(reopened[0].origin.reportId, "r1");
     assert.equal(reopened[0].lastRun.status, "failed");
@@ -160,6 +228,52 @@ test("BDD allows Given followed by Then and Then followed by Given with no actio
     const {caseBddView} = await loadWebview("caseLibrary");
     const markup = caseBddView(bdd,"en",{reorder:true});
     assert.deepEqual([...markup.matchAll(/data-bdd-role="(\w+)"/g)].map(match=>match[1]),["Given","Then","Given","Then"]);
-    assert.deepEqual([...markup.matchAll(/data-order-index="(\d+)"/g)].map(match=>match[1]),["0","1","2"]);
+    assert.deepEqual([...markup.matchAll(/data-order-index="(\d+)"/g)].map(match=>match[1]),["0","1","2","3"]);
     assert.doesNotMatch(markup, /No final assertion recorded|case-bdd-clause/);
+});
+
+test("insertion markers sit before step content and after the last row of each editable list", async () => {
+    const {caseBddView} = await loadWebview("caseLibrary");
+    const step = (path, text) => ({path,text,role:"When"});
+    const bdd = {steps:[step("steps[0]","Reset"),{...step("steps[1]","Check order"),branches:[
+        {label:"If found",steps:[step("steps[1].then[0]","Confirm")]},
+        {label:"Saved reference",readOnly:true,steps:[step("steps[1].else[0]","Read")]},
+    ]}]};
+    const html = caseBddView(bdd,"en",{insert:true,reorder:true});
+    const markers = [...html.matchAll(/class="case-insert-slot"[^>]+data-path="([^"]+)"\s+data-side="([^"]+)"/g)];
+    assert.deepEqual(markers.map(([,path,side])=>[path,side]),[
+        ["steps[0]","before"],["steps[1]","before"],
+        ["steps[1].then[0]","before"],["steps[1].then[0]","after"],["steps[1]","after"],
+    ]);
+    assert.match(html,/data-case-step="steps\[0\]"[^>]*>\s*<button class="case-insert-slot"[^>]*data-side="before"/);
+    assert.match(html,/aria-label="Insert before · Reset"><\/button>/);
+    assert.match(html,/<\/details>[\s\S]*?<button class="case-insert-slot"[^>]*data-path="steps\[1\]"\s+data-side="after"/);
+    assert.match(html,/data-menu-title="Between steps · before “Check order”"/);
+    assert.match(html,/data-menu-title="End of case"/);
+    assert.match(html,/data-menu-title="End of group"/);
+    assert.doesNotMatch(html,/class="case-insert-slot"[^>]*tabindex="-1"/);
+});
+
+test("editable rows share one step menu title and linked rows stay scoped to their owning reference",async()=>{
+    const {caseBddView}=await loadWebview("caseLibrary");
+    const linked=[["start","preconditions","主页可见"],["step","steps","检查账号"],["goal","goals","已登录"]]
+        .map(([area,field,text])=>({area,path:"steps[0].linked."+field+"[0]",text}));
+    const row={area:"step",role:"When",path:"steps[0]",text:"签入",reference:{caseId:"checkIn"},
+        branches:[{readOnly:true,steps:linked}]};
+    const bdd={steps:[row,{area:"goal",path:"goals[0]",text:"显示订单"}]};
+    const options={insert:true,stepActions:()=>"<button>更多</button>"};
+    const html=caseBddView(bdd,"zh",options);
+    assert.match(html,/data-menu-title="步骤 · 签入"/);
+    assert.match(html,/data-menu-title="引用内步骤 · 检查账号"/);
+    assert.equal([...html.matchAll(/data-compose="reference" data-path="steps\[0\]"[^>]*>管理所属引用/g)].length,3);
+    assert.doesNotMatch(html,/data-case-insert="open" data-path="steps\[0\]\.linked/);
+    assert.match(html,/data-menu-title="步骤 · 显示订单"/);
+    const empty=caseBddView({steps:[]},"zh",options);
+    assert.match(empty,/data-case-empty[^]*data-menu-title="用例起点"/);
+    const onlyGoal=caseBddView({steps:bdd.steps.slice(-1)},"zh",options);
+    assert.doesNotMatch(onlyGoal,/data-case-empty/);
+    const readOnly=caseBddView(bdd,"zh");
+    assert.doesNotMatch(readOnly,/data-item-actions|class="case-insert-slot"|管理所属引用/);
+    const selecting=caseBddView(bdd,"zh",{...options,stepSelection:{active:true,row:()=>"",checkbox:()=>""}});
+    assert.doesNotMatch(selecting,/data-item-actions|class="case-insert-slot"|管理所属引用/);
 });

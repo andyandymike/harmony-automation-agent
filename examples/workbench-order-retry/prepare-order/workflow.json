@@ -1,0 +1,128 @@
+{
+  "version": "2",
+  "goal": "准备测试订单",
+  "limits": {
+    "maxSteps": 14,
+    "maxActions": 4,
+    "timeoutMs": 30000,
+    "maxCaptures": 24
+  },
+  "preconditions": [
+    {
+      "selector": {
+        "type": "button",
+        "bundleName": "com.huawei.hmos.browser",
+        "text": "重置用例"
+      },
+      "property": "visible",
+      "equals": true
+    }
+  ],
+  "steps": [
+    {
+      "command": "press",
+      "input": {
+        "target": {
+          "type": "button",
+          "bundleName": "com.huawei.hmos.browser",
+          "text": "重置用例"
+        },
+        "expect": {
+          "selector": {
+            "type": "paragraph",
+            "bundleName": "com.huawei.hmos.browser",
+            "textPrefix": "订单状态 "
+          },
+          "equals": "订单状态 待确认"
+        }
+      }
+    },
+    {
+      "read": {
+        "name": "order_number",
+        "selector": {
+          "type": "paragraph",
+          "bundleName": "com.huawei.hmos.browser",
+          "textPrefix": "订单编号 "
+        },
+        "stripPrefix": "订单编号 "
+      }
+    },
+    {
+      "command": "press",
+      "input": {
+        "target": {
+          "type": "textField",
+          "bundleName": "com.huawei.hmos.browser",
+          "hint": "输入订单号",
+          "editable": true
+        },
+        "expect": {
+          "selector": {
+            "type": "textField",
+            "bundleName": "com.huawei.hmos.browser",
+            "hint": "输入订单号",
+            "editable": true
+          },
+          "property": "focused",
+          "equals": true
+        }
+      }
+    },
+    {
+      "command": "deviceGesture",
+      "before": [
+        {
+          "selector": {
+            "type": "textField",
+            "bundleName": "com.huawei.hmos.browser",
+            "hint": "输入订单号",
+            "editable": true
+          },
+          "property": "focused",
+          "equals": true
+        }
+      ],
+      "input": {
+        "kind": "typeText",
+        "text": "QA-042"
+      }
+    },
+    {
+      "command": "press",
+      "input": {
+        "target": {
+          "type": "button",
+          "bundleName": "com.huawei.hmos.browser",
+          "text": "确认订单"
+        },
+        "expect": {
+          "selector": {
+            "type": "paragraph",
+            "bundleName": "com.huawei.hmos.browser",
+            "textPrefix": "订单状态 "
+          },
+          "equals": {
+            "concat": [
+              "订单状态 已确认 ",
+              {
+                "var": "order_number"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "goals": [
+    {
+      "selector": {
+        "type": "button",
+        "bundleName": "com.huawei.hmos.browser",
+        "text": "提交付款"
+      },
+      "property": "enabled",
+      "equals": true
+    }
+  ]
+}

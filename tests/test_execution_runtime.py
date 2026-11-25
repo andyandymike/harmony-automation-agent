@@ -44,6 +44,29 @@ class ExecutionRuntimeTests(unittest.TestCase):
         plan = {"version": "1", "steps": steps, **extra}
         return self.agent.execute("run", {"run_id": "trial", "plan": plan})
 
+    def test_recorded_gesture_and_controls_share_one_ordered_run(self):
+        def gesture(device, value):
+            self.assertEqual(value["kind"], "click")
+            self.transport.tap(device, value["x"], value["y"])
+
+        recorded = {"command": "deviceGesture", "input": {"kind": "click", "x": 80, "y": 120}, "delayMs": 1}
+        with patch.object(self.transport, "gesture", side_effect=gesture, create=True):
+            result = self.run_plan([recorded, {"assert": condition(1)}, press(2)], preconditions=[condition(0)], goals=[condition(2)])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual([step["path"] for step in result["steps"]],
+                         ["preconditions[0]", "steps[0]", "steps[1]", "steps[2]", "goals[0]"])
+        self.assertEqual(result["steps"][1]["result"]["action"]["dispatched"], "acknowledged")
+        self.assertEqual(result["steps"][2]["result"]["actual"], "Counter: 1")
+        self.assertEqual([touch[1] for touch in self.transport.mutations], [self.transport.serial] * 2)
+        self.assertEqual(RunStore(self.agent.store.root, "trial").read()["status"], "completed")
+
+    def test_recorded_delay_obeys_the_workflow_deadline_before_dispatch(self):
+        recorded = {"command": "deviceGesture", "input": {"kind": "click", "x": 80, "y": 120}, "delayMs": 1000}
+        with patch.object(self.transport, "gesture", create=True) as gesture:
+            result = self.run_plan([recorded], limits={"timeoutMs": 10})
+        self.assertEqual(result["status"], "budget_exhausted")
+        gesture.assert_not_called()
+
     def test_debug_gate_is_durable_and_resume_rechecks_the_actual_screen(self):
         observed = []
 

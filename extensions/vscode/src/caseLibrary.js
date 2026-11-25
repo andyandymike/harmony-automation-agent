@@ -10,7 +10,8 @@ const { createBdd } = require("./caseBdd");
 const suffix = ".harmony-case.json";
 const format = "harmony-agent.case";
 const sources = new Set(["recording", "exploration", "workflow", "imported"]);
-const origins = ["reportId", "findingId", "stepId", "branchId", "outcome", "label"];
+const origins = ["reportId", "findingId", "stepId", "branchId", "outcome", "label",
+    "parentCaseId", "parentCaseDigest", "parentCaseName", "forkPosition"];
 
 function description(name, source, origin) {
     const meta = {id: randomUUID(), name, source};
@@ -38,11 +39,11 @@ async function readCaseMetadata(uri) {
     if (uri?.scheme === "file") return readMetadata(uri.fsPath + suffix);
 }
 
-async function writeCaseMetadata(uri, {name, source, origin, presentation, composition, section}) {
+async function writeCaseMetadata(uri, {name, source, origin, presentation, composition, section, draft}) {
     if (uri.scheme !== "file" || !sources.has(source) || !name?.trim()) throw new Error("Invalid case metadata");
     const marker = uri.fsPath + suffix;
     const data = {format, version: 1, ...description(name.trim(), source, origin), ...(presentation && {presentation}),
-        ...(composition && {composition}),...(section && {section:true})};
+        ...(composition && {composition}),...(section && {section:true}),...(draft && {draft:true})};
     // Publish the complete marker in one operation, without replacing another case's identity.
     const staging = marker + "." + data.id + ".tmp";
     await fs.writeFile(staging, JSON.stringify(data, null, 2) + "\n", {flag: "wx", mode: 0o600});
@@ -75,13 +76,13 @@ class CaseLibrary {
         this.pending = Promise.resolve();
     }
 
-    async add(uri, {name = defaultName(uri), source = "imported", origin, presentation, composition, section} = {}) {
+    async add(uri, {name = defaultName(uri), source = "imported", origin, presentation, composition, section, draft} = {}) {
         if (!sources.has(source)) throw new Error("Unknown case source");
         const address = uri.toString();
         const folder = this.vscode.workspace.getWorkspaceFolder?.(uri);
         const relative = folder && path.relative(folder.uri.fsPath, uri.fsPath);
         const portable = source !== "imported" && uri.scheme === "file";
-        const meta = portable ? await writeCaseMetadata(uri, {name, source, origin, presentation, composition, section}) : undefined;
+        const meta = portable ? await writeCaseMetadata(uri, {name, source, origin, presentation, composition, section, draft}) : undefined;
         const update = async () => {
             const saved = this.state.get("caseLibrary", {});
             const {composition:_layout, ...index} = meta || saved[address] || description(name,source,origin);
@@ -105,10 +106,13 @@ class CaseLibrary {
     }
 
     setHidden(address, hidden) {
+        const addresses = Array.isArray(address) ? address : [address];
         const current = this.pending.then(async()=>{
             const entries = new Set(this.state.get("hiddenCases", []));
-            if (hidden) entries.add(address);
-            else entries.delete(address);
+            for (const item of addresses) {
+                if (hidden) entries.add(item);
+                else entries.delete(item);
+            }
             await this.state.update("hiddenCases", [...entries]);
         });
         this.pending = current.catch(()=>{});
@@ -200,6 +204,7 @@ class CaseLibrary {
             items.push({id: record?.id || address, uri: address, previousUri: registered?.uri, name: record?.name || defaultName(uri),
                 source: record?.source || "workflow", origin: record?.origin, runner: test ? "pytest" : "workbench",
                 ...(isHidden && {hidden:true}),...(meta?.id && {portableId:meta.id}),...(meta?.section && {section:true}),
+                ...(meta?.draft && {draft:true}),
                 ...(Array.isArray(meta?.tags) && {tags:meta.tags.filter(tag=>typeof tag==="string").slice(0,20)}),
                 editable:Boolean(meta && meta.source!=="imported" && uri.scheme==="file" && path.basename(uri.fsPath)==="workflow.json")});
         }
@@ -220,7 +225,7 @@ class CaseLibrary {
                 const uri = Uri.parse(item.uri);
                 item.location = workspace.asRelativePath?.(uri, true) || uri.fsPath || uri.path;
             }
-            const last = runs.find(r => !r.compositionTrial && (!r.repairOf || r.repairApplied) &&
+            const last = runs.find(r => !r.compositionTrial && !r.repairTarget && (!r.repairOf || r.repairApplied) &&
                 (r.caseId === item.id || r.plan?.uri === item.uri || (previousUri && r.plan?.uri === previousUri)));
             if (last) item.lastRun = {id: last.id, status: last.status, source:last.source, at: last.time};
             return item;

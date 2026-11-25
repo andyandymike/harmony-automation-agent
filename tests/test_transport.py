@@ -53,6 +53,18 @@ class TransportTests(unittest.TestCase):
         self.assertNotIn("secret-value", str(caught.exception.to_dict()))
         self.assertEqual(run.call_count, 1)
 
+    def test_gesture_uses_the_same_native_receipt_and_checks_touch_capability(self):
+        with patch.object(self.transport, "shell", return_value="OK") as shell:
+            self.transport.gesture("fixture", {"kind": "swipe", "x": 10, "y": 20, "toX": 30, "toY": 45, "velocity": 220})
+            shell.assert_called_once_with("fixture", ["uitest", "uiInput", "swipe", "10", "20", "30", "45", "220"],
+                                          mutating=True)
+        points = [{"x": 2, "y": 3, "toX": 4, "toY": 5}, {"x": 9, "y": 8, "toX": 7, "toY": 6}]
+        with patch.object(self.transport, "shell", return_value="No touch support") as shell:
+            with self.assertRaises(AgentError) as caught:
+                self.transport.gesture("fixture", {"kind": "pinch", "fingers": points})
+        shell.assert_called_once_with("fixture", ["uinput", "-?"])
+        self.assertEqual(caught.exception.dispatched, "no")
+
     def test_missing_explicit_hdc_is_clear(self):
         with self.assertRaises(AgentError) as caught:
             HdcTransport(str(Path(self.tmp.name) / "does-not-exist"))

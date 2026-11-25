@@ -73,6 +73,17 @@
     background:var(--vscode-menu-selectionBackground,var(--hover)); color:var(--vscode-menu-selectionForeground,var(--ink));
 }
 .item-action-menu button:focus-visible { outline:1px solid var(--vscode-focusBorder,var(--accent)); outline-offset:-1px; }
+.item-action-heading {
+    padding:4px 10px 6px; margin-bottom:3px; border-bottom:1px solid var(--vscode-menu-separatorBackground,var(--line));
+    color:var(--muted); font-size:12px; line-height:1.4; max-width:min(32ch,75vw); overflow-wrap:anywhere;
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden;
+}
+.item-action-menu button[aria-disabled=true] { color:var(--vscode-disabledForeground,var(--muted)); cursor:default; }
+.item-action-description { display:block; max-width:min(32ch,75vw); margin-block-start:2px; font-size:12px; line-height:1.4; }
+.item-action-menu button:not(:focus,:hover,[aria-disabled=true]) > .item-action-description { color:var(--vscode-descriptionForeground,var(--muted)); }
+.item-action-menu button[aria-haspopup=menu] { display:flex; align-items:center; justify-content:space-between; gap:1.5em; }
+.item-action-menu button[aria-haspopup=menu]::after { content:""; width:.38em; height:.38em; border:solid currentColor; border-width:1px 1px 0 0; transform:rotate(45deg); }
+.item-action-menu button[aria-expanded=true] { background:var(--vscode-menu-selectionBackground,var(--hover)); }
 .item-action-menu [role="separator"] { height:1px; margin:4px 5px; background:var(--vscode-menu-separatorBackground,var(--line)); }
 .list-order-grip {
     flex:none; display:inline-grid; place-items:center; min-width:24px; min-height:24px; color:var(--muted); cursor:grab;

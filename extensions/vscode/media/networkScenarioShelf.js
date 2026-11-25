@@ -18,14 +18,13 @@ function nextName(list,base){
     return base+" ("+i+")";
 }
 function management(n,w,busy) {
-    if(!form || form.owner!==n.activeScenarioId || form.kind==="rename") return "";
+    if(!form || form.kind==="rename" && form.owner===n.activeScenarioId) return "";
     const target=n.scenarioLibrary.find(s=>s.id===form.owner);
-    if(!target) return "";
+    if(form.kind!=="create" && !target) return "";
     const deleting=form.kind==="delete";
-    const next=n.scenarioLibrary.find(s=>s.id!==form.owner)?.name || w("a blank rule group","空白规则组");
-    const removal = w("Remove “"+target.name+"” from this workspace?","从工作区删除「"+target.name+"」？");
-    const gatewayChange = !n.gatewayScenarioId || n.gatewayScenarioId===target.id ?
-        w(" The gateway will use "+next+".","网关将改用「"+next+"」。") : "";
+    const removal = target ? w("Remove “"+target.name+"” from this workspace?","从工作区删除「"+target.name+"」？") : "";
+    const gatewayChange = deleting && n.rulesEnabled!==false && !target.paused && (n.gatewayScenarioId || n.activeScenarioId)===target.id ?
+        w(" Manual mocking will be disabled.","手动模拟将关闭。") : "";
     return `<section class="sc-library-form" aria-labelledby="sc-library-form-title">
         <h3 id="sc-library-form-title">${w(...titles[form.kind])}</h3>
         ${deleting ? `<p>${html(removal+gatewayChange)}</p>` :
@@ -50,20 +49,22 @@ export function shelfView(n,w,busy,currentDrafts) {
         <ul>${list.map(s=>`<li class="sc-library-row" data-item-actions="rule-group" data-group-id="${html(s.id)}"
             data-item-label="${html(s.name)}"><button type="button" class="sc-library-item" data-net="sc-select" data-id="${html(s.id)}"
             ${s.id===n.activeScenarioId?'aria-current="true"':""} ${busy?"disabled":""}>
-            <strong>${html(s.name)}</strong><small>${s.id===(n.gatewayScenarioId||n.activeScenarioId)?w("Used by gateway · ","网关使用 · "):""}${s.paused?w("Disabled · ","已停用 · "):""}
+            <strong>${html(s.name)}</strong><small>${n.rulesEnabled!==false && !s.paused && s.id===(n.gatewayScenarioId||n.activeScenarioId)?w("Manual mocking · ","手动模拟 · "):""}
             ${html(s.ruleCount)} ${w("rules","条规则")}${currentDrafts.has(s.id)?w(" · Draft"," · 草稿"):""}</small></button>
             ${itemMenuTrigger(w("Rule group actions","规则组操作"),busy)}</li>`).join("")}</ul>
-        ${action("load",w("Import rule group…","导入规则组…"),busy)}
+        ${action("load",w("Import rule group","导入规则组"),busy)}
         ${management(n,w,busy)}</aside>`;
 }
-export function scenarioTools(n,w,busy) {
-    const active=!n.gatewayScenarioId || n.gatewayScenarioId===n.activeScenarioId;
-    return `<div class="sc-file-actions">${!active ? action("sc-activate",w("Use for gateway","设为网关使用的规则组"),busy) : ""}
-        ${action("sc-pause",n.scenario.paused?w("Enable rule group","启用规则组"):w("Disable rule group","停用规则组"),busy)}
+export function scenarioTools(n,w,busy,exportWorkflow) {
+    const active=n.rulesEnabled!==false && !n.scenario.paused && (!n.gatewayScenarioId || n.gatewayScenarioId===n.activeScenarioId);
+    return `<div class="sc-file-actions">${!active ? action("sc-activate",w("Use for manual mocking","用于手动模拟"),
+        busy || !n.scenario.rules.some(rule=>rule.enabled!==false)) : ""}
         <details id="sc-management"><summary>${w("Manage rule group","管理规则组")}</summary>
         <div>${action("edit",w("Bulk edit response sequences","批量编辑顺序响应"),busy)}
         ${action("sc-duplicate",w(...titles.duplicate),busy)}
-        ${action("save",w("Export rule group…","导出规则组…"),busy)}${action("sc-delete",w(...titles.delete),busy)}</div></details></div>`;
+        ${action("save",w("Export rule group","导出规则组"),busy)}
+        ${exportWorkflow ? action("saveCase",w("Export workflow with rule group","导出带规则组的流程"),busy) : ""}
+        ${action("sc-delete",w(...titles.delete),busy)}</div></details></div>`;
 }
 function focusName() {
     if (typeof document!=="undefined") queueMicrotask(()=>{
@@ -75,7 +76,7 @@ function focusName() {
 export function shelfClick(el,n,w,send,request){
     if(!el.dataset.net?.startsWith("sc-"))return false;
     const id=el.dataset.net.slice(3);
-    const attrs={id:n.activeScenarioId,scenarioId:n.activeScenarioId};
+    const targetId=el.dataset.id || n.activeScenarioId;
     el.closest?.("#sc-management")?.removeAttribute("open");
     if(id==="select"){
         form=undefined;
@@ -83,16 +84,17 @@ export function shelfClick(el,n,w,send,request){
     } else if(id==="activate"){
         const target=el.dataset.id || n.activeScenarioId;
         if (target===n.activeScenarioId || n.scenarioLibrary.some(group=>group.id===target))
-            request("networkScenarioSelect",send,{...attrs,id:target});
+            request("networkScenarioSelect",send,{id:target,scenarioId:target});
     } else if(titles[id]){
-        const name=id==="rename"?n.scenario.name:id==="duplicate"?
-            nextName(n.scenarioLibrary,w(n.scenario.name+" copy",n.scenario.name+" 副本")):"";
-        form={kind:id,owner:n.activeScenarioId,name};
+        const target=n.scenarioLibrary.find(group=>group.id===targetId);
+        if(id!=="create" && !target)return true;
+        const name=id==="rename"?target.name:id==="duplicate"?
+            nextName(n.scenarioLibrary,w(target.name+" copy",target.name+" 副本")):"";
+        form={kind:id,owner:targetId,name};
         focusName();
-    } else if(id==="confirm" && form?.owner===n.activeScenarioId){
-        request(messages[form.kind],send,{...attrs,name:form.name,browse:true});
-    } else if(id==="pause"){
-        request("networkScenarioPause",send,{...attrs,paused:!n.scenario.paused});
+    } else if(id==="confirm" && form){
+        if(form.kind==="create" || n.scenarioLibrary.some(group=>group.id===form.owner))
+            request(messages[form.kind],send,{id:form.owner,scenarioId:form.owner,name:form.name,browse:true});
     } else if(id==="dismiss"){
         const rename=form?.kind==="rename";
         form=undefined;

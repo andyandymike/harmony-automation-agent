@@ -6,13 +6,13 @@
 
 项目提供 Python CLI、[VS Code 工作台](extensions/vscode/README.zh-CN.md)、可移植的 Agent Skill 和本地 stdio MCP 适配器，共用基于 Python 标准库的执行核心。工作台支持真机预览、流程录制与回放，以及逐步调试。
 
-**Python 运行时 `0.1.0a10` 和 VS Code 工作台 `0.20.25` 均为开发预览版。** [工作台指南](extensions/vscode/README.zh-CN.md)提供 VSIX 的构建和安装方式。已验证环境见[兼容性](docs/compatibility.md)，运行时版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
+**VS Code 工作台 `0.20.33` 是开发预览版。** 混合坐标手势与控件步骤需要 Python 运行时 `0.1.0a11` 或更新版本。[工作台指南](extensions/vscode/README.zh-CN.md)提供 VSIX 的构建和安装方式。已验证环境见[兼容性](docs/compatibility.md)，运行时版本历史见 [CHANGELOG](CHANGELOG.md)。项目默认文档语言为英文。
 
 ## 功能
 
 - 读取原生 UI 树、定位控件，返回紧凑或语义化的页面视图。
 - 打开应用、点击、滚动、输入文字，并验证可观察的结果。
-- 执行包含条件、循环和明确完成目标的有界计划。
+- 执行包含条件、循环、录制手势和明确完成目标的有界计划。
 - 用一次 `execute` 完成已知流程，包括初始条件检查、最终验证和会话清理。
 - 在已知流程内绑定页面实时值，减少逐页读值、填写时与模型往返。
 - 保存本地执行记录，无需连接设备即可检查已保存的证据。

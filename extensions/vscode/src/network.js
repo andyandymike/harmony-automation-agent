@@ -79,6 +79,10 @@ function validateScenario(input) {
     return scenario;
 }
 
+function ruleGroupName(scenario) {
+    return typeof scenario?.name==="string" ? scenario.name : "";
+}
+
 function setHeaders(base, edits) {
     const result = {...base};
     for (const [key, value] of Object.entries(edits || {})) result[key.toLowerCase()] = value;
@@ -86,10 +90,11 @@ function setHeaders(base, edits) {
 }
 
 class NetworkSession {
-    constructor({onChange = () => {}, scenarioId = () => undefined} = {}) {
+    constructor({onChange = () => {}, scenarioId = () => undefined, scenario = exampleScenario()} = {}) {
         this.onChange = onChange;
         this.scenarioId = scenarioId;
-        this.scenario = exampleScenario();
+        this.scenario = scenario;
+        this.rulesEnabled = true;
         this.counts = new Map();
         this.records = [];
         this.collection = new NetworkCollection();
@@ -100,9 +105,11 @@ class NetworkSession {
 
     snapshot() {
         return {running:Boolean(this.baseUrl), baseUrl:this.baseUrl, upstream:this.upstream, scenario:this.scenario, records:[...this.records],
-            favorites:[...this.collection.items.values()], removedFavorite:this.collection.removed?.record.id, deletedCapture:this.removedRecord?.record.id,
+            favorites:[...this.collection.items.values()], removedFavorite:this.collection.removed?.id, deletedCapture:this.removedRecord?.id,
             clearedHistory:this.clearedHistory?.id,
-            omittedRecords:this.omittedRecords, hits:this.scenario.rules.map(rule => ({ruleId:rule.id,count:this.counts.get(rule.id) || 0}))};
+            omittedRecords:this.omittedRecords, rulesEnabled:this.rulesEnabled,
+            caseRules:this.caseRules ? {names:[...this.caseRules.groups.keys()]} : undefined,
+            hits:this.scenario.rules.map(rule => ({ruleId:rule.id,count:this.counts.get(rule.id) || 0}))};
     }
 
     notify() { this.onChange(this.snapshot()); }
@@ -129,24 +136,37 @@ class NetworkSession {
 
     findRecord(id) { return this.records.find(row => row.id === id) || this.collection.items.get(id)?.record; }
 
-    removeRecord(id) {
-        const index = this.records.findIndex(row => row.id === id);
-        if (index < 0) return;
-        this.removedRecord = {record:this.records[index], following:this.records[index+1]?.id, index};
-        this.records.splice(index,1);
+    removeRecord(id) { this.removeRecords([id]); }
+
+    removeRecords(ids) {
+        const selected=new Set(ids);
+        const removed=[];
+        let following;
+        for (let index=this.records.length-1;index>=0;index--) {
+            const record=this.records[index];
+            if (selected.has(record.id)) removed.push({record,following,index});
+            else following=record.id;
+        }
+        if (!removed.length) return;
+        this.removedRecord={id:removed.length===1 ? removed[0].record.id : randomUUID(),items:removed.reverse()};
+        this.records=this.records.filter(record=>!selected.has(record.id));
         this.notify();
     }
 
     undoRecordRemoval(id) {
-        const removed = this.removedRecord;
-        if (!removed || removed.record.id !== id) return;
-        const following = this.records.findIndex(r => r.id === removed.following);
-        this.records.splice(following >= 0 ? following : Math.min(removed.index,this.records.length),0,removed.record);
-        if (this.records.length > limit) {
-            this.records.splice(this.records[0] === removed.record ? 1 : 0,1);
+        const removed=this.removedRecord;
+        if (!removed || removed.id!==id) return;
+        const restored=new Set(removed.items.map(item=>item.record.id));
+        for (const item of removed.items) {
+            if (this.records.some(record=>record.id===item.record.id)) continue;
+            const next=this.records.findIndex(record=>record.id===item.following);
+            this.records.splice(next>=0 ? next : Math.min(item.index,this.records.length),0,item.record);
+        }
+        while (this.records.length>limit) {
+            this.records.splice(this.records.findIndex(record=>!restored.has(record.id)),1);
             this.omittedRecords++;
         }
-        this.removedRecord = undefined;
+        this.removedRecord=undefined;
         this.notify();
     }
 
@@ -176,6 +196,47 @@ class NetworkSession {
         this.counts = new Map(savedHits.filter(hit=>ids.has(hit.ruleId) && Number.isSafeInteger(hit.count) && hit.count>0)
             .map(hit=>[hit.ruleId,hit.count]));
         this.notify();
+    }
+
+    useCaseRules(initial, {runId,upstream}={}) {
+        const groups = new Map();
+        const scope = {groups,runId,upstream:upstream===undefined ? undefined : upstreamOrigin(upstream)};
+        const enable = input=>{
+            const scenario = validateScenario(input);
+            const name = ruleGroupName(scenario);
+            if (!groups.has(name)) groups.set(name,{scenario,counts:new Map()});
+        };
+        if (initial && !initial.paused) enable(initial);
+        this.caseRules = scope;
+        this.notify();
+        return {
+            apply:effect=>{
+                if (this.caseRules !== scope) throw new Error("The case rule group session has ended.");
+                if (effect.action==="enable") enable(effect.scenario);
+                else if (effect.action==="disable") {
+                    // Older saved steps closed the most recent group available to that run.
+                    const name = effect.name ?? [...groups.keys()].at(-1);
+                    groups.delete(name);
+                } else throw new Error("Invalid case rule group action.");
+                this.notify();
+            },
+            close:()=>{
+                if (this.caseRules !== scope) return;
+                this.caseRules = undefined;
+                this.notify();
+            },
+        };
+    }
+
+    matchingRule(method,url,scope=this.caseRules) {
+        const groups = scope ? [...scope.groups.values()].reverse() :
+            this.rulesEnabled ? [{scenario:this.scenario,counts:this.counts}] : [];
+        for (const {scenario,counts} of groups) {
+            if (scenario.paused) continue;
+            const rule = scenario.rules.find(item=>matchRule(item,method,url));
+            if (rule) return {rule,scenario,counts};
+        }
+        return {};
     }
 
     setScenarioPaused(paused) {
@@ -223,19 +284,29 @@ class NetworkSession {
         this.notify();
     }
 
-    restoreRemovedRule({rule,index,hits}) {
+    restoreRemovedRules(entries) {
         const rules=[...this.scenario.rules];
-        if(rules.some(item=>item.id===rule.id))
+        const ids=new Set(rules.map(rule=>rule.id));
+        if (entries.some(({rule})=>ids.has(rule.id)))
             invalid("A rule with this name already exists.", "已有同名规则，无法撤销移除。");
-        rules.splice(Math.min(index,rules.length),0,rule);
+        for (const {rule,index,hits} of entries) {
+            rules.splice(Math.min(index,rules.length),0,rule);
+            if (hits) this.counts.set(rule.id,hits);
+        }
         this.scenario={...this.scenario,rules};
-        if(hits) this.counts.set(rule.id,hits);
         this.notify();
     }
 
-    removeRule(id) {
-        this.scenario = {...this.scenario,rules:this.scenario.rules.filter(rule=>rule.id!==id)};
-        this.counts.delete(id);
+    removeRule(id) { this.removeRules(new Set([id])); }
+
+    removeRules(ids) {
+        this.scenario={...this.scenario,rules:this.scenario.rules.filter(rule=>!ids.has(rule.id))};
+        for (const id of ids) this.counts.delete(id);
+        this.notify();
+    }
+
+    setRulesEnabled(ids,enabled) {
+        this.scenario={...this.scenario,rules:this.scenario.rules.map(rule=>ids.has(rule.id) ? {...rule,enabled} : rule)};
         this.notify();
     }
 
@@ -357,7 +428,9 @@ class NetworkSession {
         const started = Date.now(), startedAt = new Date(started).toISOString(), baseUrl = this.baseUrl;
         // Accept local API paths, never absolute proxy targets.
         if (!/^\/(?![\/\\])/.test(req.url)) { res.writeHead(400).end(); return; }
-        const upstream = this.upstream;
+        const scope = this.caseRules ?? null;
+        const upstream = scope?.upstream ?? this.upstream;
+        const caseRun = scope?.runId ? {caseRunId:scope.runId} : {};
         // A restored upstream could coincide with the gateway's newly allocated port.
         if (upstream && new URL(upstream).port === new URL(baseUrl).port) {
             res.writeHead(508,{"content-type":"text/plain; charset=utf-8"}).end("Upstream points to this gateway. / 上游指向当前网关。");
@@ -370,20 +443,20 @@ class NetworkSession {
         delete req.headers["x-workbench-replay"];
         const bytes = await readBytes(req,{drain:true});
         if (signal.aborted) return;
-        const rule = this.scenario.paused ? undefined : this.scenario.rules.find(r => matchRule(r,method,url));
+        const {rule,scenario,counts} = this.matchingRule(method,url,scope);
         // Keep the owner at match time; a slow response can finish after the
         // operator has switched to a different scenario with a same-named rule.
-        const ruleScenarioId=rule && this.scenarioId();
-        const owner=ruleScenarioId ? {ruleScenarioId,ruleScenarioName:this.scenario.name} : {};
+        const ruleScenarioId=rule && !scope ? this.scenarioId() : undefined;
+        const owner=rule ? {ruleScenarioId,ruleScenarioName:scenario.name} : {};
         const raw = bytes.length <= maxBodyBytes ? bytes.toString("utf8") : undefined;
         let ruleHit;
         if (rule && (rule.match || raw !== undefined)) {
-            ruleHit = (this.counts.get(rule.id) || 0) + 1;
-            this.counts.set(rule.id,ruleHit);
+            ruleHit = (counts.get(rule.id) || 0) + 1;
+            counts.set(rule.id,ruleHit);
         }
         if (rule?.match || upstream && !rule) {
             const {reply,record} = await gatewayExchange({url,method,headers:req.headers,bytes,rule,upstream,signal});
-            if (!signal.aborted) this.finish(res,{id:randomUUID(),startedAt,method,path:url.pathname,...record,
+            if (!signal.aborted) this.finish(res,{id:randomUUID(),startedAt,method,path:url.pathname,...caseRun,...record,
                 ...(rule && {ruleId:rule.id,ruleHit,...owner}),status:reply.status},reply,started,pending);
             return;
         }
@@ -409,7 +482,8 @@ class NetworkSession {
         const noBody = method === "HEAD" || [204,205,304].includes(reply.status);
         const value = reply.json === undefined ? echo : reply.json;
         const serialized = noBody ? "" : JSON.stringify(value);
-        const record = {id:randomUUID(), source:"fixture", startedAt, method, path:url.pathname, request,
+        const record = {id:randomUUID(), source:"fixture", startedAt, method, path:url.pathname, request,...caseRun,
+            ...(!rule && reply.status===404 && {error:"NO_TEST_UPSTREAM"}),
             ...(ruleHit && {ruleId:rule.id, ruleHit, stepIndex, effectiveRequest:effective,...owner}), status:reply.status,
             response:{status:reply.status,headers:headersView(headers), ...bodyView(serialized, "application/json")}};
         if (reply.delayMs) await delay(reply.delayMs, undefined, {signal});
@@ -436,4 +510,4 @@ class NetworkSession {
     }
 }
 
-module.exports = { NetworkSession, exampleScenario, scenarioFromRecord, validateScenario, historyLimit:limit };
+module.exports = { NetworkSession, exampleScenario, scenarioFromRecord, validateScenario, ruleGroupName, historyLimit:limit };

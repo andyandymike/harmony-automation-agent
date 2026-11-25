@@ -60,14 +60,14 @@ function input(target,key,title,value) {
 function button(action,title,target) {
     return actionButton(title, {attrs: {"data-net": action, "data-row": target}});
 }
-export function drawEditor(form,w,selectedRule=0,{locked=false}={}) {
-    return `<div class="net-editor">${input("sc","name",w("Rule group name","规则组名称"),form.name)}
+export function drawEditor(form,w,selectedRule=0,{locked=false,single=false}={}) {
+    return `<div class="net-editor">${single?"":`${input("sc","name",w("Rule group name","规则组名称"),form.name)}
         <div class="sc-rule-picker">${form.rules.length?`<label for="ne-rule">${w("Response sequence","顺序响应")}<select id="ne-rule">${form.rules.map((r,i)=>
             `<option value="${i}" ${i===selectedRule?"selected":""}>${e(r.method)} ${e(r.path)} · ${e(r.id)}</option>`).join("")}</select></label>`:""}
-            ${button("addrule",w("Add sequence","添加顺序响应"),"sc")}</div>
-        ${form.rules.map((r,i)=>i!==selectedRule?"":`<fieldset><legend>${e(r.id)}</legend>
-            <div class="ne-row">${input(i,"method",w("Method","方法"),r.method)}${input(i,"path",w("Match path","匹配路径"),r.path)}
-            <label><input type="checkbox" data-ne="enabled" data-row="${i}" ${r.enabled?"checked":""}>${w("Enabled","启用")}</label></div>
+            ${button("addrule",w("Add sequence","添加顺序响应"),"sc")}</div>`}
+        ${form.rules.map((r,i)=>i!==selectedRule?"":`<fieldset><legend>${single?w("Responses in order","响应顺序"):e(r.id)}</legend>
+            ${single?"":`<div class="ne-row">${input(i,"method",w("Method","方法"),r.method)}${input(i,"path",w("Match path","匹配路径"),r.path)}
+            <label><input type="checkbox" data-ne="enabled" data-row="${i}" ${r.enabled?"checked":""}>${w("Enabled","启用")}</label></div>`}
             <div data-order-kind="responses" data-order-key="${i}">${r.steps.map((s,j)=>{const row=i+"-"+j;
                 const edit=(key,label,kind,objectOnly=false)=>fieldView(s,key,{id:"ne-"+row+"-"+key,label,kind,objectOnly},w);
                 const controls = r.steps.length>1 ? itemMenu(w("Response actions","响应操作"),
@@ -81,7 +81,7 @@ export function drawEditor(form,w,selectedRule=0,{locked=false}={}) {
                 ${edit("requestHeaders",w("Request headers","请求头"),"headers")}
                 ${edit("requestJson",w("Request body fields","请求正文字段"),"json",true)}
                 ${edit("responseHeaders",w("Response headers","响应头"),"headers")}</details></div>`}).join("")}</div>
-            ${button("addreply",w("Add next response","增加下一次响应"),i)} ${button("rmrule",w("Remove sequence","移除顺序响应"),i)}</fieldset>`).join("")}
+            ${button("addreply",w("Add next response","增加下一次响应"),i)} ${single?"":button("rmrule",w("Remove sequence","移除顺序响应"),i)}</fieldset>`).join("")}
         </div>`;
 }
 export function updateEditor(form,el) {

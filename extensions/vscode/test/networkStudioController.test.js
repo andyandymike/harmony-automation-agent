@@ -6,6 +6,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const {NetworkController} = require("../src/networkController");
+const {exampleScenario} = require("../src/network");
 
 test("studio preview, save and one-off resend keep separate receipts across a workspace restart", async t => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(),"ha-network-workspace-"));
@@ -15,6 +16,8 @@ test("studio preview, save and one-off resend keep separate receipts across a wo
     t.after(async () => {await controller.close();await fs.rm(dir,{recursive:true,force:true});});
     const handle = message => controller.handle(message);
     await handle({type:"networkOpen"});
+    await handle({type:"networkApply",scenario:exampleScenario()});
+    await handle({type:"networkScenarioSelect",id:controller.activeScenarioId});
     await handle({type:"networkServer"});
     await handle({type:"networkTry",id:"items"});
     const sample = bench.state.network.records[0];

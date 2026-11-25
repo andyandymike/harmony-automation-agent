@@ -132,14 +132,24 @@ test("the model cannot dispatch an unoffered command, a stale candidate or a cro
     assert.equal(moved.status,"blocked");assert(!changed.calls.some(([c])=>c==="run"));
 });
 
-test("ending a guided session on its input budget closes the active variation and preserves unstarted ones", async () => {
-    const fixture = device({home:()=>[button("Open")],detail:()=>[button("Info")]},()=>"detail");
-    const report=make({mode:"flow",plan:{version:"1",steps:[{command:"press",input:{target:{id:"Open"}}}]},
+test("the scripted prefix runs once with its own input limit; only acknowledged alternatives spend the AI budget", async () => {
+    const fixture = device({home:()=>[button("reset")],detail:()=>[button("Info"),button("More")]},()=>"detail");
+    const report=make({mode:"flow",plan:{version:"1",steps:[{command:"press",input:{target:{id:"reset"}}},{command:"back"}]},
         checkpoints:[0],maxInputs:1});
-    await runExploration({report,agent:fixture,ask:()=>assert.fail("no model call after budget")});
+    report.sourceCase={uri:"file:///saved-case"};
+    let calls=0;
+    await runExploration({report,agent:fixture,ask:async prompt=>{
+        calls++;assert.equal(fixture.location,"detail");
+        return JSON.stringify({index:0,reason:"inspect another screen"});
+    }});
     assert.equal(report.status,"completed", report.reason);
-    assert.deepEqual(report.branches.map(b=>b.status),["completed","incomplete","pending"]);
-    assert.equal(report.branches[1].reason,report.reason);
+    assert.equal(calls,1);
+    assert.equal(report.prefixInputs,1);
+    assert.equal(report.inputs,1);
+    assert.deepEqual(report.branches.map(b=>b.status),["completed","completed","incomplete"]);
+    assert.equal(report.branches[2].reason,report.reason);
+    assert.equal(report.steps[1].replayStep.input.target.bundleName,bundle);
+    assert.deepEqual(fixture.calls.filter(([cmd])=>cmd==="run").map(([,params])=>params.plan.steps.length),[1,1]);
 });
 
 test("the active guided branch can be paused, then resumed or ended by the user", async () => {

@@ -2,13 +2,14 @@
 
 const assert = require("node:assert/strict");
 const { mkdtempSync, rmSync } = require("node:fs");
+const {mkdir,writeFile} = require("node:fs/promises");
 const Module = require("node:module");
 const { tmpdir } = require("node:os");
 const path = require("node:path");
 const { after, mock, test } = require("node:test");
 const { recordedPlan } = require("../src/model");
 const { summarizePlan } = require("../src/planSummary");
-const { validateGesture } = require("../src/deviceRecorder");
+const { validateGesture, validateRecording } = require("../src/deviceRecorder");
 
 const workbenchFixtures = mkdtempSync(path.join(tmpdir(), "harmony-recording-"));
 after(() => rmSync(workbenchFixtures, { recursive: true, force: true }));
@@ -89,7 +90,7 @@ function openWorkbench(agent, recorder = {}, display, selectedPlan, runs = [], c
     const loader = Module._load;
     const stub = mock.method(Module, "_load", function (id, ...args) {
         if (id === "vscode") return vscode;
-        if (id === "./deviceRecorder") return { validateGesture, ...recorder };
+        if (id === "./deviceRecorder") return { validateGesture, validateRecording, ...recorder };
         if (id === "./liveDisplay" && display) return { async openLiveDisplay(options) {
             display.onOpen?.(options);
             return {async drain() {},...display};
@@ -279,6 +280,23 @@ test("workbench commands open the corresponding offline tab without a navigation
     await bench.deactivate();
 });
 
+test("retry on the network tab re-reads the archive without leaving the tab", async t => {
+    const bench=openWorkbench(async command=>assert.fail("Unexpected device command: "+command));
+    t.after(()=>bench.deactivate());
+    const directory=path.resolve(bench.screenshotPath(".."),"network");
+    await mkdir(directory,{recursive:true});
+    const file=path.join(directory,"evidence.json");
+    await writeFile(file,JSON.stringify({records:[],upstream:"http://localhost:8080",scenarioLibrary:{entries:"invalid"}}));
+    await bench.runCommand("harmonyAgent.network");
+    assert.equal(bench.state.network,undefined);
+    assert.match(bench.state.error,/Invalid rule group library/);
+    await writeFile(file,JSON.stringify({records:[]}));
+    await bench.send("networkOpen");
+    assert.equal(bench.state.tool,"network");
+    assert.deepEqual(bench.state.network.records,[]);
+    assert.equal(bench.state.error,"");
+});
+
 test("long workflow previews identify each target and default text assertion without leaking filled values", () => {
     const plan = {steps: [
         {command: "open", input: {app: "com.example.shop"}},
@@ -383,6 +401,99 @@ test("the status bar launcher opens or reveals one editor without issuing sideba
     assert.deepEqual(bench.hostCommands,[]);
     await bench.deactivate();
     assert.equal(closed, 1);
+});
+
+test("the preview disconnects both sessions and reconnects Elements on demand", async t => {
+    const calls = [];
+    const nodes = [{ref:"@item",id:"item",clickable:true,visible:true}];
+    let observations = 0, closed = 0, failReconnect = false;
+    const bench = openWorkbench(async (command, input) => {
+        calls.push({command,session:input.session});
+        if (command === "devices") return {devices:[{id:"phone"}]};
+        if (command === "start") {
+            if (failReconnect) throw new Error("fixture reconnect failed");
+            return {observation:{frameId:"read-" + ++observations,nodes,quality:{complete:true}}};
+        }
+        if (command === "screenshot") return {path:bench.screenshotPath("captured.png")};
+        assert.ok(["attach","claim","release","detach"].includes(command),command);
+        return {};
+    }, {
+        async replayGesture() {},
+    }, {
+        async nextFrame() { return {data:Buffer.from([1]),width:30,height:100,mime:"image/jpeg"}; },
+        async close() { closed++; },
+    });
+    t.after(async () => { bench.close(); await bench.deactivate(); });
+    const {live} = bench;
+    const liveState = () => live.messages.findLast(message => message.type==="state");
+    const sendConnection = (type,epoch=liveState().epoch) => live.send({type,epoch});
+    const sessionsReleased = () => calls.filter(call=>call.command==="detach").map(call=>call.session);
+    await Promise.all([bench.send("ready"),live.send({type:"ready"})]);
+    await bench.runCommand("harmonyAgent.inspect");
+    await bench.send("elementMode",{picking:false});
+    await bench.send("elementWatch",{frameId:bench.state.page.frameId,locator:{id:"item"},property:"visible"});
+    assert.equal(bench.state.elements.watches.length,1);
+    const session = calls.find(call=>call.command==="start").session;
+    assert.equal(liveState().streaming,true);
+    const previewEpoch = liveState().epoch;
+    await live.send({type:"nextFrame",epoch:previewEpoch});
+    const frame = live.messages.at(-1);
+    assert.equal(frame.type,"frame");
+    await live.send({type:"gesture",epoch:previewEpoch,geometry:frame.geometry,input:{kind:"back"}});
+    assert.equal(live.messages.at(-1).error,undefined);
+    const previewSession = calls.find(call=>call.command==="attach").session;
+    assert.notEqual(previewSession,session);
+
+    await bench.send("elementMode",{picking:true});
+    await bench.send("screenshot");
+    assert.equal(liveState().picking,true);
+    assert.ok(bench.state.page);
+    assert.ok(bench.state.liveImage);
+    assert.notEqual(liveState().epoch,previewEpoch);
+    await sendConnection("disconnect",previewEpoch);
+    assert.deepEqual(sessionsReleased(),[]);
+    const disconnectedEpoch = liveState().epoch;
+    await sendConnection("disconnect");
+    assert.deepEqual(sessionsReleased(),[previewSession,session]);
+    assert.equal(closed,1);
+    assert.equal(bench.state.page,undefined);
+    assert.equal(bench.state.liveImage,undefined);
+    assert.equal(bench.state.device,"phone");
+    assert.equal(liveState().disconnected,true);
+    assert.equal(liveState().streaming,false);
+    assert.equal(liveState().picking,false);
+    assert.equal(liveState().connected,true);
+
+    const readsAfterDisconnect = observations;
+    await sendConnection("reconnect",disconnectedEpoch);
+    await bench.send("workspaceTab",{view:"recordings"});
+    await bench.send("workspaceTab",{view:"inspect"});
+    await bench.send("elementMode",{picking:false});
+    await bench.send("elementSample");
+    assert.equal(observations,readsAfterDisconnect);
+    assert.equal(bench.state.page,undefined);
+    assert.equal(bench.state.elements.watches.length,1);
+    assert.equal(liveState().disconnected,true);
+
+    failReconnect = true;
+    await sendConnection("reconnect");
+    assert.equal(bench.state.error,"fixture reconnect failed");
+    assert.equal(liveState().disconnected,true);
+    failReconnect = false;
+    await sendConnection("reconnect");
+    assert.equal(bench.state.page.frameId,"read-" + (readsAfterDisconnect + 1));
+    assert.equal(liveState().disconnected,false);
+    assert.equal(liveState().picking,true);
+    assert.equal(bench.state.elements.watches.length,1);
+
+    await bench.send("elementMode",{picking:false});
+    assert.equal(liveState().streaming,true);
+    await bench.send("startRecord",{location:"preview",stepFormat:"coordinates"});
+    assert.equal(liveState().recording,true);
+    await sendConnection("disconnect");
+    assert.equal(liveState().disconnected,false);
+    assert.equal(liveState().recording,true);
+    assert.deepEqual(sessionsReleased(),[previewSession,session]);
 });
 
 test("the element overlay replaces the live frame, blocks stale touches and restores phone controls", async () => {
@@ -727,6 +838,7 @@ test("one-click workbench recording retains acknowledged steps across a failed a
     assert.deepEqual(bench.saved, { version: "1", steps: [{ command: "press", input: { target: { id: "hello" } } }] });
     assert.deepEqual(bench.state.planSummary, { source: "workflow", stepCount: 1, commands: ["press"], hasGoal: false, controlFlow: [],
         rows:[{kind:"press",detail:"hello"}],initialChecks:[],finalChecks:[] });
+    assert.deepEqual(bench.state.caseExplorationCheckpoints,{"steps[0]":0});
     requests.length = 0;
     await bench.send("run");
     assert.deepEqual(requests.map(([command]) => command), ["start", "run", "detach"]);
@@ -836,6 +948,12 @@ test("recording review reorders executable steps and rejects operations from the
     await bench.send("moveRecordedStep",{from:0,to:2,revision:0});
     await bench.send("removeStep",{index:0,revision:0});
     await bench.send("moveRecordedStep",{from:2,to:-1,revision:1});
+    await bench.send("removeRecordedSteps",{indices:[2,0],revision:0});
+    assert.equal(bench.state.draft.steps.length,3);
+    await bench.send("removeRecordedSteps",{indices:[2,0],revision:1});
+    assert.deepEqual(bench.state.draft.steps.map(step=>step.input.target.id),["third"]);
+    await bench.send("undoRecordedRemoval",{revision:2});
+    assert.deepEqual(bench.state.draft.steps.map(step=>step.input.target.id),["second","third","first"]);
     await bench.send("savePlan");
     assert.deepEqual(bench.saved.steps.map(step=>step.input.target.id),["second","third","first"]);
 });
@@ -930,13 +1048,10 @@ test("phone gestures flush before saving, replay in order, and remain readable i
         async replayGesture(target, input) { replayed.push([target.device, input.kind]); },
     });
     await bench.send("devices");
-    await bench.send("startRecord", { location: "phone", stepFormat: "controls" });
-    assert.match(bench.state.error, /currently saves screen coordinates/);
-    assert.equal(capture, undefined);
-    assert.equal(bench.state.draft, undefined);
     await bench.send("startRecord", { location: "phone", stepFormat: "coordinates" });
     assert.equal(bench.state.draft.location, "phone");
     assert.equal(bench.state.draft.stepFormat, "coordinates");
+    assert.equal(capture.withControls, false);
     capture.onStep({ command: "deviceGesture", input: { kind: "back" }, label: "" });
     assert.equal(bench.state.draft.steps.length, 1);
     await bench.send("stopRecord");
@@ -962,6 +1077,222 @@ test("phone gestures flush before saving, replay in order, and remain readable i
     bench.close();
     await bench.deactivate();
     assert.equal(stopped, 3);
+});
+
+test("device history keeps step timing across waits, dispatch errors and cancellation", async t => {
+    const plan = {format:"harmony-agent.device-recording",version:1,steps:[
+        {command:"deviceGesture",input:{kind:"back"},delayMs:30},
+        {command:"deviceGesture",input:{kind:"home"},delayMs:30},
+    ]};
+    const dispatched = [];
+    let claim;
+    const bench = openWorkbench(async command=>{
+        if (command==="devices") return {devices:[{id:"phone"}]};
+        if (command==="claim") claim?.resolve();
+        return {};
+    },{async replayGesture(_,gesture) {
+        dispatched.push(gesture.kind);
+        if (gesture.kind==="home") throw new Error("test dispatch error");
+    }},undefined,{uri:"file:///recording.json",name:"recording.json"},[],vscode=>{
+        vscode.workspace.fs.readFile = async ()=>Buffer.from(JSON.stringify(plan));
+        vscode.workspace.openTextDocument = async ()=>({getText:()=>JSON.stringify(plan)});
+    });
+    t.after(()=>bench.deactivate());
+    await bench.send("devices");
+    await bench.send("run");
+    await bench.send("report",{id:bench.state.run.entry.id});
+    assert.deepEqual(dispatched,["back","home"]);
+    assert.deepEqual(bench.state.run.steps.map(step=>step.status),["completed","unknown"]);
+    for (const receipt of bench.state.run.steps) {
+        assert.equal(Date.parse(receipt.at)-Date.parse(receipt.stepStartedAt),receipt.stepElapsedMs);
+        assert.ok(receipt.elapsedMs>=0);
+        assert.ok(receipt.stepElapsedMs>receipt.elapsedMs);
+        assert.equal(receipt.startedAt,undefined);
+    }
+
+    plan.steps[0].delayMs=60000;
+    claim=latch();
+    const active=bench.send("run");
+    await claim.promise;
+    await new Promise(setImmediate);
+    const id=bench.state.run.entry.id;
+    assert.equal(bench.state.run.steps[0].status,"running");
+    await bench.send("stopRun",{id});
+    await active;
+    await bench.send("report",{id});
+    const [cancelled]=bench.state.run.steps;
+    assert.equal(bench.state.run.steps.length,1);
+    assert.equal(cancelled.status,"cancelled");
+    assert.ok(cancelled.stepElapsedMs>=0 && cancelled.stepElapsedMs<cancelled.delayMs);
+    assert.equal(Date.parse(cancelled.at)-Date.parse(cancelled.stepStartedAt),cancelled.stepElapsedMs);
+    assert.equal(cancelled.elapsedMs,undefined);
+    assert.equal(cancelled.dispatched,undefined);
+    assert.deepEqual(dispatched,["back","home"]);
+});
+
+test("phone control recording follows page changes and saves one ordered mixed workflow", async t => {
+    const bundleName = "test.phone";
+    const bounds = (left,top,right,bottom) => ({left,top,right,bottom});
+    const node = (ref,props) => ({ref,bundleName,visible:true,...props});
+    const observation = (frameId,nodes) => ({frameId,quality:{complete:true},nodes});
+    const labelBounds = bounds(10,10,20,20);
+    const nextBounds = bounds(30,30,50,50);
+    const firstDuplicate = bounds(4,62,28,88);
+    let page = observation("first",[
+        node("@open",{id:"open",type:"Button",clickable:true,bounds:bounds(0,0,40,40)}),
+        node("@caption",{parent:"@open",text:"Open",type:"Text",bounds:labelBounds}),
+    ]);
+    const nextPage = observation("second",[
+        node("@confirm",{id:"confirm",type:"Button",clickable:true,bounds:nextBounds}),
+        node("@repeat1",{id:"repeat",type:"Button",clickable:true,bounds:firstDuplicate}),
+        node("@repeat2",{id:"repeat",type:"Button",clickable:true,bounds:bounds(54,62,78,88)}),
+    ]);
+    let capture;
+    const requests = [];
+    const tap = (x,y) => ({command:"deviceGesture", input:{kind:"click",x,y}, label:x+", "+y});
+    const longPress = {command:"deviceGesture",input:{kind:"longClick",x:40,y:40},label:"40, 40",delayMs:20};
+    const bench = openWorkbench(async (command,input) => {
+        requests.push([command,input]);
+        if (command === "devices") return {devices:[{id:"phone"}]};
+        if (command === "start") return {observation:page};
+        if (command === "schema") return {"x-harmony-plan-features":["deviceGesture"]};
+        if (command === "execute") return {status:"completed",goalVerification:{status:"passed"},
+            sessionCleanup:{status:"detached"}};
+        assert.fail("Unexpected agent command: "+command);
+    },{
+        async startRecorder(options) {
+            capture = options;
+            return {async stop() {capture.onStep(longPress);}};
+        },
+        async replayGesture() {assert.fail("Recording must not dispatch touch input");},
+    });
+    t.after(()=>bench.deactivate());
+
+    await bench.send("devices");
+    await bench.send("startRecord");
+    assert.equal(bench.state.draft.location,"auto");
+    assert.equal(capture.withControls,true);
+    page = nextPage;
+    capture.onStep(tap(15,15),{text:"Open",type:"Text",bundleName,bounds:labelBounds});
+    assert.equal(bench.state.draft.location,"phone");
+    await new Promise(setImmediate);
+    capture.onStep(tap(40,40),{id:"confirm",type:"Button",bundleName,bounds:nextBounds});
+    await new Promise(setImmediate);
+    capture.onStep(tap(20,70),{id:"repeat",type:"Button",bundleName,bounds:firstDuplicate});
+    await bench.send("stopRecord");
+    assert.deepEqual(bench.state.draft.steps.map(step=>step.command),["press","press","deviceGesture","deviceGesture"]);
+    await bench.send("savePlan",{startRef:"@open",goalRef:"@confirm",property:"visible",expected:true});
+    const locator = id => ({bundleName,id});
+    assert.deepEqual(bench.saved,{
+        version:"1",
+        preconditions:[{selector:locator("open"),property:"visible",equals:true}],
+        goals:[{selector:locator("confirm"),property:"visible",equals:true}],
+        steps:[
+            {command:"press",input:{target:locator("open")}},
+            {command:"press",input:{target:locator("confirm")}},
+            {command:"deviceGesture",input:{kind:"click",x:20,y:70}},
+            {command:"deviceGesture",input:{kind:"longClick",x:40,y:40},delayMs:20},
+        ],
+    });
+    await bench.send("run");
+    assert.deepEqual(requests.slice(-2).map(([command])=>command),["schema","execute"]);
+    assert.deepEqual(requests.at(-1)[1].plan,bench.saved);
+    assert.equal(bench.state.run.entry.status,"passed");
+});
+
+test("automatic preview recording drains the phone monitor before replaying its first action", async t => {
+    const observation = {frameId:"screen",quality:{complete:true},nodes:[
+        {ref:"@open",id:"open",type:"Button",clickable:true,visible:true,bounds:{left:0,top:0,right:40,bottom:40}},
+    ]};
+    const actions = [];
+    const lateTouch = {command:"deviceGesture",input:{kind:"click",x:91,y:12}};
+    let capture;
+    const bench = openWorkbench(async (command,input) => {
+        if (command==="devices") return {devices:[{id:"phone"}]};
+        if (command==="start") return {observation};
+        if (command==="press") {
+            actions.push(["press",input.target.id]);
+            return {observation};
+        }
+    }, {
+        async startRecorder(options) {
+            capture=options;
+            return {async stop() {
+                actions.push(["stop"]);
+                capture.onStep(lateTouch);
+            }};
+        },
+        async replayGesture(_,input) {actions.push(["replay",input]);},
+    }, {
+        async nextFrame() {return {data:Buffer.from([1]),width:100,height:200,mime:"image/jpeg"};},
+        async close() {},
+    });
+    t.after(()=>bench.deactivate());
+    const live=bench.openLive();
+    await live.send({type:"ready"});
+    const epoch=live.messages.at(-1).epoch;
+    await live.send({type:"nextFrame",epoch});
+    const geometry=live.messages.at(-1).geometry;
+    await bench.send("startRecord");
+    assert.equal(bench.state.draft.location,"auto");
+    const send = input=>live.send({type:"gesture",epoch,geometry,input});
+    await send({kind:"click",x:12,y:15});
+    assert.equal(bench.state.draft.location,"preview");
+    const unmatched={kind:"click",x:60,y:80};
+    await send(unmatched);
+    assert.deepEqual(actions,[["stop"],["press","open"],["replay",unmatched]]);
+    assert.deepEqual(bench.state.draft.steps.map(step=>step.command),["deviceGesture","press","deviceGesture"]);
+    assert.deepEqual(bench.state.draft.steps[0],lateTouch);
+    assert.deepEqual(bench.state.draft.steps[2].input,unmatched);
+    await bench.send("stopRecord");
+    assert.equal(actions.filter(([action])=>action==="stop").length,1);
+});
+
+test("automatic recording still offers the preview when phone touch capture is unavailable", async t => {
+    const bench = openWorkbench(async command => {
+        if (command==="devices") return {devices:[{id:"phone"}]};
+        if (command==="start") return {observation:{frameId:"screen",quality:{complete:true},nodes:[]}};
+    }, {
+        async startRecorder() {throw new Error("Phone recorder unavailable");},
+    });
+    t.after(()=>bench.deactivate());
+    await bench.send("devices");
+    await bench.send("startRecord");
+    assert.equal(bench.state.recording,true);
+    assert.equal(bench.state.draft.location,"preview");
+    assert.equal(bench.state.draft.phoneUnavailable,true);
+    await bench.send("stopRecord");
+    assert.equal(bench.state.recording,false);
+});
+
+test("phone recording keeps coordinates if the touch evidence is stale or the next tree has not arrived", async t => {
+    const pending = latch();
+    const bounds = {left:0,top:0,right:50,bottom:50};
+    const observation = {frameId:"first",quality:{complete:true},nodes:[
+        {ref:"@open",id:"open",type:"Button",clickable:true,visible:true,bounds},
+    ]};
+    let capture, reads = 0;
+    const bench = openWorkbench(async command => {
+        if (command === "devices") return {devices:[{id:"phone"}]};
+        assert.equal(command,"start");
+        if (++reads === 2) await pending.promise;
+        return {observation};
+    },{
+        async startRecorder(options) {
+            capture = options;
+            return {async stop() {}};
+        },
+    });
+    t.after(()=>bench.deactivate());
+    await bench.send("devices");
+    await bench.send("startRecord",{location:"phone",stepFormat:"controls"});
+    const step = {command:"deviceGesture",input:{kind:"click",x:25,y:25},label:"25, 25"};
+    capture.onStep(step,{id:"open",type:"Button",bounds:{...bounds,right:48}});
+    capture.onStep(step,{id:"open",type:"Button",bounds});
+    pending.resolve();
+    await bench.send("stopRecord");
+    await bench.send("savePlan");
+    assert.deepEqual(bench.saved,{format:"harmony-agent.device-recording",version:1,steps:[step,step]});
 });
 
 test("closing the single editor waits for a pending acknowledged gesture then restores the draft for review", async () => {
@@ -999,6 +1330,79 @@ test("closing the single editor waits for a pending acknowledged gesture then re
     assert.equal(bench.state.draft.steps.length, 1);
     assert.equal(calls.filter(command => command === "detach").length, 1);
     await bench.deactivate();
+});
+
+test("a historical summary uses its journal and reads only the requested step evidence", async t => {
+    const plan = {name:"recording.json",uri:"file:///recording.json"};
+    const original = {id:"original",plan,status:"failed",cleanup:"detached"};
+    const trial = {id:"trial",plan,status:"passed",repairOf:original.id};
+    const legacy = {id:"legacy",plan,status:"failed"};
+    const record = {schema:"harmony-run/1",runId:original.id,status:"failed",frames:["frozen"],
+        receipts:[{kind:"assert",path:"steps[0]",status:"failed",afterFrameId:"frozen",result:{
+            status:"failed",property:"text",expected:"paid",actual:"unpaid"}}],result:{status:"failed"}};
+    const calls = [];
+    let frameMissing = false;
+    const bench = openWorkbench(async (command,input)=>{
+        if (command==="devices") return {devices:[]};
+        calls.push([command,input.run_id]);
+        if (command==="report") return {...record,runId:input.run_id};
+        if (command==="inspect") {
+            if (frameMissing) throw new Error("archived frame unavailable");
+            return {frameId:input.frame_id,nodes:[]};
+        }
+        assert.fail(command);
+    },{},undefined,plan,[original,trial,legacy]);
+    t.after(()=>bench.deactivate());
+    // A journal for another run must always fall back to the runtime.
+    for (const entry of [original,legacy]) {
+        const folder = bench.screenshotPath(path.join("runs",entry.id));
+        await mkdir(folder,{recursive:true});
+        await writeFile(path.join(folder,"run.json"),JSON.stringify(record));
+    }
+    await bench.send("report",{id:trial.id});
+    assert.equal(bench.state.run.entry.id,original.id);
+    assert.equal(bench.state.run.steps[0].actual,"unpaid");
+    assert.equal(bench.state.failureReview.index,0);
+    assert.equal(bench.state.run.phase,undefined);
+    assert.deepEqual(calls,[]);
+    frameMissing=true;
+    await bench.send("step",{id:original.id,index:0});
+    assert.match(bench.state.run.frameError,/archived frame unavailable/);
+    frameMissing=false;
+    await bench.send("step",{id:original.id,index:0});
+    assert.equal(bench.state.run.frame.frameId,"frozen");
+    assert.equal(bench.state.run.frameError,undefined);
+    await bench.send("report",{id:legacy.id});
+    await bench.send("step",{id:original.id,index:0});
+    assert.equal(bench.state.run.entry.id,legacy.id);
+    assert.equal(bench.state.run.frame,undefined);
+    assert.deepEqual(calls,[["inspect",original.id],["inspect",original.id],["report",legacy.id]]);
+});
+
+test("a case row opens guided setup at its saved boundary without running the phone",async t=>{
+    const selected={name:"Languages",uri:"file:///recording.json"};
+    const plan={version:"1",steps:[{command:"press",input:{target:{id:"menu"}}},{command:"back"}]};
+    let contents=JSON.stringify(plan);
+    const calls=[];
+    const bench=openWorkbench(async command=>{calls.push(command);return {devices:[]};},{},undefined,selected,[],vscode=>{
+        vscode.workspace.fs.readFile=async()=>Buffer.from(contents);
+        vscode.workspace.openTextDocument=async()=>({getText:()=>contents});
+    });
+    t.after(()=>bench.deactivate());
+    await bench.send("view",{view:"workflow"});
+    const entry={uri:selected.uri,digest:bench.state.planDigest,checkpoint:bench.state.caseExplorationCheckpoints["steps[1]"]};
+    await bench.send("explorationFromCase",entry);
+    assert.equal(bench.navigation.selected,"exploration");
+    assert.equal(bench.state.explorationFlow.name,selected.name);
+    assert.deepEqual(bench.state.explorationFlow.defaultCheckpoints,[1]);
+    assert.equal(bench.state.exploration,undefined);
+    assert.equal(bench.state.device,undefined);
+    await bench.send("view",{view:"workflow"});
+    contents=JSON.stringify({...plan,steps:plan.steps.slice(1)});
+    await bench.send("explorationFromCase",entry);
+    assert.match(bench.state.error,/case has changed/i);
+    assert.equal(bench.navigation.selected,"recordings");
+    assert.ok(calls.every(command=>command==="devices"));
 });
 
 test("plans restored from older workspaces get a fresh preview without exposing private inputs", async () => {

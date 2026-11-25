@@ -5,11 +5,15 @@ const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
 const { ExplorationStore, summary } = require("./explorationStore");
 const { createExploration, runExploration, finishExplorationBranches } = require("./explorationEngine");
-const { prepareFlow, draftFlow, regressionPlan } = require("./explorationFlow");
+const { draftFlow, regressionPlan, checkpointDetails } = require("./explorationFlow");
+const { prepareCaseFlow,timelinePrefix } = require("./caseExplorationTimeline");
+const { readCaseMetadata } = require("./caseLibrary");
+const { authoredDocument } = require("./caseComposition");
+const { sourceDigest } = require("./caseRepair");
 const { canRecheck, recheckFinding } = require("./explorationRecheck");
-const { caseRoutes, explorationCandidate } = require("./explorationCases");
+const { caseRoutes, explorationCandidate, forkSourceSnapshot } = require("./explorationCases");
 const { pageView } = require("./model");
-const { readWorkflow, workflowWithScenario } = require("./workflowFile");
+const { readWorkflow, workflowWithScenario, requireExecutableWorkflow } = require("./workflowFile");
 
 class ExplorationController {
     constructor(bench, vscode) {
@@ -44,27 +48,46 @@ class ExplorationController {
                 return;
             }
         }
-        if (s.busy || this.job || s.draft) return;
+        const localSource=message.type==="explorationFlow" && ["current","case","file","json"].includes(message.source);
+        if (s.busy || this.job || (s.draft && !localSource)) return;
         return this.bench.perform(async () => {
-            s.mode = "exploration";
+            if (!s.draft && message.type!=="explorationFromCase") s.mode = "exploration";
             switch (message.type) {
                 case "explorationNew":
                 case "explorationFromCase":
                 case "explorationOpen": {
-                    if (message.type !== "explorationOpen") s.exploration = s.explorationEvidence = s.explorationFlow = undefined;
-                    await this.bench.networks?.init();
-                    const n = s.network;
-                    s.explorationRuleGroup = n?.scenario?.rules?.some(rule=>rule.enabled!==false) && !n.scenario.paused ?
-                        {id:n.activeScenarioId,version:n.scenarioVersion,name:n.scenario.name} : undefined;
+                    if (message.type === "explorationFromCase") {
+                        await this.prepare({...message,source:"current"});
+                        s.tool=s.mode="exploration";
+                    }
+                    if (message.type !== "explorationOpen") s.exploration = s.explorationEvidence = s.explorationSourceIssue = undefined;
+                    if (message.type === "explorationNew") s.explorationFlow = this.flowDocument = undefined;
                     await this.history();
-                    if (message.type === "explorationFromCase") await this.prepare({source:"current"});
                     break;
                 }
                 case "explorationFlow":
-                    await this.prepare(message);
+                    try { await this.prepare(message); }
+                    catch (error) {
+                        const missingFile=["ENOENT","FileNotFound"].includes(error.code);
+                        const reason = missingFile ? this.words("The case file was not found. Choose another case or load its new file.",
+                            "找不到用例文件。请选择其他用例，或从新位置导入文件。") : error instanceof SyntaxError ?
+                            this.words("Choose a valid workflow JSON file.","请选择有效的流程 JSON 文件。") : error.message;
+                        if (message.source==="case" || message.source==="current") {
+                            this.flowDocument=undefined;
+                            const entry=message.source==="current" ? s.plan : s.cases?.find(item=>item.uri===message.uri);
+                            s.explorationFlow={id:randomUUID(),source:message.source,sourceUri:entry?.uri ?? message.uri,
+                                name:entry?.name || this.words("Selected case","所选用例"),checkpoints:[],blockedReason:reason,missingFile};
+                        } else s.explorationSourceIssue=reason;
+                    }
                     break;
                 case "explorationStart":
                     await this.start(message);
+                    break;
+                case "explorationOpenSourceCase":
+                    if (message.uri && message.uri===s.explorationFlow?.sourceUri) {
+                        await this.bench.openCase(message.uri);
+                        await this.bench.openTool("recordings");
+                    }
                     break;
                 case "explorationReport":
                     s.exploration = await this.store.load(message.id);
@@ -109,7 +132,8 @@ class ExplorationController {
                     break;
             }
             s.explorationCaseRoutes = caseRoutes(s.exploration);
-        });
+        },{runtime:!(["explorationNew","explorationOpen","explorationFromCase","explorationReport","explorationCase","explorationOpenSourceCase"].includes(message.type) ||
+            (message.type==="explorationFlow" && message.source!=="text"))});
     }
 
     reviewCase(report,message) {
@@ -129,12 +153,12 @@ class ExplorationController {
 
     async prepare(message) {
         const { bench, vscode, state } = this;
-        let flow, name, sourceUri, scenario;
+        let flow, name, sourceUri, sourceCase, sourceDocument, externalScenario = false;
         const original = state.explorationFlow;
+        state.explorationSourceIssue = undefined;
         if (message.source === "text") {
             const description = message.description?.trim();
             if (!description) return;
-            state.explorationFlow = undefined;
             const controller = new AbortController();
             this.job = { controller };
             state.explorationWorking = true;
@@ -154,6 +178,7 @@ class ExplorationController {
                 }
                 controller.signal.throwIfAborted();
                 flow = await draftFlow({description, observation, ask, signal:controller.signal, language:bench.language});
+                flow = prepareCaseFlow(flow.plan,bench.language);
                 controller.signal.throwIfAborted();
                 name = description;
             } catch (error) {
@@ -164,8 +189,15 @@ class ExplorationController {
                 state.explorationWorking = false;
             }
         } else if (message.source === "json") {
-            flow = prepareFlow(message.planJson, bench.language);
-            name = state.explorationFlow?.name || this.words("Edited flow", "已编辑流程");
+            flow = prepareCaseFlow(message.planJson, bench.language);
+            name = original?.name || this.words("Edited flow", "已编辑流程");
+            externalScenario = original?.externalScenario;
+            if (isDeepStrictEqual(flow.plan,original?.plan)) {
+                sourceCase = original.sourceCase;
+                sourceUri = original.sourceUri;
+                if (this.flowDocument?.id===original.id) sourceDocument=this.flowDocument.document;
+                flow = prepareCaseFlow(flow.plan,bench.language,sourceDocument,{trustedCase:Boolean(sourceCase)});
+            }
         } else {
             let uri;
             if (message.source === "file") {
@@ -177,23 +209,40 @@ class ExplorationController {
                 uri=vscode.Uri.parse(entry.uri);
                 name=entry.name;
             } else if (message.source === "current" && state.plan) {
+                if (message.uri && message.uri !== state.plan.uri) throw new Error(this.words(
+                    "The selected case changed. Choose the step again.","当前用例已更换，请重新选择步骤。"));
                 uri = vscode.Uri.parse(state.plan.uri);
                 name=state.plan.name;
             } else throw new Error(this.words("Choose a flow file first.", "请先选择一个流程文件。"));
             sourceUri = uri.toString();
-            state.explorationFlow = undefined;
             const document = await vscode.workspace.openTextDocument(uri);
-            const file=readWorkflow(document.getText());
-            flow = prepareFlow(file.plan, bench.language);
-            scenario=file.scenario;
-            name ||= path.basename(uri.fsPath);
+            const contents = document.getText(), digest = sourceDigest(contents);
+            if (message.digest && message.digest !== digest) throw new Error(this.words(
+                "The case has changed. Choose the step again.","用例已修改，请重新选择步骤。"));
+            const file=readWorkflow(contents);
+            requireExecutableWorkflow(file,bench.language);
+            const entry = state.cases?.find(item=>item.uri===sourceUri);
+            const metadata = await readCaseMetadata(uri);
+            const authored = authoredDocument(file,metadata);
+            sourceDocument=authored;
+            if (entry) sourceCase = {uri:sourceUri,...(entry.portableId && {id:entry.portableId}),digest,
+                ...(!entry.editable && {editable:false})};
+            flow = prepareCaseFlow(file.plan, bench.language,authored,{trustedCase:Boolean(sourceCase)});
+            externalScenario = Boolean(file.scenario || bench.networks?.bindings?.[sourceUri]);
+            name ||= metadata?.name || path.basename(uri.fsPath);
         }
-        state.explorationFlow = { ...flow, id:randomUUID(), name, sourceUri:sourceUri || (message.source === "json" ? original?.sourceUri : undefined),
-            source:message.source === "json" ? original?.source : message.source,
-            scenario:message.source === "json" ? original?.scenario : scenario,
+        if (message.checkpoint !== undefined) {
+            const point=flow.checkpoints.find(point=>point.index===message.checkpoint);
+            if (point?.blockedReason) throw new Error(point.blockedReason);
+            if (!point) throw new Error(this.words(
+                "This position is unavailable. Choose a position from the current case.",
+                "这个位置暂不支持探索，请从当前用例重新选择位置。"));
+            flow.defaultCheckpoints = [message.checkpoint];
+        }
+        state.explorationFlow = { ...flow, sourceCase, externalScenario, id:randomUUID(), name, sourceUri,
+            source:message.source === "json" && (sourceUri || original?.source==="text") ? original?.source : message.source,
             description:message.source === "json" ? original?.description : message.description?.trim() };
-        const fileFlow = state.explorationFlow;
-        fileFlow.ruleGroupName = (fileFlow.scenario || (fileFlow.sourceUri && bench.networks?.bindings?.[fileFlow.sourceUri]))?.name;
+        this.flowDocument=sourceDocument ? {id:state.explorationFlow.id,document:sourceDocument} : undefined;
     }
 
     async start(message) {
@@ -206,28 +255,31 @@ class ExplorationController {
             if (!source || (message.flowId && source.id !== message.flowId)) {
                 throw new Error(this.words("Review the flow before starting.", "请先核对流程再开始。"));
             }
-            prepared = prepareFlow(message.planJson ?? source.plan, this.bench.language);
-            checkpoints = message.checkpoints ?? prepared.defaultCheckpoints;
-            const eligible = new Set(prepared.checkpoints.map(c => c.index));
-            if (!Array.isArray(checkpoints) || !checkpoints.length || checkpoints.some(i => !eligible.has(i))) {
-                throw new Error(this.words("Choose an exploration checkpoint in this flow.", "请在当前流程中选择要探索的步骤。"));
+            if (source.blockedReason) throw new Error(source.blockedReason);
+            const document=this.flowDocument?.id===source.id ? this.flowDocument.document : undefined;
+            prepared = prepareCaseFlow(message.planJson ?? source.plan,this.bench.language,document,{trustedCase:Boolean(source.sourceCase)});
+            if (!isDeepStrictEqual(prepared.plan,source.plan)) throw new Error(this.words(
+                "Apply your flow changes before starting.","请先应用流程修改，再开始探索。"));
+            if (prepared.blockedReason) throw new Error(prepared.blockedReason);
+            checkpoints = message.checkpoints ?? source.defaultCheckpoints;
+            const point=Array.isArray(checkpoints) && checkpoints.length===1 && prepared.checkpoints.find(c=>c.index===checkpoints[0]);
+            if (!point || point.blockedReason) {
+                throw new Error(point?.blockedReason || this.words("Choose one starting position in this case.", "请为本轮探索选择一个分叉位置。"));
             }
+            await this.bench.requireGestureRuntime?.(timelinePrefix(prepared.plan,point.index));
         }
         const focus = message.focus?.trim() || (guided ? source.name : this.words("Explore this app", "从当前页探索"));
         const report = createExploration({ device:s.device, mode:guided ? "flow" : "free", goal:focus,
             plan:prepared?.plan, checkpoints, maxInputs:message.maxActions, maxMinutes:message.maxMinutes,
             language:this.bench.language, source:guided ? source.name : undefined });
-        report.evidenceDir = this.bench.stateDir;
-        const bound = guided && (source.scenario || (source.sourceUri && this.bench.networks?.bindings?.[source.sourceUri]));
-        if (message.ruleGroupId) {
-            const n = s.network;
-            if (bound || !n?.scenario || n.activeScenarioId !== message.ruleGroupId || n.scenarioVersion !== message.ruleGroupVersion) {
-                throw new Error(this.words("The rule group changed. Reopen exploration setup to review it.", "规则组已更改，请重新打开探索设置核对。"));
-            }
-            report.mockScenario = await this.bench.prepareFlowScenario(undefined,structuredClone(n.scenario));
-        } else if (guided && source.sourceUri) {
-            report.mockScenario = await this.bench.prepareFlowScenario?.({uri:source.sourceUri},source.scenario);
+        if (guided) {
+            report.routeMode="fork";
+            report.checkpointLayout="rows";
+            if (this.flowDocument?.id===source.id) report.forkSource=forkSourceSnapshot(this.flowDocument.document,checkpoints[0],report.checkpointLayout);
+            report.checkpointDetails = checkpointDetails(prepared,checkpoints);
+            if (source.sourceCase) report.sourceCase = source.sourceCase;
         }
+        report.evidenceDir = this.bench.stateDir;
         await this.store.withWriter(report.id, () => this.run(report));
     }
 
@@ -259,8 +311,8 @@ class ExplorationController {
 
     deviceAgent(report) {
         const runtime = this.reportAgent(report);
-        return { call: (cmd,input) => {
-            const work = () => runtime.call(cmd,input);
+        return { call: (cmd,input,options) => {
+            const work = () => runtime.call(cmd,input,options);
             const panel = this.bench.livePanel;
             return panel ? panel.withDeviceOperation(work) : work();
         } };
@@ -316,17 +368,24 @@ class ExplorationController {
         if (this.state.exploration?.id !== id) return;
         await this.store.withWriter(id,async () => {
             const report = await this.store.load(id);
-            const finding = report.findings.find(item => item.id === findingId);
-            if (!finding || report.status === "running") return;
-            this.state.exploration = report;
+            if (report.status === "running") return;
             if (message.type === "explorationTriage") {
-                if (finding.kind !== "review" || !["open","ignored"].includes(message.reviewStatus)) return;
-                finding.reviewStatus = message.reviewStatus;
-                finding.note = String(message.note || "").trim();
+                if (!["open","ignored"].includes(message.reviewStatus)) return;
+                const batch=Array.isArray(message.findingIds);
+                const ids=new Set(batch ? message.findingIds : [findingId]);
+                const findings=report.findings.filter(item=>item.kind==="review" && ids.has(item.id));
+                if (!findings.length || findings.length!==ids.size) return;
+                for (const item of findings) {
+                    item.reviewStatus=message.reviewStatus;
+                    if (!batch) item.note=String(message.note || "").trim();
+                }
+                this.state.exploration = report;
                 await this.save(report);
                 return;
             }
+            const finding = report.findings.find(item => item.id === findingId);
             if (!["completed","stopped","blocked"].includes(report.status) || !canRecheck(finding)) return;
+            this.state.exploration = report;
             this.requireDevice(report.device);
             const controller = new AbortController();
             this.job = {id,controller};

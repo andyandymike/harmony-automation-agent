@@ -8,7 +8,7 @@ const paths = {
     home: '<path d="m3 11 9-7 9 7M6 10v10h12V10"/>',
     recents: '<rect x="7" y="7" width="13" height="13" rx="2"/><path d="M16 4H6a2 2 0 0 0-2 2v10"/>',
     keyboard: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h1m3 0h1m3 0h2M7 14h1m3 0h6"/>',
-    pause: '<path d="M8 5v14m8-14v14"/>',
+    power: '<path d="M12 3v8m5-5.2a8 8 0 1 1-10 0"/>',
     read: '<path d="M3 4h12a3 3 0 0 1 3 3v4M3 4v14h7m4-4 2 2 5-5"/>',
     inspect: '<path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/><rect x="8" y="8" width="8" height="8" rx="1"/>',
     record: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
@@ -17,7 +17,6 @@ const paths = {
     folder: '<path d="M3 7V5h6l2 2h9v3M3 9h18l-3 10H3z"/>',
     history: '<path d="M3 10a8.7 8.7 0 1 1 .8 6M3 4v6h6m3-3v5l3 2"/>',
     chat: '<path d="M4 5h16v12H9l-5 4zm4 4h8m-8 4h5"/>',
-    down: '<path d="m6 9 6 6 6-6"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
     expand: '<path d="M4 10V4h6m10 10v6h-6M4 4l6 6m10 10-6-6"/>',
 };
@@ -28,7 +27,7 @@ function icon(name) {
 
 function liveDeviceMarkup() {
     return `<section id="live-preview" aria-labelledby="live-title">
-        <header class="live-monitor-head"><h2 id="live-title" tabindex="-1"></h2>
+        <header class="live-monitor-head"><div class="live-monitor-name">${icon("inspect")}<h2 id="live-title" tabindex="-1"></h2></div>
             <div class="live-monitor-state"><span id="status" role="status"></span>
                 <button type="button" id="preview-zoom" aria-expanded="false" aria-controls="stage">${icon("expand")}<span></span></button>
             </div>
@@ -42,18 +41,10 @@ function liveDeviceMarkup() {
                 <span id="case-pick-instructions"></span>
                 <button type="button" id="case-pick-exit"></button>
             </div>
-            <div class="record-choices" id="record-choices" hidden>
-                <fieldset id="record-location"><legend id="record-location-label"></legend><div class="record-segments">
-                    <label><input type="radio" name="record-location" value="preview" checked><span id="record-preview-label"></span></label>
-                    <label><input type="radio" name="record-location" value="phone"><span id="record-phone-label"></span></label></div></fieldset>
-                <fieldset id="record-format" aria-describedby="record-format-note"><legend id="record-format-label"></legend><div class="record-segments">
-                    <label><input type="radio" name="record-format" value="controls" checked><span id="record-controls-label"></span></label>
-                    <label><input type="radio" name="record-format" value="coordinates"><span id="record-coordinates-label"></span></label></div></fieldset>
-            </div>
-            <p id="record-format-note" role="status" hidden></p>
+            <p id="recording-notice" role="status" hidden></p>
             <div class="preview-actions" id="preview-actions">
                 <button type="button" id="record" hidden><i class="record-start-icon" aria-hidden="true">${icon("record")}</i><i class="record-stop-icon" aria-hidden="true">${icon("stop")}</i><span></span></button>
-                <button type="button" id="toggle">${icon("pause")}<span></span></button>
+                <button type="button" id="preview-connection" aria-controls="stage">${icon("power")}<span></span></button>
             </div>
         </div>
         <div id="phone-controls" hidden>
@@ -86,7 +77,7 @@ function liveDeviceMarkup() {
             </div>
         </div>
         <footer class="live-monitor-foot">
-            <div class="live-monitor-bar"><span id="size"></span></div>
+            <div class="live-monitor-bar"><span id="last-tap"></span><span id="size"></span></div>
         </footer>
         <p id="feedback" role="status" hidden></p>
     </section>`;

@@ -9,10 +9,10 @@ export function pytestPhases(run, language) {
     const states = {passed:w("Passed","通过"), failed:w("Failed","失败"), skipped:w("Skipped","跳过")};
     const problems = report.phases.filter(p => p.outcome !== "passed");
     const severalTests = new Set(report.phases.filter(p => p.phase === "setup").map(p => p.node)).size > 1;
-    const phases = report.phases.map(p => {
+    const phases = report.phases.map((p,i) => {
         const label = (titles[p.phase] || p.phase) + " · " + (states[p.outcome] || p.outcome);
         const node = severalTests && p.node ? `<small>${html(p.node)} · </small>` : "";
-        return p.message ? `<li><details><summary>${node}${html(label)}</summary><pre class="ai-answer">${html(p.message)}</pre></details></li>` :
+        return p.message ? `<li><details id="pytest-phase-${i}"><summary>${node}${html(label)}</summary><pre class="ai-answer">${html(p.message)}</pre></details></li>` :
             `<li>${node}${html(label)}${p.durationMs ? " · " + html(p.durationMs) + " ms" : ""}</li>`;
     }).join("");
     let note = report.launchError;
@@ -30,5 +30,5 @@ export function pytestPhases(run, language) {
     const reason = first?.reason?.split("\n")[0] || first?.message?.trim().split("\n").at(-1);
     const failure = first ? `<p class="ai-answer"><strong>${html(titles[first.phase] || first.phase)} · ${html(states[first.outcome] || first.outcome)}</strong>${reason ? "  "+html(reason.slice(0,240)) : ""}</p>` : "";
     return `<section class="plan-preview pytest-phases"><h2>${w("pytest result","pytest 结果")}</h2>
-        ${failure}${note ? `<p>${html(note)}</p>` : ""}${phases ? `<details><summary>${w("Test phases","查看测试阶段")}${code ? " · "+html(code):""}</summary><ul>${phases}</ul></details>` : html(code)}</section>`;
+        ${failure}${note ? `<p>${html(note)}</p>` : ""}${phases ? `<details id="pytest-test-phases"><summary>${w("Test phases","查看测试阶段")}${code ? " · "+html(code):""}</summary><ul>${phases}</ul></details>` : html(code)}</section>`;
 }

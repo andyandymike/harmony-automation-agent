@@ -120,3 +120,10 @@ export function exchangeDifferences(before, after) {
         ...changedFields(responsePart(before.response), responsePart(after.response), "response"),
         ...changedFields(before.durationMs, after.durationMs, "durationMs")];
 }
+export function hasRetainedRule(network, record) {
+    const groupId=record?.ruleScenarioId, ruleId=record?.ruleId;
+    if (!groupId || !ruleId) return false;
+    if (groupId===network.activeScenarioId) return network.scenario.rules.some(rule=>rule.id===ruleId);
+    if (groupId===network.viewedGroup?.id) return network.viewedGroup.scenario.rules.some(rule=>rule.id===ruleId);
+    return network.scenarioLibrary?.find(group=>group.id===groupId)?.ruleIds?.includes(ruleId) ?? false;
+}

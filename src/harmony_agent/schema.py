@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from . import SCHEMA_VERSION, DEFAULT_INPUT_TIMEOUT_MS
 from .errors import AgentError
+from .gestures import COMMAND as GESTURE_COMMAND
 from .observation import selector_uses_refs
 
 
@@ -352,4 +353,5 @@ def request_schema(command=None):
         result["$defs"].update({"plan_" + key: relocate(value) for key, value in plan.pop("$defs").items()})
         plan.pop("$schema", None)
         result["$defs"]["plan"] = relocate(plan)
+        result["x-harmony-plan-features"] = [GESTURE_COMMAND]
     return result

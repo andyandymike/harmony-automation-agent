@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("node:path");
+const {tmpdir} = require("node:os");
 const fs = require("node:fs/promises");
 const { createHash, randomUUID } = require("node:crypto");
 const { setTimeout: delay } = require("node:timers/promises");
@@ -8,9 +9,9 @@ const vscode = require("vscode");
 const { AgentClient } = require("./agent");
 const { ProjectRuntime, projectHdc, pythonPath } = require("./projectRuntime");
 const { pageView, recordedPlan, moveListItem, runView, withAuthoredTargets, compareRuns, deviceRecordingFormat } = require("./model");
-const { summarizePlan } = require("./planSummary");
-const { startRecorder, replayGesture, validateGesture } = require("./deviceRecorder");
-const { controlCommands, controlTarget, scrollDirection, boundaryControls } = require("./controlRecording");
+const { summarizePlan, caseExplorationCheckpoints } = require("./planSummary");
+const { startRecorder, replayGesture, validateRecording } = require("./deviceRecorder");
+const { controlCommands, controlTarget, phoneControlStep, scrollDirection, boundaryControls } = require("./controlRecording");
 const { LiveDevicePanel } = require("./liveDevicePanel");
 const { liveDeviceMarkup, phoneTaskMarkup } = require("./liveDeviceMarkup");
 const { registerCopilotMcp } = require("./aiIntegration");
@@ -23,21 +24,25 @@ const { suggestRecordingCheck } = require("./recordingCheck");
 const { ExplorationController } = require("./explorationController");
 const { ElementsController } = require("./elementsController");
 const { NetworkController } = require("./networkController");
-const { readWorkflow } = require("./workflowFile");
+const { readWorkflow, requireExecutableWorkflow } = require("./workflowFile");
+const { hasRuleSteps, validateRuleStep, saveRulePlanForRun } = require("./caseRuleSteps");
+const { runCasePlan } = require("./workflowWorker");
 const { readiness, safeCaseName, writeCase, findCase, startPytest } = require("./pytestCase");
 const { CaseLibrary, createBdd, readCaseMetadata } = require("./caseLibrary");
-const { restorePresentation, pageCue, stepEvidence } = require("./casePresentation");
+const { restorePresentation, pageCue, stepEvidence, pendingCaseWork } = require("./casePresentation");
 const { CaseAuthoring, caseDefinitions, canEditCase } = require("./caseAuthoring");
 const { CaseCompositionEditor } = require("./caseCompositionEditor");
-const { authoredDocument } = require("./caseComposition");
+const { authoredDocument, hasGestures } = require("./caseComposition");
 const { loadPytestRun } = require("./pytestReport");
-const { journalPath, watchRunJournal } = require("./runProgress");
+const { journalPath, readSummaryRecord, withRunReceipts, watchRunJournal } = require("./runProgress");
 const { CaseRepair, sourceDigest } = require("./caseRepair");
 const { reviewCaseFailure } = require("./caseFailure");
 const { diagnoseCase } = require("./caseDiagnosis");
 const { workspaceTools, selectedWorkspaceTab, registerWorkbenchLauncher } = require("./workbenchTools");
 const { FlowDebugger } = require("./flowDebug");
 const { exportProblemClip, openProblemClip } = require("./problemExport");
+const { CaseRunReports, archivedRunPlan } = require("./caseRunReport");
+const { TestRunOverviewPanel } = require("./testRunOverviewPanel");
 const { messagesFor } = require("./strings");
 
 const observationOptions = { max_nodes: 240, compact: true };
@@ -52,8 +57,11 @@ const recordingViews = new Set(["recordings", "workflow", "run", "history"]);
 const toolMessages = new Map([
     ["openRecordingWorkspace", "recordings"], ["inspect", "inspect"], ["inspectDevice", "inspect"], ["networkOpen", "network"],
 ]);
-const localCaseActions = new Set(["openPlan", "editPlan", "caseOpen", "caseReview", "caseDuplicate", "caseRemove", "caseRestore",
-    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest", "repairApply", "repairDraft"]);
+const networkDeviceActions = new Set(["networkNative", "networkNativeChoose", "networkNativeTimed", "networkMap",
+    "networkStep", "networkExplorationStep"]);
+const localCaseActions = new Set(["openPlan", "editPlan", "caseOpen", "caseNew", "caseReview", "caseDuplicate", "caseRemove", "caseHideSelected", "caseRestore",
+    "caseCancel", "caseMoveStep", "caseStepAction", "caseEdit", "caseSave", "caseTargets", "openPytest", "repairApply", "repairDraft",
+    "moveRecordedStep", "removeStep", "removeRecordedSteps", "undoRecordedRemoval", "report", "step"]);
 
 class Workbench {
     constructor(context) {
@@ -110,12 +118,16 @@ class Workbench {
         this.elements = new ElementsController(this, vscode);
         this.networks = new NetworkController(this, vscode);
         this.flowDebugger = new FlowDebugger(this, vscode);
+        this.caseRunReports = new CaseRunReports(this, vscode);
+        this.testRunOverview = new TestRunOverviewPanel(this,vscode);
+        context.subscriptions.push(this.caseRunReports,this.testRunOverview);
         this.recordingView = this.state.mode;
         this.projectRuntime = new ProjectRuntime(vscode, context, () => this.language, () =>
             this.runtimeOperation || this.state.recording || this.networks.activeCapture || this.closingRuntime);
         context.subscriptions.push(this.projectRuntime.onDidChange((next, previous) => {
             if (this.deviceLookup?.runtime) this.cancelDeviceLookup();
             this.state.device = undefined;
+            this.state.deviceDisconnected = false;
             this.state.devices = [];
             this.caseAuthoring.invalidateLiveTargets();
             this.state.deviceLookupError = undefined;
@@ -161,7 +173,8 @@ class Workbench {
     }
 
     get recordingControls() {
-        return this.state.recording && this.state.draft?.stepFormat === "controls";
+        const {recording, draft} = this.state;
+        return recording && draft?.location !== "phone" && draft?.stepFormat === "controls";
     }
 
     get fullControlTree() {
@@ -210,22 +223,23 @@ class Workbench {
             } else if (message.type === "devices") {
                 await this.listDevices();
             } else if (message.type.startsWith("exploration")) {
-                if (["explorationReport","explorationNew","explorationFromCase"].includes(message.type) &&
-                    this.state.tool === "recordings" && !this.state.caseReview && !this.state.draft)
+                const fromTests=this.state.tool==="recordings" && !this.state.caseReview && !this.state.draft;
+                if (["explorationReport","explorationNew"].includes(message.type) && fromTests)
                     this.state.tool = "exploration";
-                if (this.state.tool !== "exploration") return;
+                if (this.state.tool !== "exploration" && !(fromTests && message.type==="explorationFromCase")) return;
                 await this.explorations.handle(message);
             } else if (toolMessages.has(message.type) ||
                     (message.type === "view" && message.view === "inspect")) {
                 await this.openTool(message.type === "view" ? "inspect" : toolMessages.get(message.type));
             } else if (message.type.startsWith("element")) {
-                await this.perform(() => this.elements.handle(message));
-            } else if (message.type === "networkNativeStop") {
-                // A phone action can still be running when the user ends the capture.
+                await this.perform(() => this.elements.handle(message),{
+                    runtime:!["elementCopySelected","elementUnwatchSelected","elementRemoveSelected","elementUndoRemoval"].includes(message.type)});
+            } else if (message.type === "networkNativeStop" || message.type === "networkCopyRetained") {
+                // Stopping the recorder and copying archived data also work during a phone action.
                 try { await this.networks.handle(message); }
                 catch (error) { this.networks.showError(error); }
             } else if (message.type.startsWith("network")) {
-                await this.perform(() => this.networks.handle(message), { runtime: !["networkClearTraffic", "networkUndoClearTraffic"].includes(message.type) });
+                await this.perform(() => this.networks.handle(message), {runtime:networkDeviceActions.has(message.type)});
             } else if (message.type.startsWith("flowDebug")) {
                 await this.flowDebugger.handle(message);
             } else if (message.type === "stopRun") {
@@ -236,6 +250,12 @@ class Workbench {
                 }
             } else if (message.type === "problemExport") {
                 await this.perform(() => exportProblemClip(this,vscode,message));
+            } else if (message.type === "caseFullReport") {
+                await this.caseRunReports.open(message.id,message.index);
+            } else if (message.type === "caseExportReport") {
+                await this.caseRunReports.export(message.id);
+            } else if (message.type === "testRunOverview") {
+                await this.testRunOverview.open();
             } else if (message.channel === "live") {
                 await live.receive(message);
             } else if (message.type === "liveDevice") {
@@ -278,12 +298,19 @@ class Workbench {
                 if (this.caseAuthoring.endPick(message)) this.publish();
             } else if (message.type === "caseComposeCancel") {
                 this.composition.cancelJob();
+            } else if (message.type === "caseInsert") {
+                await this.composition.requestInsertion(message,result=>{
+                    if (this.panel===panel) void webview.postMessage({type:"caseInsert",action:message.action,
+                        session:message.session,sourceId:message.sourceId,request:message.request,...result});
+                });
             } else if (message.type === "caseCompose") {
                 await this.perform(()=>this.composition.handle(message),{
-                    runtime:["runExplore","scanCheck","verifyCheck","verifyUpdate"].includes(message.action)});
+                    runtime:["runExplore","verifyUpdate","revisionRun","revisionVerify"].includes(message.action)});
             } else {
                 await this.perform(() => this.dispatch(message), {runtime:!localCaseActions.has(message.type) || Boolean(message.fromRun) ||
                     (message.type === "caseTargets" && message.live === true)});
+                if (message.type==="caseOpen" && message.preview && this.panel===panel)
+                    void webview.postMessage({type:"caseLibraryPreviewed",id:message.id});
             }
         });
         panel.onDidChangeViewState(() => {
@@ -301,6 +328,7 @@ class Workbench {
             this.caseAuthoring.stopOrganizing();
             this.caseAuthoring.endPick();
             this.composition.cancelJob();
+            this.composition.cancelInsertionIndex();
             this.explorations.cancel("pause");
             this.flowDebugger.stop();
             this.nativeReplay?.abort();
@@ -325,10 +353,10 @@ class Workbench {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${webview.cspSource}; style-src ${webview.cspSource}; img-src ${webview.cspSource};">
 <link rel="stylesheet" href="${resource("workbench.css")}"><link rel="stylesheet" href="${resource("liveDevice.css")}"><link rel="stylesheet" href="${resource("workspaceRail.css")}"><link rel="stylesheet" href="${resource("elements.css")}">
 <link rel="stylesheet" href="${resource("network.css")}"><link rel="stylesheet" href="${resource("networkEditor.css")}"><link rel="stylesheet" href="${resource("networkScenarios.css")}">
-<link rel="stylesheet" href="${resource("ui/components.css")}"><link rel="stylesheet" href="${resource("ui/fieldEditor.css")}"><link rel="stylesheet" href="${resource("caseLibrary.css")}"><title>Harmony Agent</title></head>
-<body><div id="app-shell"><header id="station-header"></header><main id="station-body">
+<link rel="stylesheet" href="${resource("ui/components.css")}"><link rel="stylesheet" href="${resource("ui/disclosure.css")}"><link rel="stylesheet" href="${resource("ui/fieldEditor.css")}"><link rel="stylesheet" href="${resource("caseLibrary.css")}"><link rel="stylesheet" href="${resource("caseInsert.css")}"><link rel="stylesheet" href="${resource("exploration.css")}"><title>Harmony Agent</title></head>
+<body><div id="app-shell"><header id="station-header"></header><div id="tool-navigation"></div><main id="station-body">
 <aside id="live-device" aria-labelledby="live-title">${liveDeviceMarkup()}</aside>
-<div id="tool-pane"><div id="tool-navigation"></div><div id="tool-content" role="tabpanel" tabindex="0">
+<div id="tool-pane"><div id="tool-content" role="tabpanel" tabindex="0">
 <div id="workbench"></div>${phoneTaskMarkup()}</div></div></main></div>
 <script type="module" src="${resource("workbench.js")}"></script><script type="module" src="${resource("liveDevice.js")}"></script></body></html>`;
     }
@@ -437,7 +465,7 @@ class Workbench {
                 const agent = kind === "diagnosis" ? {call:(...args)=>this.reportAgent(run.entry).call(...args)} :
                     kind === "phone" ? this.agent : undefined;
                 const options = { agent, ask, signal, onEvent, language: this.language,
-                    readRequests:(window,filter) => localRequests(this.networks,window,filter) };
+                    readRequests:(window,filter) => localRequests(this.networks,window,filter,failure && run.entry.id) };
                 if (kind === "phone") {
                     const outcome = await runPhoneTask({ ...options, device, goal, allowActions: !readOnly,
                         readRequests:readOnly ? undefined : options.readRequests, workbenchSession: this.sessionFor(device) });
@@ -453,7 +481,7 @@ class Workbench {
                             prepare:input=>this.caseRepair.prepare(input)});
                         const {summary,proposed,...details} = diagnosis;
                         Object.assign(result,{answer:summary,...details});
-                        this.caseRepair.propose(proposed);
+                        await this.caseRepair.propose(proposed);
                     } else await explainRun({...options,run,goal:goal || this.text.aiReportTask});
                 } else if (kind === "exchange") {
                     await explainExchange({...options,controller:this.networks,id:exchangeId});
@@ -507,11 +535,12 @@ class Workbench {
         if (recordingViews.has(this.state.mode)) this.recordingView = this.state.mode;
         if (!this.panel) return;
         const text = this.text;
-        const baseline = this.baseline();
+        const report = this.caseRepair.reportState(this.state.run);
+        const baseline = this.baseline(report.run?.entry);
         void this.panel.webview.postMessage({
-            state: {...this.state, testView:this.recordingView, runtimeName: this.projectRuntime.current.name,
+            state: {...this.state,...report,testView:report.repairInProgress ? "run" : this.recordingView, runtimeName: this.projectRuntime.current.name,
                 runtimeError: this.projectRuntime.current.error,
-                failureReview: reviewCaseFailure(this.state.run),
+                failureReview: reviewCaseFailure(report.run),
                 ...(this.state.tool !== "network" && {network:undefined,networkDraft:undefined}),
                 nativeCaptureActive:Boolean(this.networks.activeCapture)},
             text,
@@ -568,6 +597,7 @@ class Workbench {
         if (this.state.tool === "recordings" && this.state.caseReview &&
             !["caseBoundary","caseSave","caseCancel","caseEdit","caseMoveStep","caseStepAction","caseTargets","device"].includes(message.type)) return;
         switch (message.type) {
+            case "caseNew": this.caseAuthoring.create(); break;
             case "caseReview":
                 if (message.id && !message.fromRun && !this.state.draft) await this.openCase(message.id);
                 await this.caseAuthoring.open(message);
@@ -577,9 +607,10 @@ class Workbench {
                 await this.caseAuthoring.open({copy:true});
                 break;
             case "caseRemove": await this.removeCase(message.id); break;
+            case "caseHideSelected": await this.hideSelectedCases(message.uris); break;
             case "caseRestore":
                 if (this.state.removedCase?.uri===message.id) {
-                    await this.caseLibrary.setHidden(message.id,false);
+                    await this.caseLibrary.setHidden(this.state.removedCase.uris || message.id,false);
                     this.state.removedCase=undefined;
                     await this.refreshCases();
                 }
@@ -593,22 +624,18 @@ class Workbench {
             case "caseCancel": this.caseAuthoring.cancel(); break;
             case "caseOpen": await this.openCase(message.id); break;
             case "caseRun": await this.runCase(message); break;
-            case "repairVerify": await this.caseRepair.verify(message); break;
-            case "repairApply": await this.caseRepair.apply(message); break;
-            case "repairDraft": await this.caseRepair.stage(message); break;
+            case "repairVerify":
+            case "repairApply":
+            case "repairDraft": await this.caseRepair.handle(message); break;
             case "device": await this.selectDevice(message.device); break;
             case "observe": await this.observe(); break;
-            case "detach":
-                await this.detach();
-                if (this.livePanel) this.livePanel.paused = true;
-                break;
             case "openApp": await this.openApp(); break;
             case "screenshot": await this.takeScreenshot(); break;
             case "action": await this.act(message); break;
             case "startRecord": await this.startRecording(message); break;
             case "stopRecord": await this.stopRecording(); break;
             case "discardRecord": await this.discardRecording(); break;
-            case "moveRecordedStep": case "removeStep":
+            case "moveRecordedStep": case "removeStep": case "removeRecordedSteps": case "undoRecordedRemoval":
                 this.editRecordedSteps(message);
                 break;
             case "savePlan": await this.savePlan(message); break;
@@ -617,16 +644,19 @@ class Workbench {
             case "openPytest": await this.usePytest(false); break;
             case "openPlan": await this.choosePlan(); break;
             case "editPlan": await this.editPlan(message.fromRun,message.id); break;
-            case "run": await this.executePlan(message.fromRun); break;
+            case "run": await this.executePlan(message.fromRun,undefined,{skipRuleGroup:message.skipRuleGroup===true}); break;
             case "report": await this.openReport(message.id); break;
-            case "step": await this.inspectStep(message.index, message.phase); break;
+            case "step":
+                if (!message.id || message.id===this.state.run?.entry.id) await this.inspectStep(message.index, message.phase);
+                break;
             case "compare": await this.compare(); break;
         }
     }
 
     async openTool(tab) {
         if (!workspaceTools.has(tab)) return;
-        if (this.state.tool !== tab || !this.panel) this.pendingTool = tab;
+        if (this.state.tool !== tab || !this.panel || (tab==="network" && !this.state.network && !this.state.networkLoading))
+            this.pendingTool = tab;
         this.state.tool = tab;
         this.open();
         this.publish();
@@ -639,17 +669,22 @@ class Workbench {
         if (tab === "network") {
             this.pendingTool = undefined;
             this.state.networkLoading = true;
+            if (this.networkLoadError && this.state.error===this.networkLoadError) this.state.error="";
+            this.networkLoadError=undefined;
             this.publish();
             try { await this.networks.init(); }
-            catch (error) { this.networks.showError(error); }
+            catch (error) {
+                this.networkLoadError=this.errorMessage(error);
+                this.networks.showError(error);
+            }
             finally { this.state.networkLoading = false; this.publish(); }
             return;
         }
         if (this.state.busy) return;
         this.pendingTool = undefined;
-        if (tab === "exploration" && !this.state.draft) {
+        if (tab === "exploration" && !this.state.draft && !["explore","revision"].includes(this.state.caseComposition?.mode)) {
             await this.explorations.handle({type:"explorationOpen"});
-        } else if (tab === "inspect" && this.state.devices.includes(this.state.device)) {
+        } else if (tab === "inspect" && this.state.devices.includes(this.state.device) && !this.state.deviceDisconnected) {
             if (!this.elements.canReuseSnapshot()) await this.perform(() => this.refreshInspector());
         } else if (tab === "recordings" && !this.state.draft) {
             void this.loadTestLibrary(this.panel);
@@ -675,57 +710,74 @@ class Workbench {
 
     async sendLiveGesture(device, input, isCurrent, sessions, anchor) {
         if (this.state.device !== device || !isCurrent()) return this.text.liveChanged;
-        if (this.recordingControls) return this.perform(() => this.recordControlGesture(input,isCurrent,anchor));
-        if (this.state.draft && (!this.state.recording || this.state.draft.location !== "preview")) return this.text.liveRecording;
+        const {draft, recording} = this.state;
+        if (draft && (!recording || draft.location === "phone")) return this.text.liveRecording;
         return this.perform(async () => {
-            const agent = this.agent;
-            let session = sessions.get(device)?.id;
-            if (!session) {
-                session = "vscode-display-" + randomUUID();
-                await agent.call("attach", { session, device });
-                sessions.set(device, { id: session, agent });
-            }
-            await agent.call("claim", { session });
-            try {
-                if (!isCurrent()) throw new Error(this.text.liveChanged);
-                this.state.page = this.state.liveImage = undefined;
-                if (this.state.tool === "inspect") this.publish();
-                const started = Date.now();
-                await replayGesture({ device, hdcPath: agent.hdcPath, isCurrent }, input);
-                this.networks.mark(input.kind,started,Date.now());
-                if (this.state.recording) {
-                    const step = { command: "deviceGesture", input };
-                    if (this.lastScreenStepAt) step.delayMs = Math.max(0, started - this.lastScreenStepAt);
-                    this.state.draft.steps.push(step);
-                    this.lastScreenStepAt = Date.now();
-                }
-            } finally {
-                try { await agent.call("release",{session}); }
-                catch {
-                    try {
-                        await agent.call("detach",{session});
-                        sessions.delete(device);
-                    } catch (error) {
-                        this.state.error = this.errorMessage(error);
-                    }
-                }
-            }
-            await this.refreshInspector(isCurrent);
+            if (!isCurrent()) throw new Error(this.text.liveChanged);
+            if (draft?.location === "phone") throw new Error(this.text.liveRecording);
+            if (draft?.location === "auto") await this.startPreviewRecording(draft);
+            if (this.recordingControls && await this.recordControlGesture(input,isCurrent,anchor,draft?.automatic)) return;
+            await this.sendCoordinateGesture(device,input,isCurrent,sessions);
         });
     }
 
-    async recordControlGesture(input, isCurrent, anchor) {
+    async sendCoordinateGesture(device,input,isCurrent,sessions) {
+        const agent = this.agent;
+        let session = sessions.get(device)?.id;
+        if (!session) {
+            session = "vscode-display-" + randomUUID();
+            await agent.call("attach", { session, device });
+            sessions.set(device, { id: session, agent });
+        }
+        await agent.call("claim", { session });
+        try {
+            if (!isCurrent()) throw new Error(this.text.liveChanged);
+            this.state.page = this.state.liveImage = undefined;
+            if (this.state.tool === "inspect") this.publish();
+            const started = Date.now();
+            await replayGesture({ device, hdcPath: agent.hdcPath, isCurrent }, input);
+            this.networks.mark(input.kind,started,Date.now());
+            if (this.state.recording) {
+                const step = { command: "deviceGesture", input };
+                if (this.lastScreenStepAt) step.delayMs = Math.max(0, started - this.lastScreenStepAt);
+                this.state.draft.steps.push(step);
+                this.lastScreenStepAt = Date.now();
+            }
+        } finally {
+            try { await agent.call("release",{session}); }
+            catch {
+                try {
+                    await agent.call("detach",{session});
+                    sessions.delete(device);
+                } catch (error) {
+                    this.state.error = this.errorMessage(error);
+                }
+            }
+        }
+        await this.refreshInspector(isCurrent);
+    }
+
+    async recordControlGesture(input, isCurrent, anchor, coordinateFallback) {
         if (!isCurrent()) throw new Error(this.text.liveChanged);
         const command = controlCommands.get(input.kind);
-        if (!command) throw new Error(this.text.recordingGestureOnly);
-        if (command === "back") return this.act({command});
+        if (command === "back") {
+            await this.act({command});
+            return true;
+        }
         const direction = command === "scroll" ? scrollDirection(input) : undefined;
-        if (command === "scroll" && !direction) throw new Error(this.text.recordingScrollControl);
+        if (!command || command === "scroll" && !direction) {
+            if (coordinateFallback) return false;
+            throw new Error(command ? this.text.recordingScrollControl : this.text.recordingGestureOnly);
+        }
         await this.observe(isCurrent);
         if (!isCurrent()) throw new Error(this.text.liveChanged);
         const {node,locator,issue} = controlTarget(this.state.page,command,anchor || input);
-        if (issue) throw new Error(this.text[issue]);
+        if (issue) {
+            if (coordinateFallback) return false;
+            throw new Error(this.text[issue]);
+        }
         await this.act({command,ref:node.ref,direction,text:input.text,frameId:this.state.page.frameId},locator);
+        return true;
     }
 
     cancelDeviceLookup() {
@@ -767,6 +819,7 @@ class Workbench {
         if (!current()) return;
         if (!this.state.draft && !this.networks.activeCapture && !this.state.devices.includes(this.state.device)) {
             this.state.device = devices.length === 1 ? devices[0].id : undefined;
+            this.state.deviceDisconnected = false;
             this.state.page = this.state.liveImage = undefined;
             this.state.actions = [];
             if (this.state.tool === "inspect" && !this.state.busy) await this.perform(() => this.refreshInspector(current));
@@ -781,9 +834,29 @@ class Workbench {
         if (this.state.draft) throw new Error(this.text.activeRecording);
         await this.detach();
         this.state.device = device;
+        this.state.deviceDisconnected = false;
         this.caseAuthoring.invalidateLiveTargets();
         this.state.actions = [];
         await this.refreshInspector();
+    }
+
+    async disconnectDevice(device, live) {
+        if (this.livePanel !== live || this.state.device !== device || this.state.deviceDisconnected || this.state.recording) return;
+        await live.withDeviceOperation(async () => {
+            await live.detachDeviceSession(device);
+            await this.detach();
+            this.state.deviceDisconnected = true;
+            this.caseAuthoring.invalidateLiveTargets();
+            this.publish();
+        });
+        await live.closing;
+    }
+
+    async reconnectDevice(device, live) {
+        if (this.livePanel !== live || this.state.device !== device || !this.state.deviceDisconnected) return;
+        if (this.state.tool === "inspect") await this.observe();
+        this.state.deviceDisconnected = false;
+        live.error = undefined;
     }
 
     async detach() {
@@ -798,15 +871,26 @@ class Workbench {
         this.state.page = undefined;
         this.state.liveImage = undefined;
         if (this.state.tool === "inspect") this.publish();
+        const page = await this.readPage(fullControls);
+        if (!isCurrent || isCurrent()) {
+            this.state.page = page;
+            if (this.state.deviceDisconnected) {
+                this.state.deviceDisconnected = false;
+                if (this.livePanel) this.livePanel.error = undefined;
+            }
+        }
+    }
+
+    async readPage(fullControls) {
         const result = await this.agent.call("start", {
             device: this.state.device, session: this.session, ...(fullControls ? controlTreeOptions : observationOptions),
         });
-        if (isCurrent && !isCurrent()) return;
-        this.state.page = pageView(result.observation,{elements:fullControls});
+        return pageView(result.observation,{elements:fullControls});
     }
 
     async refreshInspector(isCurrent) {
-        if (!this.state.device || this.state.tool !== "inspect" || (isCurrent && !isCurrent())) return;
+        if (!this.state.device || this.state.deviceDisconnected ||
+            (this.state.tool !== "inspect" && !this.recordingControls) || (isCurrent && !isCurrent())) return;
         try {
             await this.observe(isCurrent);
         } catch (error) {
@@ -886,6 +970,7 @@ class Workbench {
             if (node) input.target = selector;
             const evidence=stepEvidence({from:pageCue(page),to:pageCue(this.state.page)});
             this.state.draft.steps.push({command,input,label,...(evidence && {evidence})});
+            if (this.state.draft.automatic) this.lastScreenStepAt = Date.now();
         }
     }
 
@@ -896,41 +981,53 @@ class Workbench {
         }
         if (this.state.caseReview) throw new Error(this.text.activeRecording);
         if (!this.state.devices.includes(this.state.device)) throw new Error(this.text.selectDevice);
-        if (!["preview", "phone"].includes(location) || !["controls", "coordinates"].includes(stepFormat)) return;
-        if (location === "phone" && stepFormat === "controls") throw new Error(this.text.recordPhoneCoordinateOnly);
+        const automatic = location === undefined && stepFormat === undefined;
+        if (!automatic && (!["preview", "phone"].includes(location) || !["controls", "coordinates"].includes(stepFormat))) return;
 
+        const onPhone = automatic || location === "phone";
+        const controls = automatic || stepFormat === "controls";
         this.state.tool = "recordings";
-        if (stepFormat === "controls") await this.observe(undefined, true);
-        if (this.livePanel) {
-            this.livePanel.paused = false;
-            this.livePanel.error = undefined;
-        }
+        if (controls && !onPhone) await this.observe(undefined, true);
+        const initialPage = controls && onPhone ? await this.readPage(true).catch(() => undefined) : this.state.page;
+        this.state.deviceDisconnected = false;
+        if (this.livePanel) this.livePanel.error = undefined;
         this.lastScreenStepAt = undefined;
         const draft = {
-            location, stepFormat,
-            start: stepFormat === "controls" ? boundaryControls(this.state.page) : [],
+            location: automatic ? "auto" : location,
+            stepFormat: controls ? "controls" : "coordinates",
+            ...(automatic && {automatic:true}),
+            start: controls ? boundaryControls(initialPage) : [],
             steps: [],
         };
         delete this.state.aiResults.check;
         this.state.draft = draft;
         this.state.recording = true;
-        if (location !== "phone") return;
+        if (!onPhone) return;
 
         this.state.page = undefined;
         this.state.liveImage = undefined;
-        const capture = this.capture = {};
+        const capture = this.capture = {page:initialPage};
         capture.ready = startRecorder({
-            device: this.state.device, hdcPath: projectHdc(this), stateDir: this.stateDir,
-            onStep: step => {
-                draft.steps.push(step);
+            device: this.state.device, hdcPath: projectHdc(this), withControls: controls,
+            onStep: (step, control) => {
+                if (this.capture !== capture) return;
+                if (draft.location === "auto" && !capture.previewStarting) draft.location = "phone";
+                draft.steps.push(controls ? phoneControlStep(capture.page, step, control) : step);
+                capture.page = undefined;
+                if (controls) this.refreshPhoneRecordingPage(capture, draft);
                 this.publish();
             },
             onError: error => {
                 if (this.capture !== capture) return;
                 this.capture = undefined;
-                this.state.recording = false;
-                this.state.mode = "workflow";
-                this.state.error = this.errorMessage(error);
+                if (automatic) {
+                    draft.location = "preview";
+                    draft.phoneUnavailable = true;
+                } else {
+                    this.state.recording = false;
+                    this.state.mode = "workflow";
+                    this.state.error = this.errorMessage(error);
+                }
                 this.publish();
             },
         });
@@ -938,6 +1035,11 @@ class Workbench {
             capture.handle = await capture.ready;
         } catch (error) {
             if (this.capture === capture) this.capture = undefined;
+            if (automatic) {
+                draft.location = "preview";
+                draft.phoneUnavailable = true;
+                return;
+            }
             this.state.recording = false;
             if (!draft.steps.length) this.state.draft = undefined;
             this.state.mode = draft.steps.length ? "workflow" : "recordings";
@@ -945,19 +1047,62 @@ class Workbench {
         }
     }
 
+    async startPreviewRecording(draft) {
+        const capture = this.capture;
+        if (capture) {
+            // Stop and drain the phone monitor before injecting any preview gesture.
+            capture.previewStarting = true;
+            try {
+                await this.closePhoneRecording(capture);
+            } catch (error) {
+                draft.end = [];
+                this.state.recording = false;
+                this.state.mode = "workflow";
+                throw error;
+            } finally {
+                if (this.capture === capture) this.capture = undefined;
+            }
+        }
+        draft.location = "preview";
+    }
+
+    closePhoneRecording(capture) {
+        return capture.closing ??= Promise.resolve(capture.handle || capture.ready).then(async handle => {
+            try { await handle.stop(); }
+            finally { await capture.refresh; }
+        });
+    }
+
+    refreshPhoneRecordingPage(capture, draft) {
+        if (capture.refresh || capture.closing) return;
+        const stepCount = draft.steps.length;
+        // Skip promotion when another touch arrived during the tree read.
+        capture.refresh = this.readPage(true).catch(() => undefined).then(page => {
+            if (this.capture === capture && draft.steps.length === stepCount) capture.page = page;
+        }).finally(() => {
+            capture.refresh = undefined;
+            if (this.capture === capture && draft.steps.length !== stepCount) {
+                this.refreshPhoneRecordingPage(capture, draft);
+            }
+        });
+    }
+
     async stopRecording() {
         const draft = this.state.draft;
         if (!this.state.recording || !draft) return;
         const capture = this.capture;
+        let endPage = capture ? undefined : this.state.page;
         try {
             if (capture) {
-                capture.closing ??= capture.handle ? capture.handle.stop() : capture.ready.then(handle => handle.stop());
-                await capture.closing;
+                await this.closePhoneRecording(capture);
+                if (draft.stepFormat === "controls" && draft.steps.length) {
+                    endPage = await this.readPage(true).catch(() => undefined);
+                }
             }
         } finally {
             this.capture = undefined;
             this.state.recording = false;
-            draft.end = draft.stepFormat === "controls" ? boundaryControls(this.state.page) : [];
+            draft.end = draft.stepFormat === "controls" ? boundaryControls(endPage) : [];
             this.state.mode = "workflow";
         }
     }
@@ -975,19 +1120,29 @@ class Workbench {
         const start = draft.start.find(node => node.ref === startRef);
         const goal = draft?.end?.find(node => node.ref === goalRef);
         if ((startRef && !start) || (goalRef && !goal)) throw new Error(this.text.chooseConditions);
-        return draft.stepFormat === "controls" ? recordedPlan(draft.steps, start, goal, property, expected)
-            : { format: deviceRecordingFormat, version: 1, steps: draft.steps };
+        if (draft.stepFormat === "controls" && (start || goal || draft.steps.some(step => step.command !== "deviceGesture"))) {
+            return recordedPlan(draft.steps, start, goal, property, expected);
+        }
+        return { format: deviceRecordingFormat, version: 1, steps: draft.steps };
     }
 
-    editRecordedSteps({type,index,from,to,revision}) {
+    editRecordedSteps({type,index,indices,from,to,revision}) {
         const {draft,recording,caseReview,tool} = this.state;
         if (!draft || recording || caseReview || tool!=="recordings") return;
         const current = draft.stepRevision || 0;
+        if (current!==revision && (type!=="removeStep" || revision!==undefined)) return;
         if (type==="moveRecordedStep") {
-            if (current!==revision || !moveListItem(draft.steps,from,to)) return;
+            if (!moveListItem(draft.steps,from,to)) return;
+            draft.removedSteps = undefined;
+        } else if (type==="undoRecordedRemoval") {
+            if (!draft.removedSteps?.length) return;
+            for (const {index,step} of draft.removedSteps) draft.steps.splice(index,0,step);
+            draft.removedSteps = undefined;
         } else {
-            if ((revision!==undefined && current!==revision) || !Number.isInteger(index) || index<0 || index>=draft.steps.length) return;
-            draft.steps.splice(index,1);
+            const positions=type==="removeStep" ? [index] : Array.isArray(indices) ? [...new Set(indices)] : [];
+            if (!positions.length || positions.some(position=>!Number.isInteger(position) || position<0 || position>=draft.steps.length)) return;
+            draft.removedSteps=positions.sort((a,b)=>a-b).map(index=>({index,step:draft.steps[index]}));
+            for (const index of positions.toReversed()) draft.steps.splice(index,1);
         }
         draft.stepRevision = current+1;
         delete this.state.aiResults.check;
@@ -1049,6 +1204,20 @@ class Workbench {
         await this.setPlan(vscode.Uri.parse(item.uri));
     }
 
+    async hideSelectedCases(uris) {
+        const state=this.state;
+        if (state.tool!=="recordings" || state.draft || state.caseReview || !Array.isArray(uris)) return;
+        const selected=new Set(uris);
+        const cases=state.cases.filter(item=>selected.has(item.uri));
+        if (!cases.length || cases.length!==selected.size) return;
+        await this.caseLibrary.setHidden(cases.map(item=>item.uri),true);
+        const count=cases.length;
+        const name=count===1 ? cases[0].name : /^zh/i.test(this.language) ? count+" 条用例" : count+" cases";
+        state.removedCase={uri:randomUUID(),uris:cases.map(item=>item.uri),name};
+        await this.refreshCases();
+        if (selected.has(state.plan?.uri)) await this.setPlan(state.cases[0] ? vscode.Uri.parse(state.cases[0].uri) : undefined);
+    }
+
     async removeCase(id) {
         const state = this.state;
         const item = state.cases.find(row=>row.uri===id);
@@ -1095,8 +1264,9 @@ class Workbench {
                     "The original pytest test file is missing. Reopen the case from the library.");
         } else if (message.id && this.state.plan?.uri !== message.id) await this.openCase(message.id);
         if (message.runner === "pytest" && !this.state.pytestCase) throw new Error(this.text.chooseSavedPlan);
-        if (message.runner !== "workbench" && this.state.pytestCase) return this.usePytest(true);
-        return this.executePlan(false);
+        const options = {skipRuleGroup:message.skipRuleGroup===true};
+        if (message.runner !== "workbench" && this.state.pytestCase) return this.usePytest(true,options);
+        return this.executePlan(false,undefined,options);
     }
 
     async createPytest(message) {
@@ -1109,10 +1279,13 @@ class Workbench {
             if (!selected) throw new Error(this.text.chooseSavedPlan);
             const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(selected.uri));
             const file = readWorkflow(document.getText());
+            requireExecutableWorkflow(file,this.language);
             plan = file.plan;
             group = file.scenario || this.networks.bindings[selected.uri];
         }
         const issue = readiness(plan);
+        if (issue === "ruleSteps") throw new Error(zh ? "用例内的规则组步骤请在工作台运行。" :
+            "Run cases with rule group steps in the workbench.");
         if (issue === "gestures") throw new Error(zh ? "坐标手势可在工作台回放。请按控件名称或 ID 重新录制，再生成 pytest 用例。" :
             "Replay gestures in the workbench. Record by control name or ID to create a pytest test.");
         if (issue) throw new Error(zh ? "请补齐控件步骤、起始条件和最终断言。录制草稿可选控件，已保存流程可编辑 JSON。" :
@@ -1151,24 +1324,43 @@ class Workbench {
         }
         const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(this.state.plan.uri));
         const file = readWorkflow(document.getText());
-        if (!file.scenario && this.networks.bindings[this.state.plan.uri]) throw new Error(/^zh/i.test(this.language) ?
+        if (options.skipRuleGroup && !options.workflowOverride && (file.scenario || entry.requiresRuleGroup)) {
+            const folder = await fs.mkdtemp(path.join(tmpdir(),"harmony-case-no-rules-"));
+            const workflowOverride = path.join(folder,"workflow.json");
+            try {
+                await fs.writeFile(workflowOverride,JSON.stringify(file.plan),{mode:0o600});
+                return await this.usePytest(true,{...options,workflowOverride});
+            } finally {
+                await fs.rm(workflowOverride,{force:true});
+                await fs.rmdir(folder);
+            }
+        }
+        const execution = options.workflowOverride ? readWorkflow(await fs.readFile(options.workflowOverride,"utf8")) : file;
+        requireExecutableWorkflow(execution,this.language);
+        if (hasRuleSteps(execution.plan)) throw new Error(/^zh/i.test(this.language) ?
+            "用例内的规则组步骤请在工作台运行。" : "Run cases with rule group steps in the workbench.");
+        await this.requireGestureRuntime(options.repairPlan || execution.plan);
+        if (!options.skipRuleGroup && !file.scenario && this.networks.bindings[this.state.plan.uri]) throw new Error(/^zh/i.test(this.language) ?
             "项目用例还没有包含工作区绑定的规则组。请生成包含当前绑定的新用例。" : "Create a new case to include the rule group bound in this workspace.");
-        if (entry.requiresRuleGroup && !file.scenario) throw new Error(/^zh/i.test(this.language) ?
+        if (!options.skipRuleGroup && entry.requiresRuleGroup && !file.scenario) throw new Error(/^zh/i.test(this.language) ?
             "请在 workflow.json 中恢复此用例需要的规则组快照。" : "Restore this case's required rule group snapshot in workflow.json.");
         const digest = sourceDigest(document.getText());
         const metadata = await readCaseMetadata(document.uri);
         const composedBdd = options.bdd || (!options.workflowOverride && this.composedReportBdd(file,metadata));
         let active, result;
+        const ruleScope = await this.networks.beginCaseRules();
         try {
-            result = await startPytest(vscode, this, {...entry, requiresRuleGroup: entry.requiresRuleGroup || Boolean(file.scenario)}, {
+            result = await startPytest(vscode,this,{...entry,requiresRuleGroup:Boolean(execution.scenario)}, {
                 ...options,
                 onRunning:(run,locate,candidate)=>{
                     active = run;
-                    Object.assign(run,{sourceDigest:digest,caseId:this.state.activeCase?.id});
+                    Object.assign(run,{sourceDigest:digest,caseId:this.state.activeCase?.id,
+                        ...(options.skipRuleGroup && {ruleGroupDisabled:true})});
                     if (composedBdd) run.composedBdd = composedBdd;
                     if (options.compositionTrial) run.compositionTrial = true;
                     if (options.repairOf) run.repairOf = options.repairOf;
-                    return this.showRunning(run,candidate || file.plan,file.scenario,locate,metadata?.presentation);
+                    if (options.repairTarget) run.repairTarget = options.repairTarget;
+                    return this.showRunning(run,candidate || file.plan,execution.scenario,locate,metadata?.presentation);
                 },
             });
         } catch (error) {
@@ -1177,14 +1369,18 @@ class Workbench {
                 this.state.run.error = this.errorMessage(error);
             }
             throw error;
+        } finally {
+            await ruleScope?.close();
         }
         if (result) {
             if (!options.repairOf && !options.compositionTrial) this.state.pytestOutcome = {uri: this.state.plan.uri, code: result.code, at: new Date().toISOString()};
             if (result.entry) {
-                Object.assign(result.entry, {sourceDigest: digest, caseId: this.state.activeCase?.id});
+                Object.assign(result.entry, {sourceDigest:digest,caseId:this.state.activeCase?.id,
+                    ...(options.skipRuleGroup && {ruleGroupDisabled:true})});
                 if (composedBdd) result.entry.composedBdd = composedBdd;
                 if (options.compositionTrial) result.entry.compositionTrial = true;
                 if (options.repairOf) result.entry.repairOf = options.repairOf;
+                if (options.repairTarget) result.entry.repairTarget = options.repairTarget;
                 this.state.runs = [result.entry, ...this.state.runs.filter(row => row.id !== result.entry.id)].slice(0,50);
                 await this.persistRuns();
                 await this.openReport(result.entry.id,{reveal:false});
@@ -1207,6 +1403,7 @@ class Workbench {
         const name = uri && (this.state.activeCase?.name || path.basename(uri.path));
         this.state.plan = uri && { name, uri: uri.toString() };
         this.state.planSummary = undefined;
+        this.state.caseExplorationCheckpoints = undefined;
         this.state.planDigest = undefined;
         this.state.caseBdd = undefined;
         this.state.caseDefinitions = undefined;
@@ -1227,7 +1424,7 @@ class Workbench {
         if (!plan) return;
         const request = this.planRead = Symbol();
         const activeCase = this.state.cases.find(row => row.uri === plan.uri);
-        let summary, digest, bdd, definitions, pytestReadiness, compositionStale, entry = this.context.workspaceState.get("pytestCases", {})[plan.uri];
+        let summary, digest, bdd, definitions, explorationCheckpoints, pytestReadiness, compositionStale, entry = this.context.workspaceState.get("pytestCases", {})[plan.uri];
         try {
             const uri = vscode.Uri.parse(plan.uri);
             if (this.panel && this.watchedUri !== plan.uri) this.watchPlan(uri);
@@ -1240,16 +1437,22 @@ class Workbench {
                 pytestReadiness = {issue: readiness(file.plan), ruleGroup: Boolean(file.scenario) || workspaceBinding, workspaceBinding};
                 summary = summarizePlan(file.plan);
                 if (summary) {
+                    const pending = pendingCaseWork(file.plan);
+                    if (pending.length) summary.pending = pending;
                     digest = sourceDigest(contents);
                     const meta = activeCase && await readCaseMetadata(uri);
                     const authored = authoredDocument(file,meta);
-                    const sources = authored.authored ? await this.composition.refreshFor(authored.plan) : this.composition.sources;
+                    const sources = authored.authored || file.draft ? await this.composition.refreshFor(authored.plan) : this.composition.sources;
                     compositionStale = authored.stale;
                     bdd = createBdd(authored.plan,this.language,file.scenario || this.networks.bindings[plan.uri],
                         authored.presentation,{...authored,sources});
                     if (activeCase && await canEditCase(uri,activeCase)) definitions = caseDefinitions(authored.plan,authored.presentation);
+                    explorationCheckpoints=caseExplorationCheckpoints(file,authored,this.language,
+                        {bdd,editable:Boolean(definitions),trustedCase:Boolean(activeCase)});
                 }
-                if(summary && file.scenario) summary.scenarioName=String(file.scenario.name || this.text.netUntitledGroup);
+                const group = file.scenario || this.networks.bindings[plan.uri];
+                if (summary && group) summary.scenarioName=String(group.name || this.text.netUntitledGroup);
+                if (summary && hasRuleSteps(file.plan)) summary.ruleSteps=true;
             } catch {
                 // JSON parser diagnostics can contain fragments of private step inputs.
             }
@@ -1259,6 +1462,7 @@ class Workbench {
         }
         if (this.planRead === request && this.state.plan === plan) {
             this.state.planSummary = summary;
+            this.state.caseExplorationCheckpoints = explorationCheckpoints;
             this.state.planDigest = digest;
             this.state.caseBdd = bdd;
             this.state.caseDefinitions = definitions;
@@ -1315,16 +1519,18 @@ class Workbench {
 
     async persistRuns() {
         await this.context.workspaceState.update("runs", this.state.runs);
+        this.testRunOverview?.scheduleRefresh();
     }
 
     composedReportBdd(file,metadata) {
         const authored = authoredDocument(file,metadata);
-        if (!authored.authored) return;
+        if (!authored.authored && !hasRuleSteps(file.plan)) return;
         return createBdd(authored.plan,this.language,file.scenario,authored.presentation,{...authored,sources:this.composition.sources});
     }
 
     async verifyCompositionCopy(contents,bdd,runner) {
-        if (runner!=="pytest") return this.executePlan(false,{contents,bdd,compositionTrial:true});
+        if (runner!=="pytest" || hasRuleSteps(readWorkflow(contents).plan))
+            return this.executePlan(false,{contents,bdd,compositionTrial:true});
         const root = path.join(this.storage.fsPath,"case-verification");
         await fs.mkdir(root,{recursive:true});
         const dir = await fs.mkdtemp(path.join(root,"draft-"));
@@ -1353,94 +1559,117 @@ class Workbench {
         });
     }
 
-    async executePlan(fromRun, trial) {
+    async executePlan(fromRun, trial, {skipRuleGroup = false} = {}) {
         if (this.state.draft) throw new Error(this.text.activeRecording);
-        if (!this.state.device) throw new Error(this.text.selectDevice);
         const selected = this.planForRun(fromRun);
         if (!selected) throw new Error(this.text.chooseSavedPlan);
         const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(selected.uri));
         const contents = document.getText();
         const file = readWorkflow(trial?.contents || contents);
+        requireExecutableWorkflow(file,this.language);
+        if (!this.state.device) throw new Error(this.text.selectDevice);
         const {plan,scenario} = file;
+        await this.requireGestureRuntime(plan);
         const metadata = await readCaseMetadata(document.uri);
-        const entry = { id: randomUUID(), plan: selected, status: "running", time: new Date().toISOString(),
+        const entry = { id: randomUUID(), plan: selected, device:this.state.device, status: "running", time: new Date().toISOString(),
             sourceDigest: sourceDigest(contents), caseId: this.state.cases.find(row => row.uri === selected.uri)?.id };
+        if (skipRuleGroup) entry.ruleGroupDisabled = true;
         if (trial) entry.repairOf = trial.repairOf;
+        if (trial?.repairTarget) entry.repairTarget = trial.repairTarget;
         if (trial?.compositionTrial) entry.compositionTrial = true;
-        const composedBdd = trial?.bdd || (!trial && this.composedReportBdd(file,metadata));
+        const group = skipRuleGroup ? undefined : scenario || this.networks.bindings[selected.uri];
+        const composedBdd = trial?.bdd || (!trial && this.composedReportBdd({...file,scenario:group},metadata));
         if (composedBdd) entry.composedBdd = composedBdd;
-        await this.prepareFlowScenario(selected,scenario,entry.id);
-        if (plan.format === deviceRecordingFormat) entry.source = "device";
-        const expired = this.state.runs.slice(49);
-        this.state.runs = [entry, ...this.state.runs].slice(0, 50);
-        await this.persistRuns();
-        for (const old of expired) {
-            if (old.source === "device") await this.context.workspaceState.update("gestures." + old.id, undefined);
-        }
-        this.state.page = undefined;
-        this.state.liveImage = undefined;
-        const locate = entry.source === "device" ? undefined :
-            ()=>({id:entry.id,file:journalPath(this.stateDir,entry.id)});
-        const group = scenario || this.networks.bindings[selected.uri];
-        const stopProgress = this.showRunning(entry,plan,group,locate,metadata?.presentation);
-        if (entry.source === "device") {
-            await this.replayDevicePlan(entry, plan);
-            return;
-        }
-        const agent = this.agent, session = this.session, device = this.state.device;
-        let result, failure;
+        const scheduled = hasRuleSteps(plan);
+        const ruleScope = await this.networks.beginCaseRules(group,entry.id,
+            {prepare:!skipRuleGroup && hasRuleSteps(plan,"enable"),upstream:trial?.upstream});
+        const activeRules = skipRuleGroup ? undefined : ruleScope;
         try {
-            const request = {session,run_id:entry.id,plan,output:"full",...observationOptions};
-            if (plan.preconditions?.length && plan.goals?.length) {
-                result = await agent.call("execute",{...request,device});
-            } else {
-                // execute requires both boundary checks. A session run journals the same steps and frames.
-                await agent.call("start",{device,session,max_nodes:1,compact:true});
-                result = await agent.call("run",request);
+            if (plan.format === deviceRecordingFormat) entry.source = "device";
+            const expired = this.state.runs.slice(49);
+            this.state.runs = [entry, ...this.state.runs].slice(0, 50);
+            await this.persistRuns();
+            for (const old of expired) {
+                if (old.source === "device") await this.context.workspaceState.update("gestures." + old.id, undefined);
             }
-        } catch (error) {
-            failure = error;
-        } finally {
-            stopProgress?.();
-            entry.cleanup = "detached";
-            if (result?.sessionCleanup?.status!=="detached") {
-                try {
-                    // Reports read frozen files. The live session can be released even when a step failed.
-                    await agent.call("detach",{session});
-                } catch (error) {
-                    entry.cleanup = "failed";
-                    this.state.error = this.errorMessage(error);
+            this.state.page = undefined;
+            this.state.liveImage = undefined;
+            const locate = entry.source === "device" ? undefined :
+                ()=>({id:entry.id,file:journalPath(this.stateDir,entry.id)});
+            const stopProgress = this.showRunning(entry,plan,group,locate,metadata?.presentation);
+            if (entry.source === "device") {
+                await saveRulePlanForRun(this.stateDir,entry.id,plan);
+                await this.replayDevicePlan(entry,plan,activeRules);
+                return entry;
+            }
+            const agent = this.agent, session = this.session, device = this.state.device;
+            let result, failure;
+            const controller = scheduled && activeRules ? new AbortController() : undefined;
+            if (controller) {
+                this.nativeReplay = controller;
+                this.state.run.canStop = true;
+                this.publish();
+            }
+            try {
+                const request = {session,run_id:entry.id,plan,output:"full",...observationOptions};
+                const options = {scope:activeRules,signal:controller?.signal};
+                if (plan.preconditions?.length && plan.goals?.length) {
+                    result = await runCasePlan(this,"execute",{...request,device},options);
+                } else {
+                    // execute requires both boundary checks. A session run journals the same steps and frames.
+                    await agent.call("start",{device,session,max_nodes:1,compact:true});
+                    result = await runCasePlan(this,"run",request,options);
+                }
+            } catch (error) {
+                failure = error;
+            } finally {
+                this.nativeReplay = undefined;
+                this.state.run.canStop = false;
+                stopProgress?.();
+                entry.cleanup = "detached";
+                if (result?.sessionCleanup?.status!=="detached") {
+                    try {
+                        // Reports read frozen files. The live session can be released even when a step failed.
+                        await agent.call("detach",{session});
+                    } catch (error) {
+                        entry.cleanup = "failed";
+                        this.state.error = this.errorMessage(error);
+                    }
                 }
             }
+            if (failure) {
+                entry.status = ["INVALID_PLAN","INVALID_ARGUMENT","INVALID_REQUEST"].includes(failure.code) ? "rejected" : "unknown";
+                entry.failureCode = this.state.run.errorCode = failure.code;
+                this.state.run.cleanup = entry.cleanup;
+                entry.failureMessage = this.state.run.error = this.errorMessage(failure);
+                await this.persistRuns();
+                throw failure;
+            }
+            await saveRulePlanForRun(this.stateDir,entry.id,plan);
+            await this.setRun(entry,result,{plan,group});
+            return entry;
+        } finally {
+            await ruleScope?.close();
         }
-        if (failure) {
-            entry.status = ["INVALID_PLAN","INVALID_ARGUMENT","INVALID_REQUEST"].includes(failure.code) ? "rejected" : "unknown";
-            entry.failureCode = this.state.run.errorCode = failure.code;
-            this.state.run.cleanup = entry.cleanup;
-            entry.failureMessage = this.state.run.error = this.errorMessage(failure);
-            await this.persistRuns();
-            throw failure;
-        }
-        await this.setRun(entry, result, plan, group);
-        return entry;
     }
 
-    async replayDevicePlan(entry, plan) {
+    async requireGestureRuntime(plan) {
+        if (plan?.format===deviceRecordingFormat || !hasGestures(plan)) return;
+        const schema = await this.agent.call("schema",{command_name:"run"});
+        const features = schema?.["x-harmony-plan-features"];
+        if (!Array.isArray(features) || !features.includes("deviceGesture")) throw new Error(/^zh/i.test(this.language) ?
+            "此用例包含坐标手势和控件步骤，请将当前项目的 Harmony Agent 运行时升级到 0.1.0a11 或更高版本。" :
+            "This case combines gestures and controls. Update this project's Harmony Agent runtime to 0.1.0a11 or later.");
+    }
+
+    async replayDevicePlan(entry,plan,ruleScope) {
         const run = this.state.run;
         run.goalStatus = "not_requested";
         const controller = this.nativeReplay = new AbortController();
         const target = { device: this.state.device, hdcPath: projectHdc(this) };
         const session = this.session;
         try {
-            if (plan.version !== 1 || !Array.isArray(plan.steps) || !plan.steps.length ||
-                plan.preconditions?.length || plan.goals?.length) throw new Error(this.text.invalidDevicePlan);
-            for (const step of plan.steps) {
-                if (step?.command !== "deviceGesture" || !step.input) throw new Error(this.text.invalidDevicePlan);
-                if (step.input.kind === "unsupported") throw new Error(this.text.unsupportedDeviceStep);
-                validateGesture(step.input);
-                if (step.delayMs !== undefined && (!Number.isSafeInteger(step.delayMs) ||
-                    step.delayMs < 0 || step.delayMs > 2_147_483_647)) throw new Error(this.text.invalidDevicePlan);
-            }
+            validateRecording(plan,{invalid:this.text.invalidDevicePlan,unsupported:this.text.unsupportedDeviceStep});
             try {
                 await this.agent.call("claim", { session });
             } catch (error) {
@@ -1462,7 +1691,7 @@ class Workbench {
         entry.gestureTimingVersion = 1;
         try {
             run.canStop = true;
-            await this.replayGestures(plan.steps, run, target, controller.signal, started);
+            await this.replayGestures(plan.steps,run,target,controller.signal,started,ruleScope);
             entry.status = run.steps.at(-1).status;
         } finally {
             this.nativeReplay = undefined;
@@ -1479,32 +1708,39 @@ class Workbench {
         }
     }
 
-    async replayGestures(steps, run, target, signal, started) {
+    async replayGestures(steps,run,target,signal,started,ruleScope) {
         for (const [index, step] of steps.entries()) {
+            const rule = step.ruleGroup;
+            const operation = rule?.action==="enable" ? "enableRuleGroup" : "disableRuleGroup";
+            const stepStart = Date.now();
             const receipt = {
-                path: `steps[${index}]`, kind: "command", command: step.input.kind, gesture: step.input,
-                label: step.label, status: "running",
+                path:`steps[${index}]`,kind:rule ? "ruleGroup" : "command",
+                command:rule ? operation : step.input.kind,gesture:step.input,
+                label:rule?.scenario?.name || rule?.name || step.label,status:"running",stepStartedAt:new Date(stepStart).toISOString(),
                 ...(step.delayMs !== undefined && {delayMs:step.delayMs}),
             };
             run.selected = index;
             run.steps.push(receipt);
             this.publish();
-            let attempted = false;
+            let dispatchedAt;
             try {
                 if (step.delayMs) await delay(step.delayMs, undefined, { signal });
                 signal.throwIfAborted();
-                const dispatchedAt = Date.now();
-                attempted = true;
-                await replayGesture(target, step.input);
-                receipt.elapsedMs = Date.now() - dispatchedAt;
-                receipt.at = new Date().toISOString();
+                dispatchedAt = Date.now();
+                if (rule) ruleScope?.apply(validateRuleStep(step));
+                else await replayGesture(target,step.input);
                 receipt.status = "completed";
                 receipt.dispatched = "acknowledged";
             } catch (error) {
-                receipt.status = signal.aborted && !attempted ? "cancelled" : "unknown";
+                receipt.status = signal.aborted && dispatchedAt===undefined ? "cancelled" : "unknown";
                 run.error = receipt.error = this.errorMessage(error);
             }
-            run.runtimeMs = Date.now() - started;
+            const finished = Date.now();
+            receipt.at = new Date(finished).toISOString();
+            receipt.stepElapsedMs = Math.max(0,finished-stepStart);
+            // Network evidence uses the dispatch window, excluding the recorded wait.
+            if (dispatchedAt!==undefined) receipt.elapsedMs = Math.max(0,finished-dispatchedAt);
+            run.runtimeMs = finished - started;
             await this.context.workspaceState.update("gestures." + run.entry.id, {
                 steps: run.steps, error: run.error, runtimeMs: run.runtimeMs, bdd:run.bdd,
             });
@@ -1513,9 +1749,10 @@ class Workbench {
     }
 
     async openReport(id, {reveal=true} = {}) {
-        const entry = this.state.runs.find(run => run.id === id);
+        let entry = this.state.runs.find(run => run.id === id);
         if (!entry) return;
         if (reveal) {
+            if (entry.repairOf) entry = this.state.runs.find(run=>run.id===entry.repairOf) || entry;
             this.state.tool = "recordings";
             const associated = this.planForEntry(entry);
             if (associated.uri !== this.state.plan?.uri) await this.setPlan(vscode.Uri.parse(associated.uri));
@@ -1527,41 +1764,47 @@ class Workbench {
             const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
             const report = await loadPytestRun(entry,this.language,metadata?.presentation);
             this.state.run = {...report, entry, bdd:entry.composedBdd || report.bdd};
-            if (report.steps?.length) await this.inspectStep(report.selected ?? 0);
+            await this.caseRepair.show(this.state.run);
             return;
         }
         if (entry.source === "device") {
             const report = this.context.workspaceState.get("gestures." + entry.id, { steps: [] });
             this.state.run = { ...report, entry, status: entry.status, cleanup: entry.cleanup, goalStatus: "not_requested",
                 selected: Math.max(report.steps.length - 1, 0) };
+            await this.caseRepair.show(this.state.run);
             return;
         }
         let record;
-        try { record = await this.agent.call("report", { run_id: id, full: true }); }
-        catch (error) {
+        try {
+            record = await readSummaryRecord(this.stateDir,entry,async ()=>{
+                await this.projectRuntime.ready(false,true);
+                return this.reportAgent(entry).call("report",{run_id:entry.id,full:true});
+            });
+        } catch (error) {
             if (!entry.failureMessage) throw error;
             this.state.run = {entry,steps:[],status:entry.status,error:entry.failureMessage,errorCode:entry.failureCode};
+            await this.caseRepair.show(this.state.run);
             return;
         }
-        await this.setRun(entry, record);
+        await this.setRun(entry,record,{fromHistory:true});
     }
 
-    async setRun(entry, record, plan, group) {
-        if (!plan && /^[a-zA-Z0-9_-]+$/.test(entry.id)) {
-            try { plan = JSON.parse(await fs.readFile(path.join(this.stateDir,"runs",entry.id,"plan.json"),"utf8")); }
-            catch (error) {
-                if (error.code !== "ENOENT" && error.code !== "ENOTDIR" && !(error instanceof SyntaxError)) throw error;
-            }
+    async setRun(entry, record, {plan,group,fromHistory=false} = {}) {
+        plan ??= await archivedRunPlan(this.stateDir,entry.id);
+        const view = withAuthoredTargets(runView(await withRunReceipts(this.stateDir,entry.id,record)), plan);
+        let bdd = entry.composedBdd;
+        if (!bdd) {
+            if (!group && plan) group = await this.networks.scenarioForRun(entry.id);
+            const uri = this.planForEntry(entry)?.uri;
+            const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
+            bdd = createBdd(plan,this.language,group,restorePresentation(plan,metadata?.presentation));
         }
-        const view = withAuthoredTargets(runView(record), plan);
-        if (!group && plan) group = await this.networks.scenarioForRun(entry.id);
-        const uri = this.planForEntry(entry)?.uri;
-        const metadata = uri && await readCaseMetadata(vscode.Uri.parse(uri));
-        const presentation = restorePresentation(plan,metadata?.presentation);
+        const previousStatus = entry.status, previousDevice = entry.device;
         entry.status = view.status;
-        this.state.run = { entry, ...view, bdd:entry.composedBdd || createBdd(plan,this.language,group,presentation), cleanup: entry.cleanup || view.cleanup };
-        await this.persistRuns();
-        await this.inspectStep(view.selected);
+        entry.device ??= record.device || (record.result || record).observation?.device;
+        this.state.run = {entry,...view,bdd,cleanup:entry.cleanup || view.cleanup};
+        await this.caseRepair.show(this.state.run);
+        if (!fromHistory || previousStatus!==entry.status || previousDevice!==entry.device) await this.persistRuns();
     }
 
     async inspectStep(index, phase) {
@@ -1571,15 +1814,16 @@ class Workbench {
         run.selected = index;
         run.phase = phase || (step.after ? "after" : "before");
         run.frame = undefined;
+        run.image = undefined;
         delete run.frameError;
         run.image = await this.reportImage(run,step,index);
         const frameId = step[run.phase];
         if (frameId) {
             try {
+                await this.projectRuntime.ready(false,true);
                 const frozen = await this.reportAgent(run.entry).call("inspect", { run_id: run.entry.id, frame_id: frameId, max_nodes: 180 });
                 run.frame = pageView(frozen);
             } catch (error) {
-                if (run.entry.source !== "pytest") throw error;
                 run.frameError = this.errorMessage(error);
             }
         }
@@ -1591,10 +1835,9 @@ class Workbench {
         return agent;
     }
 
-    baseline() {
-        const current = this.state.run?.entry;
+    baseline(current = this.state.run?.entry) {
         return current && current.source !== "device" && this.state.runs.find(entry =>
-            entry.status === "passed" && !entry.compositionTrial && (!entry.repairOf || entry.repairApplied) &&
+            entry.status === "passed" && !entry.compositionTrial && !entry.repairTarget && (!entry.repairOf || entry.repairApplied) &&
             this.planForEntry(entry)?.uri === this.planForEntry(current)?.uri && entry.time < current.time);
     }
 

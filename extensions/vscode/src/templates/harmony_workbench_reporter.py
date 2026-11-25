@@ -84,6 +84,8 @@ def pytest_collection_modifyitems(session, config, items):
         raise pytest.UsageError(reason)
     if candidate:
         module.WORKFLOW = Path(candidate).resolve(strict=True)
+        if os.environ.get("HARMONY_PYTEST_SKIP_RULE_GROUP") == "1":
+            module.REQUIRES_RULE_GROUP = False
     if python:
         # Existing generated tests pass a single executable followed by the CLI flags.
         cli = os.environ["HARMONY_AGENT_CLI"]
@@ -93,6 +95,35 @@ def pytest_collection_modifyitems(session, config, items):
             return call_cli([python, cli, *options[1:]], command, *args)
 
         module.call_cli = call_project_cli
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    repair_plan = os.environ.get("HARMONY_PYTEST_REPAIR_PLAN")
+    if not repair_plan:
+        return
+    # The generated test's fixture still prepares the same device, route and
+    # artifacts. For a repair trial only, run the bounded plan in its place.
+    module = pyfuncitem.module
+    _, run_id, session, artifacts, options, device, input_file = pyfuncitem.funcargs["harmony_workflow_run"]
+    plan = json.loads(Path(repair_plan).read_text(encoding="utf-8"))
+    module.write_json(input_file, plan)
+    response = module.call_cli(options, "attach", "--device", device, "--session", session)
+    try:
+        if response["success"]:
+            response = module.call_cli(options, "run", "--session", session, "--run-id", run_id,
+                                       "--plan-file", str(input_file))
+        module.write_json(artifacts / "execution.json", response)
+    finally:
+        cleanup = module.call_cli(options, "detach", "--session", session)
+        module.write_json(artifacts / "cleanup.json", cleanup)
+    data = response.get("data") or {}
+    if not cleanup["success"]:
+        pytest.fail(f"Trial session cleanup failed: {cleanup.get('error')}", pytrace=False)
+    if not response["success"] or data.get("status") != "completed":
+        detail = response.get("error") or data.get("yieldReason") or ""
+        pytest.fail(f"Repair trial: {data.get('status', 'unavailable')}; {detail}", pytrace=False)
+    return True
 
 
 def pytest_sessionfinish(session, exitstatus):

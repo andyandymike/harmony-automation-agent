@@ -6,11 +6,12 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const {pathToFileURL,fileURLToPath} = require("node:url");
-const {explorationCandidate,caseRoutes} = require("../src/explorationCases");
+const {explorationCandidate,caseRoutes,forkSourceSnapshot} = require("../src/explorationCases");
 const {CaseAuthoring,caseDefinitions} = require("../src/caseAuthoring");
 const {sourceDigest} = require("../src/caseRepair");
 const {CaseLibrary,writeCaseMetadata} = require("../src/caseLibrary");
 const {restorePresentation} = require("../src/casePresentation");
+const {authoredDocument,compileCase} = require("../src/caseComposition");
 const {findCase} = require("../src/pytestCase");
 const {messagesFor} = require("../src/strings");
 const loadMedia = require("../test-support/loadWebview");
@@ -18,6 +19,47 @@ const loadMedia = require("../test-support/loadWebview");
 const press = id=>({command:"press",input:{target:{id}}});
 const condition = id=>({selector:{id},property:"visible",equals:true});
 const group = {version:1,name:"Stock",rules:[]};
+
+test("forked cases keep the authored prefix and only the acknowledged new action", async t=>{
+    const {author,b,directory,folders}=await host(t);
+    const source={version:"1",preconditions:[condition("Start")],steps:[
+        {description:{id:"group",text:"进入订单页",steps:[press("Cart"),press("Details")]}},press("Checkout")],goals:[condition("Paid")]};
+    const compiled=compileCase(source), frozen=structuredClone(source);
+    const snapshot=forkSourceSnapshot({...compiled,plan:source,execution:compiled.plan,
+        presentation:new Map([[source.steps[0],{name:"订单详情",role:"Given"}]])},1);
+    const act={id:"action",runId:"a",key:"branch/act",status:"completed",fromStateId:"cart",toStateId:"help",after:"f2",
+        replayStep:press("Help"),receipts:[{command:"press",path:"steps[0]",status:"completed",dispatched:"acknowledged"}]};
+    const variant={id:"branch",kind:"variant",checkpoint:1,runId:"a",status:"completed",choice:{label:"帮助"}};
+    const report={id:"r",mode:"flow",routeMode:"fork",status:"completed",source:"订单",plan:compiled.plan,forkSource:snapshot,
+        sourceCase:{id:"original-case",digest:"original-digest"},checkpointDetails:[{index:1,position:1}],findings:[],
+        branches:[{id:"prefix",kind:"prefix",checkpoint:1,runId:"p",status:"completed"},variant],steps:[
+            {key:"prefix",runId:"p",status:"completed",before:"f0",toStateId:"cart"},act,
+            {key:"branch/return",status:"completed"}]};
+    assert.deepEqual(caseRoutes(report).branchIds,["branch"]);
+    assert.deepEqual(caseRoutes(report).diffBranchIds,[]);
+    const candidate=explorationCandidate(report,{branchId:"branch"});
+    assert.deepEqual(candidate.plan.steps,[source.steps[0],press("Help")]);
+    assert.deepEqual(candidate.plan.preconditions,source.preconditions);
+    assert.equal(candidate.plan.goals,undefined);
+    assert.deepEqual(candidate.frames,{start:{runId:"p",frame:"f0"},goal:{runId:"a",frame:"f2"}});
+    author.begin(candidate);
+    assert.equal(author.candidate.presentation.get(author.candidate.plan.steps[0]).name,"订单详情");
+    folders.push([uri(directory)]);
+    await author.save({id:author.candidate.id,name:author.candidate.name});
+    const file=b.selected.fsPath;
+    const workflow=JSON.parse(await fs.readFile(file,"utf8"));
+    const metadata=JSON.parse(await fs.readFile(file+".harmony-case.json","utf8"));
+    assert.equal(metadata.origin.parentCaseId,"original-case");
+    assert.notEqual(metadata.id,metadata.origin.parentCaseId);
+    assert.deepEqual(authoredDocument({plan:workflow},metadata).plan.steps,candidate.plan.steps);
+    assert.deepEqual(source,frozen);
+    report.branches[0].checkpoint=-1;
+    assert.deepEqual(caseRoutes(report).branchIds,[]);
+    report.branches[0].checkpoint=1;
+    act.receipts[0].dispatched="unknown";
+    assert.deepEqual(caseRoutes(report).branchIds,[]);
+    assert.equal(explorationCandidate(report,{branchId:"branch"}),undefined);
+});
 function free() {
     const steps = ["Products","Details","Unknown"].map((id,index)=>({
         id,runId:"run-"+index,phase:"free",label:id,entryId:"entry-"+id,status:"completed",
@@ -30,6 +72,64 @@ function free() {
     return {id:"trace",mode:"free",status:"blocked",goal:"Browse products",steps,pages,bundle:"fixture.shop",
         mockScenario:group,branches:[],findings:[{kind:"review",id:"review",title:"Product page did not change",stepId:"Details"}]};
 }
+
+test("manual step details save and reopen across generated steps, boundary checks and AI-organized actions",async t=>{
+    const {directory,b,author,folders}=await host(t);
+    const plan={version:"1",preconditions:[condition("home")],goals:[condition("done")],steps:[
+        {description:{id:"generated",text:"Original instruction",steps:[press("Settings")]}},press("Details")]};
+    const executable=structuredClone(compileCase(plan).plan);
+    author.begin({name:"Settings",source:"workflow",plan});
+    const edit=(path,fields)=>author.edit({area:"stepDetails",path,id:author.candidate.id,revision:author.candidate.revision,...fields});
+    await edit("preconditions[0]",{name:"Ready",descriptionText:"Start here",role:"Then"});
+    await edit("steps[0]",{name:"Open settings",descriptionText:"核对后打开设置",role:"Given"});
+    await edit("steps[0].description.steps[0]",{descriptionText:"人工修改的 AI 步骤说明",role:"Then"});
+    await edit("steps[1]",{name:"Original AI title",descriptionText:"人工补充\n第二行",role:"Given"});
+    await edit("goals[0]",{name:"Done",descriptionText:"最终确认",role:"When"});
+    const current=author.candidate;
+    assert.deepEqual(compileCase(current.plan).plan,executable);
+    assert.equal(current.plan.steps[0].description.id,"generated");
+    assert.equal(b.state.caseReview.bdd.steps[2].displayDescription,"人工补充\n第二行");
+    folders.push([uri(directory)]);
+    await author.save({id:current.id,name:"Settings"});
+    const saved=JSON.parse(await fs.readFile(b.selected.fsPath,"utf8"));
+    const meta=JSON.parse(await fs.readFile(b.selected.fsPath+".harmony-case.json","utf8"));
+    assert.deepEqual(saved,executable);
+    const reopened=authoredDocument({plan:saved},meta);
+    const defs=caseDefinitions(reopened.plan,reopened.presentation);
+    assert.equal(defs.start[0].role,"Then");
+    assert.equal(defs.goal[0].descriptionText,"最终确认");
+    assert.equal(defs.steps["steps[0]"].descriptionText,"核对后打开设置");
+    assert.equal(defs.steps["steps[0].description.steps[0]"].descriptionText,"人工修改的 AI 步骤说明");
+    assert.equal(defs.steps["steps[1]"].descriptionText,"人工补充\n第二行");
+    const source=b.selected, raw=await fs.readFile(source.fsPath,"utf8");
+    author.begin({name:"Settings",source:"workflow",plan:reopened.plan,edit:{uri:source,original:raw},
+        presentationData:reopened.display,metadataPresentation:meta.presentation,compositionData:meta.composition});
+    await edit("steps[0]",{descriptionText:"编辑已生成描述，保留子步骤"});
+    assert.equal(author.candidate.added,undefined);
+    await author.save({id:author.candidate.id,name:"Settings"});
+    assert.equal(await fs.readFile(source.fsPath,"utf8"),raw);
+    const updated=authoredDocument({plan:saved},JSON.parse(await fs.readFile(source.fsPath+".harmony-case.json","utf8")));
+    assert.equal(updated.plan.steps[0].description.text,"编辑已生成描述，保留子步骤");
+    assert.deepEqual(updated.plan.steps[0].description.steps,plan.steps[0].description.steps);
+});
+
+test("a combined operation and description edit is atomic and keeps its controls and review evidence",async t=>{
+    const {b,author}=await host(t);
+    author.begin({name:"Settings",source:"workflow",plan:{version:"1",steps:[press("A")]}});
+    const c=author.candidate;
+    const edit=fields=>author.edit({id:c.id,revision:c.revision,area:"stepDetails",path:"steps[0]",...fields});
+    await assert.rejects(edit({descriptionText:"new",role:"Then",name:"bad",operationArea:"stepOperation",command:"press",target:"manual",controlId:""}));
+    assert.equal(c.revision,0);
+    assert.equal(c.presentation.size,0);
+    await edit({descriptionText:"edited",role:"Then",name:"Changed",operationArea:"stepOperation",command:"press",target:"manual",locatorField:"id",controlId:"B"});
+    assert.equal(c.revision,1);
+    assert.equal(c.plan.steps[0].input.target.id,"B");
+    assert.equal(b.state.caseReview.bdd.steps[0].role,"Then");
+    assert.equal(b.state.caseReview.bdd.steps[0].displayDescription,"edited");
+    await edit({descriptionText:""});
+    assert.equal(b.state.caseReview.bdd.steps[0].displayDescription,undefined);
+    assert.equal(b.state.caseReview.bdd.steps[0].role,"Then");
+});
 
 test("a free result offers only a contiguous acknowledged prefix; a review finding stays unverified", () => {
     const r=free();
@@ -83,6 +183,48 @@ async function host(t) {
     const author=new CaseAuthoring(b,vscode);
     return {directory,b,author,calls,inputs,picks,folders};
 }
+
+test("a follow-up saves into a separate case and restores an open source draft after review or cancellation", async t=>{
+    const {directory,b,author,folders}=await host(t);
+    const {CaseCompositionEditor}=require("../src/caseCompositionEditor");
+    const start={selector:{id:"home"},property:"visible",equals:true};
+    const oldGoal={selector:{id:"obsolete"},property:"visible",equals:true};
+    const newGoal={selector:{id:"new"},property:"visible",equals:true};
+    author.begin({name:"Source",source:"workflow",plan:{version:"1",preconditions:[start],
+        steps:[press("one"),press("two")],goals:[oldGoal]}});
+    const parent=author.candidate, first=parent.plan.steps[0];
+    parent.presentation.set(first,{name:"My first step"});
+    parent.presentationChanged=true;
+    b.caseAuthoring=author;
+    const editor=b.composition=new CaseCompositionEditor(b,author.vscode);
+    const sourcePlan=structuredClone(parent.plan);
+    async function review(){
+        await editor.handle({action:"explore",id:parent.id,revision:parent.revision,path:"steps[0]",side:"after"});
+        editor.draft.explore.result={plan:{version:"1",steps:[press("three"),{assert:newGoal}]}};
+        await editor.handle({action:"reviewFollowUp",id:parent.id,revision:parent.revision});
+        assert.deepEqual(author.candidate.plan.steps,[press("one"),press("three")]);
+        assert.deepEqual(author.candidate.plan.preconditions,[start]);
+        assert.deepEqual(author.candidate.plan.goals,[newGoal]);
+        assert.equal(author.candidate.presentation.get(author.candidate.plan.steps[0]).name,"My first step");
+        assert.notEqual(parent.id,author.candidate.id);
+        assert.equal(author.candidate.edit,undefined);
+    }
+    await review();
+    author.cancel();
+    assert.equal(author.candidate,parent);
+    await review();
+    folders.push([uri(directory)]);
+    const saved=author.candidate;
+    await author.save({id:saved.id,name:saved.name});
+    assert.equal(author.candidate,parent);
+    assert.deepEqual(parent.plan,sourcePlan);
+    const created=JSON.parse(await fs.readFile(saved.uri.fsPath,"utf8"));
+    assert.deepEqual(created.steps,[press("one"),press("three")]);
+    assert.deepEqual(created.goals,[newGoal]);
+    const raw=JSON.parse(await fs.readFile(saved.uri.fsPath+".harmony-case.json","utf8"));
+    assert.equal(raw.origin.parentCaseName,"Source");
+    assert.equal(raw.origin.forkPosition,"My first step");
+});
 
 test("free exploration is reviewable with BDD, users can supply boundary checks, and a portable runnable case retains lineage", async t => {
     const {directory,b,author,calls,folders}=await host(t);
@@ -202,6 +344,38 @@ test("AI organizes nested BDD steps without changing the pytest workflow or send
     assert.equal(restorePresentation(saved,presentation).get(saved.steps[0].then[0]).role,"Given");
     saved.steps.reverse();
     assert.equal(restorePresentation(saved,presentation).get(saved.steps[0]),undefined);
+});
+
+test("existing checks at both ends use the step picker and retain their original execution fields",async t=>{
+    const {author,b,directory,folders}=await host(t);
+    const start={selector:{id:"password"},property:"text",equals:"private-value",timeoutMs:2123};
+    const goal={selector:{id:"receipt"},property:"visible",equals:true,timeoutMs:4591};
+    const pressStep=press("submit"), path="goals[0]";
+    author.begin({name:"Checkout",source:"workflow",plan:{version:"1",steps:[pressStep],preconditions:[start],goals:[goal]}});
+    const ctx=()=>({id:author.candidate.id,revision:author.candidate.revision});
+    const edit=(at,data)=>author.edit({...ctx(),path:at,area:"stepDetails",operationArea:"stepCheck",...data});
+    assert.equal(b.state.caseReview.definitions.start[0].expected,"");
+    await edit("preconditions[0]",{role:"Given",target:"keep",property:"text",expected:""});
+    assert.deepEqual(author.candidate.plan.preconditions,[start]);
+    b.state.device="phone"; b.state.devices=["phone"];
+    b.observe=async()=>{b.state.page={complete:true,nodes:[{label:"Receipt number",id:"number",
+        attributes:{id:"number"},bounds:{left:1,top:2,right:10,bottom:12}}]};};
+    b.agent={call:async command=>{assert.equal(command,"screenshot");return {path:"receipt.png"};}};
+    b.image=file=>"test/"+file;
+    await author.loadTargets({...ctx(),path,area:"stepCheck",live:true,pick:true});
+    const picker=b.state.caseReview.stepTargets;
+    assert.equal(picker.path,path);
+    assert.equal(picker.picture.src,"test/receipt.png");
+    const choice=picker.choices.find(x=>x.locator.includes("number"));
+    assert.ok(choice.bounds);
+    await assert.rejects(edit("preconditions[0]",{role:"Given",target:choice.key,property:"visible",expected:"false"}),/请选择|请选中/);
+    await edit(path,{role:"When",name:"Receipt number",target:choice.key,property:"visible",expected:"false"});
+    assert.deepEqual(author.candidate.plan.goals,[{...goal,selector:{id:"number"},equals:false}]);
+    await edit(path,{role:"When",target:"manual",locatorField:"description",controlId:"Order number",property:"visible",expected:"true"});
+    folders.push([uri(directory)]);
+    await author.save({id:author.candidate.id,name:author.candidate.name});
+    const saved=JSON.parse(await fs.readFile(b.selected.fsPath,"utf8"));
+    assert.deepEqual(saved,{version:"1",preconditions:[start],steps:[pressStep],goals:[{...goal,selector:{description:"Order number"}}]});
 });
 
 test("named steps can use observed compatible locators, be duplicated and restored after deletion", async t=>{

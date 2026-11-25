@@ -1,5 +1,5 @@
 import {html} from "./networkInspector.js";
-import {button} from "./networkDetail.js";
+import {button,clock} from "./networkDetail.js";
 
 export function retainedRecords(network) {
     const history = new Set(network.records.map(row => row.id));
@@ -7,7 +7,7 @@ export function retainedRecords(network) {
     return archived.concat(network.records);
 }
 
-export function sourceReceipts(network, records, currentBatch, w) {
+function sourceReceipts(network, records, currentBatch, w) {
     const notes = [];
     function add(batch, message, keepStatus=false) {
         if (!batch || (batch.id === currentBatch?.id && !keepStatus)) return;
@@ -32,4 +32,21 @@ export function sourceReceipts(network, records, currentBatch, w) {
         add(web.batch,`ArkWeb · ${web.batch.label} · ${status[web.reason] || status.disconnected}`,true);
     }
     return notes.length ? `<div class="net-source-receipts" role="status">${notes.join("")}</div>` : "";
+}
+
+export function captureActivity(n, records, batch, w, lang) {
+    const receipts=sourceReceipts(n,records,batch,w);
+    const markers=batch ? [] : n.markers || [];
+    const logs=batch ? [] : (n.logs || []).filter(log=>!n.stepLabel ||
+        (n.range && Date.parse(log.at)>=n.range.start && Date.parse(log.at)<=n.range.end));
+    if (!receipts && !markers.length && !logs.length) return "";
+    const web=n.webStatus;
+    const connection=web ? web.reason==="connected" ? w("ArkWeb connected","ArkWeb 已连接") :
+        ["disconnected","page-changed"].includes(web.reason) ? w("ArkWeb disconnected","ArkWeb 已断开") : "" : "";
+    return `<details id="net-activity" class="net-activity"><summary>${w("Capture activity & logs","采集记录与日志")}
+        ${connection ? `<span>${html(connection)}</span>` : ""}</summary>${receipts}
+        ${markers.length ? `<details id="net-markers"><summary>${w("Phone actions","手机操作")} · ${markers.length}</summary>
+            ${markers.map(marker=>button("marker",clock(marker.start,lang)+" · "+marker.label,{id:marker.id})).join("")}</details>` : ""}
+        ${logs.length ? `<details id="net-logs"><summary>HiLog · ${logs.length}</summary>
+            <ul>${logs.map(log=>`<li>${html(clock(log.at,lang))} · ${html(log.level)} · ${html(log.tag)}</li>`).join("")}</ul></details>` : ""}</details>`;
 }

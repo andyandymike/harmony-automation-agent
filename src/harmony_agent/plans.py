@@ -11,6 +11,7 @@ from copy import deepcopy
 import time
 
 from .errors import AgentError
+from .gestures import COMMAND as GESTURE_COMMAND, MAX_DELAY_MS, gesture_schema, validate_gesture
 from .observation import selector_uses_refs, select_nodes
 from .bindings import (check_references, expression_schema, normalize_read_result,
                        resolve_value, validate_expression, variable_name)
@@ -18,8 +19,8 @@ from .bindings import (check_references, expression_schema, normalize_read_resul
 
 PLAN_VERSION = "1"
 PLAN_VERSIONS = ("1", "2")
-COMMANDS = frozenset({"observe", "find", "press", "fill", "scroll", "back", "wait", "open"})
-MUTATIONS = frozenset({"press", "fill", "scroll", "back", "open"})
+COMMANDS = frozenset({"observe", "find", "press", "fill", "scroll", "back", "wait", "open", GESTURE_COMMAND})
+MUTATIONS = frozenset({"press", "fill", "scroll", "back", "open", GESTURE_COMMAND})
 LIMITS = {"maxSteps": (50, 1, 500), "maxActions": (20, 1, 100),
           "timeoutMs": (60000, 1, 600000), "maxCaptures": (100, 1, 1000)}
 MAX_DEFINITION_STEPS = 200
@@ -109,12 +110,14 @@ def validate_plan(plan):
             supported = {"command", "assert", "if", "repeat", "yield", "stop"}
             if version == "2":
                 supported.add("read")
-            _object(step, supported | {"input", "before", "refresh", "then", "else"}, location)
+            _object(step, supported | {"input", "before", "refresh", "then", "else", "delayMs"}, location)
             kinds = set(step) & supported
             if len(kinds) != 1:
                 _invalid("Each step must contain exactly one operation.", location)
             kind = next(iter(kinds))
             allowed = {"command", "input", "before", "refresh"} if kind == "command" else {"if", "then", "else"} if kind == "if" else {kind}
+            if step.get("command") == GESTURE_COMMAND:
+                allowed.add("delayMs")
             _object(step, allowed, location)
             if kind == "command":
                 command = step["command"]
@@ -139,7 +142,7 @@ def validate_plan(plan):
                             params["expect"] = deepcopy(expectation)
                             if isinstance(params["expect"]["equals"], dict):
                                 params["expect"]["equals"] = "" if params["expect"]["property"] == "text" else False
-                    params = validate_params(command, params)
+                    params = validate_gesture(params) if command == GESTURE_COMMAND else validate_params(command, params)
                     params.update(expressions)
                     params.pop("session", None)
                     # Unspecified public-view options inherit the run's view.
@@ -160,6 +163,8 @@ def validate_plan(plan):
                 except (RecursionError, TypeError, ValueError) as exc:
                     _invalid("Invalid command input: " + str(exc), location + ".input")
                 normalized_step = {"command": command, "input": params}
+                if "delayMs" in step:
+                    normalized_step["delayMs"] = _integer(step["delayMs"], 0, MAX_DELAY_MS, location + ".delayMs")
                 if "refresh" in step:
                     if command not in MUTATIONS or type(step["refresh"]) is not bool:
                         _invalid("refresh must be a boolean on a mutating command.", location + ".refresh")
@@ -235,7 +240,7 @@ def _literal_plan_schema():
                           "equals": {"type": ["string", "boolean"]},
                           "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 60000}}}
     variants = []
-    for command in sorted(COMMANDS):
+    for command in sorted(COMMANDS - {GESTURE_COMMAND}):
         spec = COMMAND_DEFINITIONS[command]
         fields = spec["positional"] + spec["options"]
         properties = {name: _field_schema(name, command) for name in fields}
@@ -257,6 +262,11 @@ def _literal_plan_schema():
         variants.append({"type": "object", "additionalProperties": False,
                          "required": ["command"] + (["input"] if required else []),
                          "properties": step_properties})
+    variants.append({"type": "object", "additionalProperties": False, "required": ["command", "input"],
+                     "properties": {"command": {"const": GESTURE_COMMAND}, "input": gesture_schema(),
+                                    "delayMs": {"type": "integer", "minimum": 0, "maximum": MAX_DELAY_MS},
+                                    "refresh": {"type": "boolean", "default": False},
+                                    "before": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/expect"}}}})
     step_list = {"type": "array", "minItems": 1, "maxItems": MAX_DEFINITION_STEPS,
                  "items": {"$ref": "#/$defs/step"}}
     variants.extend([
@@ -559,6 +569,8 @@ def run_plan(plan, executor, evaluate, *, checkpoint=None, budget=None, clock=ti
                 params["_plan_before"] = [resolved_condition(item) for item in step["before"]]
             if step.get("refresh"):
                 params["_plan_refresh"] = True
+            if step.get("delayMs"):
+                params["_gesture_delay_ms"] = step["delayMs"]
             result = executor(command, params)
             if not isinstance(result, dict):
                 raise AgentError("INVALID_PLAN_RESULT", "Command callback must return a result object.",

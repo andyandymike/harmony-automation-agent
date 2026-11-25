@@ -1,0 +1,155 @@
+/* Keep live input counts and the archived route review on the same station readout. */
+#workbench .x-explore {
+    container: exploration / inline-size;
+    min-width: 0;
+}
+#workbench .x-report-head {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 8px 18px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+#workbench .x-report-heading { flex: 1 1 16rem; min-width: 0; }
+#workbench .x-report-heading .kicker { margin: 0 0 5px; }
+#workbench .x-report-heading h1, #workbench .x-setup h1 {
+    font-size: clamp(20px, 4.4cqi, 28px);
+    line-height: 1.24;
+}
+#workbench .x-report-heading h1 + p { margin: 5px 0 0; color: var(--muted); }
+#workbench .x-report-head > .toolbar { max-width: 100%; }
+#workbench .x-readout {
+    display: grid;
+    gap: 12px 18px;
+    align-items: center;
+    border-block: 1px solid var(--line);
+    padding-block: 13px;
+}
+#workbench .x-readout.x-with-budget { grid-template-columns: minmax(0, 1fr) minmax(116px, 24%); }
+#workbench .x-readout-main { min-width: 0; }
+#workbench .x-session-status {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+#workbench .x-session-status::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+}
+#workbench .x-report:is([data-session="ready"],[data-session="running"]) .x-session-status { color: var(--accent); }
+#workbench .x-report:is([data-session="ready"],[data-session="running"]) .x-session-status::before { background: currentColor; }
+#workbench .x-report[data-session="paused"] .x-session-status::before { border-radius: 0; }
+#workbench .x-report[data-session="blocked"] .x-session-status { color: var(--warning); }
+#workbench .x-readout .x-action-label { margin-top: 9px; font-size: 12px; color: var(--muted); }
+#workbench .x-action-name {
+    display: block;
+    margin: 2px 0 3px;
+    font-size: clamp(16px, 3.6cqi, 23px);
+    line-height: 1.35;
+    font-weight: 620;
+}
+#workbench .x-guided-activity { margin-top: 6px; font-weight: 550; }
+#workbench .x-action-reason, #workbench .x-screen-name {
+    color: var(--muted);
+    font-size: 12px;
+}
+#workbench .x-screen-name { margin-top: 8px; color: var(--ink); }
+#workbench .x-screen-name span { margin-inline-end: .55em; color: var(--muted); }
+#workbench .x-input-budget {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+    padding-inline-start: 16px;
+    border-inline-start: 1px solid var(--line);
+}
+#workbench .x-input-budget small { color: var(--muted); font-size: 12px; }
+#workbench .x-input-reading { font: 400 17px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+#workbench .x-input-reading strong { font-size: clamp(24px, 6.2cqi, 42px); font-weight: 450; color: var(--accent); }
+#workbench .x-input-reading span { margin-inline-start: .35em; color: var(--muted); }
+#workbench .x-input-budget meter {
+    display: block;
+    appearance: none;
+    width: min(100%, 112px);
+    height: 5px;
+}
+#workbench .x-input-budget meter::-webkit-meter-inner-element { display: block; }
+#workbench .x-input-budget meter::-webkit-meter-bar { height: 5px; background: var(--line); border: 0; border-radius: 0; }
+#workbench .x-input-budget meter::-webkit-meter-optimum-value { background: var(--accent); }
+#workbench .x-summary-readout {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 5px 16px;
+    padding-block: 9px;
+}
+#workbench .x-summary-readout .x-input-budget {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 3px 6px;
+    border: 0;
+    padding: 0;
+}
+#workbench .x-summary-readout .x-input-reading, #workbench .x-summary-readout .x-input-reading strong {
+    font-size: 14px;
+    color: var(--ink);
+}
+#workbench .x-summary-readout meter { display: none; }
+#workbench .x-route-baseline {
+    border: 0;
+    border-inline-start: 3px solid var(--accent);
+    background: var(--instrument-panel, var(--sidebar));
+}
+#workbench .x-route-baseline > .x-route-row { border-inline-start: 0; }
+#workbench .x-route-count { font-size: 12px; }
+#workbench .x-route-group > h3 {
+    margin-bottom: 0;
+    padding: 8px 10px;
+    border-inline-start: 2px solid var(--accent);
+    background: var(--instrument-rail, var(--sidebar));
+}
+#workbench .x-route-original { padding: 5px 10px; border-bottom: 1px solid var(--line); }
+#workbench .x-route-group .x-route-list { margin-top: 6px; }
+#workbench .x-route-group .x-route-row {
+    position: relative;
+    padding: 9px 4px 9px 12px;
+    border-bottom: 1px solid var(--line);
+}
+#workbench .x-route-group .x-route-row:has(.x-route-marker) { padding-inline-start: 42px; }
+#workbench .x-route-marker {
+    position: absolute;
+    inset-inline-start: 7px;
+    top: 10px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 23px;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    background: var(--instrument-panel, var(--surface));
+    font: normal 12px var(--mono);
+}
+#workbench .x-route-row-head { align-items: center; }
+#workbench .x-route-row-head > span, #workbench .x-observed-path { font-size: 12px; }
+#workbench .x-observed-path { margin-block: 4px; color: var(--muted); }
+#workbench .x-observed-path > span { color: var(--accent); margin-inline: .3em; }
+#workbench .x-trace-row > small:first-child { color: var(--muted); font: 12px var(--mono); }
+#workbench .x-trace-row[aria-expanded="true"] > small:first-child { color: var(--accent); }
+#workbench .x-setup .x-position-list { background: var(--instrument-panel, var(--surface)); }
+@container exploration (max-width: 352px) {
+    #workbench .x-readout.x-with-budget { grid-template-columns: minmax(0,1fr); }
+    #workbench .x-input-budget { border-inline: 0; border-top: 1px solid var(--line); padding: 8px 0 0; }
+    #workbench .x-input-reading strong { font-size: 24px; }
+    #workbench .x-route-group .x-route-row { padding-inline-end: 0; }
+}
+@media (forced-colors: active) {
+    #workbench .x-input-budget meter { display: none; }
+    #workbench .x-session-status::before, #workbench .x-route-marker { border-color: currentColor; }
+}

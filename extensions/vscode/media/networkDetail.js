@@ -63,7 +63,7 @@ export function diffRows(changes, labels, w) {
 }
 function changesView(record,w) {
     if (!record.effectiveRequest && !record.originalResponse) {
-        return `<p class="net-unavailable">${w("This source recorded one version of the exchange. To compare two captures, choose Compare.","此来源只记录了一版请求与响应。要比较两条记录，请选择「对比请求」。")}</p>`;
+        return `<p class="net-unavailable">${w("This source retained a single version. To compare captures, select two requests in the list.","此来源只保留了一版请求与响应。可在请求列表中多选两条记录进行对比。")}</p>`;
     }
     const labels = {before:w("Original","原始"),after:w("Effective","实际生效")};
     const changes = ruleDifferences(record);
@@ -73,21 +73,27 @@ function changesView(record,w) {
         w("Compares the incoming request and upstream response with what the gateway sent.","对比网关收到的原始请求、上游返回的原始响应，以及应用规则后发出的内容。") :
         w("Request changes only. The local response has no upstream original.","显示请求的改写。此本地响应没有上游原文。")}</p>
         ${application.length || !transport.length ? diffRows(application,labels,w) : ""}
-        ${transport.length ? `<details class="net-transport-diff"><summary>${w("Transport headers","传输头部")} · ${transport.length}</summary>
+        ${transport.length ? `<details class="net-transport-diff" id="net-transport-diff-${html(record.id)}"><summary>${w("Transport headers","传输头部")} · ${transport.length}</summary>
             ${diffRows(transport,labels,w)}</details>` : ""}`;
 }
-function signature(record,lang) {
-    return `${clock(record.startedAt,lang)} · ${record.method} ${requestHost(record)}${record.path} · ${record.status}`;
-}
-function comparison(record,records,baselineId,w,lang) {
-    const candidates = records.filter(other => other.id !== record.id);
-    if (!candidates.length) return `<p class="net-unavailable">${w("Capture or import a second exchange to compare.","再采集或导入一条请求即可对比。")}</p>`;
-    const baseline = candidates.find(other => other.id === baselineId);
-    return `<label class="net-compare-field">${w("Compare this exchange with","选择对照请求")}
-        <select id="net-baseline">${option("",w("Choose an exchange…","选择一条记录…"),baseline?.id || "")}
-        ${candidates.map(other => option(other.id,signature(other,lang),baseline?.id)).join("")}</select></label>
-        ${baseline ? `<p class="net-diff-note">${html(signature(baseline,lang))} → ${html(signature(record,lang))}</p>
-        ${diffRows(exchangeDifferences(baseline,record),{before:w("Comparison","对照请求"),after:w("Selected","当前请求")},w)}` : ""}`;
+export function comparisonView(before,after,w,lang,fromSelection) {
+    const changes=exchangeDifferences(before,after);
+    const labels={before:w("Request A","请求 A"),after:w("Request B","请求 B")};
+    const identity=(record,label)=>{
+        const time=new Date(record.startedAt).toLocaleString(lang,{year:"numeric",month:"2-digit",day:"2-digit",
+            hour:"2-digit",minute:"2-digit",second:"2-digit",fractionalSecondDigits:3,hour12:false});
+        const status=record.status ? "HTTP "+record.status : w("No HTTP response","未收到 HTTP 响应");
+        return `<div data-comparison-id="${html(record.id)}"><dt>${label}</dt>
+            <dd><strong>${html(record.method+" "+requestHost(record)+record.path)}</strong>
+            <small>${html(time)} · ${html(status)} · ${duration(record.durationMs)}</small></dd></div>`;
+    };
+    return `<article class="net-detail net-comparison"${fromSelection ? ' data-list-name="requests"' : ""} aria-labelledby="net-comparison-title">
+        <header class="net-detail-head"><div class="net-detail-title"><h2 id="net-comparison-title" tabindex="-1">${w("Request comparison","请求对比")}</h2>
+        ${actionButton(w("Back to requests","返回请求列表"),{quiet:true,attrs:{"data-net":"closeComparison"}})}</div>
+        <dl class="net-comparison-sources">${identity(before,labels.before)}${identity(after,labels.after)}</dl></header>
+        <div class="net-detail-content" id="net-detail-body" data-scroll-key="${html(JSON.stringify([before.id,after.id]))}">
+        ${changes.length ? `<h3 class="net-comparison-count">${w(changes.length+" changed fields","差异字段 "+changes.length+" 项")}</h3>` : ""}
+        ${diffRows(changes,labels,w)}</div></article>`;
 }
 function timing(record,w) {
     const labels = {blocked:w("Blocked","排队"),dns:"DNS",connect:w("Connect","连接"),ssl:"TLS",
@@ -97,12 +103,11 @@ function timing(record,w) {
         ${stages.length ? `<dl class="net-timings">${stages.map(([name,ms]) => `<dt>${html(labels[name] || name)}</dt><dd>${duration(ms)}</dd>`).join("")}</dl>` :
         `<p class="net-unavailable">${w("This source did not retain timing phases.","此来源未保留分段耗时。")}</p>`}</section>`;
 }
-export function detailView(record, records, detail, hit, w, lang, matchedRule, {favorite,ai,busy,editor=""}={}) {
+export function detailView(record, records, detail, hit, w, lang, matchedRule, {favorite,ai,busy,editor="",hasRuleDraft=false,picking=false}={}) {
     const tabs = {response:w("Response","响应"),request:w("Request","请求"),timing:w("Timing","耗时"),
-        changes:w("Rule changes","改写差异"),compare:w("Compare","对比请求")};
+        changes:w("Rule changes","改写差异")};
     let contents;
     if (detail.tab === "changes") contents = changesView(record,w);
-    else if (detail.tab === "compare") contents = comparison(record,records,detail.baselineId,w,lang);
     else if (detail.tab === "timing") contents = timing(record,w);
     else {
         const fields = detail.tab === "response" ? ["responseBody","responseHeaders"] : ["url","requestHeaders","requestBody"];
@@ -111,17 +116,17 @@ export function detailView(record, records, detail, hit, w, lang, matchedRule, {
     const source = sourceNames(w)[record.source] || record.source;
     const original = record.replayOf && records.find(row=>row.id===record.replayOf);
     const tabOptions = {id:"network-detail",className:"net-detail-tabs",label:w("Exchange details","请求详情"),active:detail.tab,
-        items:Object.entries(tabs).map(([id,label])=>({id,label,data:{net:"detail",id}}))};
+        items:Object.entries(tabs).map(([id,label])=>({id,label,data:{net:"detail",id,...(picking && {"list-name":"requests"})}}))};
     return `<article class="net-detail" data-item-actions="request" data-record-detail="true" data-record-id="${html(record.id)}"
         data-item-label="${html(record.method+" "+record.path)}" aria-label="${w("Exchange details","请求详情")}">
-        ${button("backToList",w("← Back to requests","← 返回请求列表"),{className:"net-back-list",quiet:true})}
-        <header class="net-detail-head"><div class="net-detail-title"><h2><span class="net-verb">${html(record.method)}</span> ${html(record.path)}</h2>
+        <header class="net-detail-head"><div class="net-detail-title">
+        ${actionButton("←",{className:"net-back-list",quiet:true,attrs:{"data-net":"backToList","aria-label":w("Back to requests","返回请求列表"),title:w("Back to requests","返回请求列表")}})}
+        <h2><span class="net-verb">${html(record.method)}</span> ${html(record.path)}</h2>
+        <span class="net-status" data-tone="${statusTone(record.status)}">${record.status === 0 ? w("No HTTP response","未收到 HTTP 响应") : "HTTP "+html(record.status)}</span></div>
+        <div class="net-detail-meta"><span class="net-host">${html(requestHost(record))}</span><span>${html(source)}</span><span>${html(clock(record.startedAt,lang))}</span><span>${duration(record.durationMs)}</span>
         ${button(favorite?"unfavorite":"favorite",favorite?w("★ Saved","★ 已收藏"):w("☆ Save","☆ 收藏"),
-            {id:record.id,focusId:"net-detail-star",pressed:!!favorite,className:"net-save-exchange",title:favorite?w("Remove this favorite","取消收藏这条请求"):w("Keep this request and response","保存此请求与当时的响应")})}</div>
-        <p class="net-host">${html(requestHost(record))}</p>
+            {id:record.id,focusId:"net-detail-star",pressed:!!favorite,className:"net-save-exchange",quiet:true,title:favorite?w("Remove this favorite","取消收藏这条请求"):w("Keep this request and response","保存此请求与当时的响应")})}</div>
         ${favorite?`<div class="net-saved-name">${html(favorite.name)} ${button("renameFavorite",w("Rename","改名"),{id:record.id,quiet:true})}</div>`:""}
-        <div class="net-detail-meta"><span class="net-status" data-tone="${statusTone(record.status)}">${record.status === 0 ? w("No HTTP response","未收到 HTTP 响应") : "HTTP "+html(record.status)}</span>
-        <span>${html(source)}</span><span>${html(clock(record.startedAt,lang))}</span><span>${duration(record.durationMs)}</span></div>
         ${record.batch ? button("captureResults",record.batch.label,{id:record.batch.id,quiet:true,title:w("View requests from this batch","查看这批请求")}) : ""}
         ${record.ruleId ? `<p class="net-provenance">${w("Matched rule","命中规则")} ${matchedRule ?
             button("matchedRule",record.ruleId,{id:record.id,className:"net-rule-link",quiet:true,title:w("Edit matched rule","编辑命中规则")}) :
@@ -130,11 +135,10 @@ export function detailView(record, records, detail, hit, w, lang, matchedRule, {
             ${button("compareReplay",w("Compare with original","与原请求对比"),{id:record.id})}</div>` :
             record.replayOf ? `<p class="net-provenance">${w("The original request is no longer retained.","历史和收藏中已找不到原请求。")}</p>` : ""}
         ${record.error ? `<p role="alert">${html(record.error)}</p>` : ""}
-        <div class="net-actions">${button("createRule",w("Create rule","创建规则"),{id:record.id})}
-        ${button("resend",w("Edit & resend","编辑并重发"),{id:record.id})}
-        ${itemMenuTrigger(w("Request actions","请求操作"),busy)}
-        <div data-item-menu hidden>${actionButton(w("Explain this request with AI","用 AI 解释这条请求"),{quiet:true,disabled:busy,attrs:{"data-type":"explainExchange","data-id":record.id}})}
-            ${button("from",w("Create response sequence","创建顺序响应"),{id:record.id,quiet:true,disabled:busy})}</div></div></header>
+        <div class="net-actions">${button("createRule",hasRuleDraft?w("Continue rule draft","继续编辑规则"):w("Create rule","创建规则"),{id:record.id,disabled:busy})}
+        ${button("resend",w("Edit & resend","编辑并重发"),{id:record.id,disabled:busy})}
+        ${itemMenuTrigger(w("Request actions","请求操作"),false)}
+        <div data-item-menu hidden>${actionButton(w("Explain this request with AI","用 AI 解释这条请求"),{quiet:true,disabled:busy,attrs:{"data-type":"explainExchange","data-id":record.id}})}</div></div></header>
         ${ai?.key === record.id ? `<section class="inline-ai"><strong>${w("AI explanation","AI 解释")}</strong>
             ${["running","stopping"].includes(ai.status) ? `<p role="status">${w("Reviewing this request…","正在分析这条请求…")}</p>
                 ${actionButton(w("Stop","停止"),{disabled:ai.status==="stopping",attrs:{"data-type":"cancelAI"}})}` : ""}
@@ -142,5 +146,5 @@ export function detailView(record, records, detail, hit, w, lang, matchedRule, {
             ${ai.answer ? `<p class="ai-answer" role="status">${html(ai.answer)}</p>` : ""}
             ${ai.evidence?.length ? `<details id="net-ai-evidence-${html(record.id)}"><summary>${w("Evidence consulted","实际读取的证据")}</summary>
                 <p class="ai-answer">${html(ai.evidence[0].text)}</p></details>` : ""}</section>` : ""}
-        ${editor}${tabList(tabOptions)}<div class="net-detail-content" id="net-detail-body" data-scroll-key="${html(record.id)}-${detail.tab}">${tabPanels(tabOptions,contents)}</div></article>`;
+        ${editor}${tabList(tabOptions)}<div class="net-detail-content" id="net-detail-body"${picking ? ' data-list-name="requests"' : ""} data-scroll-key="${html(record.id)}-${detail.tab}">${tabPanels(tabOptions,contents)}</div></article>`;
 }

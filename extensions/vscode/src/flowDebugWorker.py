@@ -1,4 +1,4 @@
-"""Interactive gates for the native plan runner. One process owns one run."""
+"""Run a native plan with debugger pauses and case rule group steps."""
 import json
 import os
 import queue
@@ -20,8 +20,10 @@ def serve(stream, agent_factory=Agent):
     request = json.loads(stream.readline())
     plan = validate_plan(request["plan"])
     session, run_id = request["session"], request["runId"]
+    debug = request.get("debug", "breakpoints" in request)
     breakpoints = set(request.get("breakpoints", []))
-    step_next = not breakpoints
+    step_next = debug and not breakpoints
+    rule_steps = request.get("ruleSteps", {})
     controls = queue.Queue()
     first = None
 
@@ -36,28 +38,21 @@ def serve(stream, agent_factory=Agent):
             agent.request_cancel()
             controls.put({"action": "stop"})
 
-    def checkpoint(event):
-        nonlocal step_next
-        if event["event"] == "step_finished":
-            send("step", path=event["path"], status=event["status"], stepId=event["stepId"])
-            return
-        if agent.cancel_event.is_set():
-            raise KeyboardInterrupt
-        where = event["path"]
-        top = re.fullmatch(r"steps\[(\d+)\](?:\.repeat\.check\[0\])?", where)
-        if not step_next and (not top or int(top.group(1)) not in breakpoints):
-            return
-        token = event["stepId"]
-        frame_id = event.get("basisFrameId")
-        send("paused", path=where, operation=event.get("command", event["kind"]), token=token,
-             frameId=frame_id)
+    def matching_controls(token):
         while True:
             control = controls.get()
-            action = control["action"]
-            if action == "stop":
+            if control["action"] == "stop":
                 raise KeyboardInterrupt
-            if control.get("token") != token:
-                continue
+            if control.get("token") == token:
+                yield control
+
+    def pause(event, operation):
+        nonlocal step_next
+        token = event["stepId"]
+        frame_id = event.get("basisFrameId")
+        send("paused", path=event["path"], operation=operation, token=token, frameId=frame_id)
+        for control in matching_controls(token):
+            action = control["action"]
             if action == "probe":
                 selector = control["selector"]
                 try:
@@ -78,13 +73,44 @@ def serve(stream, agent_factory=Agent):
                     send("probe", token=token, error=str(exc))
             elif action in ("continue", "step"):
                 step_next = action == "step"
-                return True
+                return
+
+    def checkpoint(event):
+        if event["event"] == "step_finished":
+            if debug:
+                send("step", path=event["path"], status=event["status"], stepId=event["stepId"])
+            return
+        if agent.cancel_event.is_set():
+            raise KeyboardInterrupt
+        where = event["path"]
+        canonical = re.sub(r"\.repeat\.iteration\[\d+\]", ".repeat.steps", where)
+        rule_operation = rule_steps.get(canonical)
+        top = re.fullmatch(r"steps\[(\d+)\](?:\.repeat\.check\[0\])?", where)
+        paused = debug and (step_next or (top and int(top.group(1)) in breakpoints))
+        if paused:
+            pause(event, rule_operation or event.get("command", event["kind"]))
+        if rule_operation:
+            token = event["stepId"]
+            send("ruleGroup", path=where, token=token)
+            for control in matching_controls(token):
+                if control["action"] == "ruleGroupResult":
+                    if control.get("error"):
+                        raise AgentError("RULE_GROUP_SWITCH_FAILED", control["error"])
+                    break
+        return paused
 
     try:
         agent = agent_factory(request["stateDir"], request.get("hdcPath"), on_plan_step=checkpoint)
     except TypeError as exc:
-        raise AgentError("DEBUG_CORE_REQUIRED", "Interactive debugging requires harmony-automation-agent 0.1.0a10 or later.") from exc
+        if debug:
+            raise AgentError("DEBUG_CORE_REQUIRED", "Interactive debugging requires harmony-automation-agent 0.1.0a10 or later.") from exc
+        raise AgentError("RULE_STEP_CORE_REQUIRED", "Rule group steps require harmony-automation-agent 0.1.0a10 or later.") from exc
     threading.Thread(target=receive, daemon=True).start()
+    if not debug:
+        result = agent.execute(request["method"], {**request.get("options", {}),
+                               "session": session, "run_id": run_id, "plan": plan})
+        send("complete", status=result.get("status"), result=result)
+        return
     attached = False
     try:
         result = agent.execute("start", {"session": session, "device": request["device"], "max_nodes": 5000})

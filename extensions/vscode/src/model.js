@@ -73,7 +73,9 @@ function recordedPlan(steps, start, goal, property, expected) {
     return {
         version: "1",
         ...(start && { preconditions: [{ selector: start.selector, property: "visible", equals: true }] }),
-        steps: steps.map(({ command, input }) => ({ command, input })),
+        steps: steps.map(({ command, input, delayMs }) => ({
+            command, input, ...(command === "deviceGesture" && delayMs !== undefined && {delayMs}),
+        })),
         ...(goal && { goals: [{ selector: goal.selector, property, equals: expected }] }),
     };
 }
@@ -165,11 +167,14 @@ function compareRuns(current, earlier) {
 function withAuthoredTargets(view, plan) {
     if (!Array.isArray(view?.steps) || !Array.isArray(plan?.steps)) return view;
     const steps = view.steps.map(receipt => {
-        if (receipt.selector || !receipt.command || typeof receipt.path !== "string") return receipt;
+        if (typeof receipt.path !== "string") return receipt;
         const operation = receipt.path.replace(/\.repeat\.iteration\[\d+\]/g, ".repeat.steps");
         if (!/^steps\[\d+\](?:\.(?:then|else|repeat\.steps)\[\d+\])*$/.test(operation)) return receipt;
         const step = operation.match(/[a-z]+|\d+/g).reduce((node, key) => node?.[key], plan);
-        if (step?.command !== receipt.command) return receipt;
+        if (step?.ruleGroup) return {...receipt,kind:"ruleGroup",
+            command:step.ruleGroup.action==="enable" ? "enableRuleGroup" : "disableRuleGroup",
+            authoredTarget:step.ruleGroup.scenario?.name || step.ruleGroup.name};
+        if (receipt.selector || !receipt.command || step?.command !== receipt.command) return receipt;
         const name = targetLabel(step.input?.target);
         return name ? {...receipt, authoredTarget:name} : receipt;
     });

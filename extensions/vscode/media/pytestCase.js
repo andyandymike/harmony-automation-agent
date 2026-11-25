@@ -9,6 +9,8 @@ const messages = {
         pendingBinding: "当前规则组仅绑定在工作区。生成新用例可将它写入流程文件。",
         missingGroup: "请在 workflow.json 中恢复此用例需要的规则组快照。",
         invalid: "请打开包含控件步骤的有效流程 JSON。",
+        description: "生成全部待生成步骤后即可导出 pytest。",
+        ruleSteps: "包含规则组启用或关闭步骤的用例使用工作台运行。",
         terminal: "在用例目录设置 HARMONY_DEVICE 后运行", binding: "为当前绑定重新生成用例",
         result: code => code === 0 ? "最近一次 pytest 运行通过。" : code === undefined ? "pytest 已结束，退出状态未知。请查看任务终端。" : "最近一次 pytest 未通过。请在任务终端查看失败原因和证据路径。",
     },
@@ -22,12 +24,22 @@ const messages = {
         pendingBinding: "The current group is bound in this workspace. Generate a new case to include it in the workflow file.",
         missingGroup: "Restore this case’s required rule group snapshot in workflow.json.",
         invalid: "Open a valid workflow JSON file with control-based steps.",
+        description: "Generate the remaining steps before exporting to pytest.",
+        ruleSteps: "Run cases with rule group steps in the workbench.",
         terminal: "Set HARMONY_DEVICE and run in the case folder", binding: "Generate case with current binding",
         result: code => code === 0 ? "Last pytest run passed." : code === undefined ? "Pytest ended without an exit status. See the task terminal." : "Last pytest run did not pass. See the task terminal for the failure and evidence path.",
     },
 };
 
 const words = language => /^zh/i.test(language) ? messages.zh : messages.en;
+
+export function pytestCheckHint(issue, language) {
+    const zh=/^zh/i.test(language);
+    if (issue==="start") return zh ? "要用 pytest 运行，请在第一步前插入验证。" : "To run with pytest, insert a check before the first step.";
+    if (issue==="goal") return zh ? "要用 pytest 运行，请在最后一步后插入验证。" : "To run with pytest, insert a check after the last step.";
+    if (issue==="both") return zh ? "要用 pytest 运行，请在第一步前和最后一步后各插入一条验证。" :
+        "To run with pytest, insert a check before the first step and another after the last.";
+}
 
 export function pytestWorkflow(model, language, button, escape) {
     const t = words(language);
@@ -37,8 +49,8 @@ export function pytestWorkflow(model, language, button, escape) {
     const entry = model.pytestCase;
     const bound = availability?.workspaceBinding;
     let note = "";
-    if (issue === "gestures" || issue === "invalid") note = t[issue];
-    else if (issue) note = t.edit(t[issue]);
+    if (["gestures","invalid","description","ruleSteps"].includes(issue)) note = t[issue];
+    else if (issue) note = (model.caseDefinitions && pytestCheckHint(issue,language)) || t.edit(t[issue]);
     const missingGroup = entry?.requiresRuleGroup && !availability?.ruleGroup;
     const groupNote = bound ? (entry ? t.pendingBinding : t.includeBinding) : missingGroup ? t.missingGroup : availability?.ruleGroup ? t.fixture : "";
     if (groupNote) note += (note ? " " : "") + groupNote;

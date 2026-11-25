@@ -1,6 +1,8 @@
 import { actionButton, escapeHtml } from "./controls.js";
 import { closeItemMenu } from "./itemActions.js";
 
+export const dragThreshold = 6;
+
 const rowSelector = "[data-order-index]";
 const listSelector = "[data-order-kind]";
 const gripSelector = ":scope > [data-order-grip], :scope > [data-order-head] > [data-order-grip]";
@@ -123,7 +125,7 @@ export function bindListOrder(root, commit) {
         const drag=pointer;
         if (!drag || drag.id!==event.pointerId) return;
         drag.y=event.clientY;
-        if (!drag.ghost && Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)>=6) begin(drag);
+        if (!drag.ghost && Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)>=dragThreshold) begin(drag);
         if (drag.ghost) event.preventDefault();
     });
     document.addEventListener("pointerup",event=>{

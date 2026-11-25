@@ -4,7 +4,7 @@ Updated: 2026-11-11. Package version, request `schemaVersion`, fixture contract,
 
 ## Tested combinations
 
-The Python runtime is `0.1.0a10`. Interactive debugging in the [VS Code workbench](../extensions/vscode/README.md) uses this runtime. See [alpha9 validation](validation-alpha9.md) for the previous runtime's local results and host/device validation boundaries. The [alpha8 record](validation-alpha8.md), [alpha7 record](validation-alpha7.md), [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 isolated package checks, the [alpha3 validation record](validation-alpha3.md), and alpha2 device/hosted-CI results describe their recorded source versions. Start with [installation](installation.md) and choose an [agent integration](integrations.md) when needed.
+The Python runtime is `0.1.0a11`. This version supports recorded gestures and control steps in the same [VS Code workbench](../extensions/vscode/README.md) workflow. Interactive debugging requires `0.1.0a10` or later. See [alpha9 validation](validation-alpha9.md) for the previous runtime's local results and host/device validation boundaries. The [alpha8 record](validation-alpha8.md), [alpha7 record](validation-alpha7.md), [alpha6 record](validation-alpha6.md), alpha5's 224 offline tests and 14 isolated package checks, the [alpha3 validation record](validation-alpha3.md), and alpha2 device/hosted-CI results describe their recorded source versions. Start with [installation](installation.md) and choose an [agent integration](integrations.md) when needed.
 
 | Combination | Recorded evidence | Current boundary |
 | --- | --- | --- |

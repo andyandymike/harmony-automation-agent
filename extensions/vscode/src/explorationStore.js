@@ -9,7 +9,11 @@ const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 
 function summary(report) {
     const { id, goal, mode, status, device, createdAt, updatedAt, reason } = report;
+    const guided = mode === "flow" && report.branches?.length;
     return { id, goal, mode, status, device, createdAt, updatedAt, reason,
+        ...(report.routeMode==="fork" && {routeMode:"fork",prefixStatus:report.branches?.find(b=>b.kind==="prefix")?.status}),
+        ...(guided && { ...(report.routeMode!=="fork" && {originalStatus:report.branches.find(b=>b.id==="baseline")?.status}),
+            variationStates:[...new Set(report.branches.filter(b=>b.kind!=="prefix" && b.id!=="baseline").map(b=>b.status))]}),
         pages: report.pages.length, findings: report.findings.length };
 }
 

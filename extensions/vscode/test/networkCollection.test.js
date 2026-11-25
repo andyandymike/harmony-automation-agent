@@ -76,6 +76,26 @@ test("deleting history preserves its snapshot and undo restores arrival order",(
     assert.equal(net.collection.recordsWithHistory(net.records).length,4);
 });
 
+test("removing a group from history and favorites supplies one undo for each collection",()=>{
+    const net=new NetworkSession();
+    importRows(net,[sample(),sample(),sample(),sample()]);
+    const ids=net.records.map(record=>record.id);
+    const selected=[ids[0],ids[2],ids[3]];
+    for (const id of selected) net.collection.save(net.findRecord(id));
+    net.removeRecords(selected);
+    const historyUndo=net.snapshot().deletedCapture;
+    assert.deepEqual(net.records.map(row=>row.id),[ids[1]]);
+    assert.equal(net.collection.items.size,3);
+    importRows(net,[sample()]);
+    const later=net.records.at(-1).id;
+    net.undoRecordRemoval(historyUndo);
+    assert.deepEqual(net.records.map(row=>row.id),[...ids,later]);
+    net.collection.removeMany(selected);
+    assert.equal(net.collection.items.size,0);
+    net.collection.undoRemoval(net.snapshot().removedFavorite);
+    assert.deepEqual([...net.collection.items.keys()],selected);
+});
+
 test("clearing the request list persists an empty history, preserves favorites and merges new arrivals on undo",async t=>{
     const dir=await fs.mkdtemp(path.join(os.tmpdir(),"harmony-clear-history-"));
     const bench={storage:{fsPath:dir},language:"en",state:{tool:"network"},context:{workspaceState:{get:(_k,fallback)=>fallback}},publish(){}};

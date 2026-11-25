@@ -10,13 +10,17 @@ const load=require("../test-support/loadWebview");
 function localRule(id,field,value,status=201){
     return {id,method:"GET",match:{field,type:"exact",value},action:"local",response:{status,headers:{},body:"ok"}};
 }
-async function controller(t,vscode={},options){
+async function controller(t,vscode={},options,{withGroup=true}={}){
     const dir=await fs.mkdtemp(path.join(os.tmpdir(),"ha-rule-execution-")), values=new Map();
     const bench={storage:{fsPath:dir},state:{mode:"network"},language:"en",publish(){},errorMessage:e=>e.message,
         text:{chooseSavedPlan:"Select workflow",planFileInvalid:"Invalid workflow"},
         context:{workspaceState:{get:(k,d)=>values.get(k)??d,update:async(k,v)=>values.set(k,v)}}};
     const host=new NetworkController(bench,vscode,options);
     await host.init();
+    if (withGroup) {
+        await host.handle({type:"networkApply",scenario:exampleScenario()});
+        await host.handle({type:"networkScenarioSelect",id:host.activeScenarioId});
+    }
     t.after(async()=>{await host.close();await fs.rm(dir,{force:true,recursive:true});});
     return host;
 }
@@ -37,6 +41,75 @@ async function useDevice(host,phones,device){
     host.bench.state.devices=[...phones.online];
     await host.devicesChanged(host.bench.state.devices);
 }
+test("the gateway only uses a group on explicit request and restores manual rules after each case",async t=>{
+    const phones=mappedPhones(),host=await controller(t,{},phones,{withGroup:false});
+    await useDevice(host,phones,"A");
+    const state=host.bench.state;
+    assert.deepEqual(state.network.scenarioLibrary,[]);
+    assert.equal(state.network.rulesEnabled,false);
+    await host.handle({type:"networkUpsertRule",originalRule:null,newGroupName:"Manual",rule:exampleScenario().rules[0]});
+    assert.equal(state.network.operation.error,undefined);
+    assert.equal(state.network.scenarioLibrary[0].name,"Manual");
+    assert.equal(state.network.rulesEnabled,false);
+    await host.handle({type:"networkServer"});
+    const status=async()=>{
+        const response=await fetch(host.net.baseUrl+"/items");
+        await response.text();
+        return response.status;
+    };
+    assert.equal(await status(),404);
+    await host.handle({type:"networkScenarioSelect",id:host.activeScenarioId});
+    assert.equal(await status(),503);
+
+    const group={version:1,name:"Only for checkout",rules:[localRule("case","path","/items",409)]};
+    const release=await host.beginCaseRules(group);
+    try {
+        assert.equal(await status(),409);
+        assert.deepEqual(state.network.caseRules.names,[group.name]);
+        assert.equal(state.network.hits[0].count,1);
+        assert.deepEqual(state.network.scenarioLibrary.map(item=>item.name),["Manual"]);
+    } finally { await release.close(); }
+    const releaseWithoutRules=await host.beginCaseRules();
+    try { assert.equal(await status(),404); }
+    finally { await releaseWithoutRules.close(); }
+    assert.equal(await status(),200);
+    await host.handle({type:"networkManualRulesOff"});
+    assert.equal(await status(),404);
+
+    await host.handle({type:"networkServer"});
+    const caseOnly=await host.beginCaseRules(undefined,undefined,{prepare:true});
+    try {
+        assert.equal(await status(),404);
+        const sequence={...group,rules:[{id:"shared",method:"GET",path:"/items",steps:[
+            {response:{status:409}},{response:{status:201}},
+        ]}]};
+        const overlap={version:1,name:"Rate limit",rules:[{id:"shared",method:"GET",path:"/items",steps:[{response:{status:429}}]}]};
+        caseOnly.apply({action:"enable",scenario:sequence});
+        assert.equal(await status(),409);
+        caseOnly.apply({action:"enable",scenario:overlap});
+        assert.deepEqual(state.network.caseRules.names,[group.name,overlap.name]);
+        assert.equal(await status(),429);
+        const revised={...sequence,rules:[{...sequence.rules[0],steps:[{response:{status:418}}]}]};
+        caseOnly.apply({action:"enable",scenario:revised});
+        assert.deepEqual(state.network.caseRules.names,[sequence.name,overlap.name]);
+        assert.equal(await status(),429);
+        caseOnly.apply({action:"disable",name:"Unrelated"});
+        assert.equal(await status(),429);
+        caseOnly.apply({action:"disable",name:overlap.name});
+        assert.equal(await status(),201);
+        caseOnly.apply({action:"enable",scenario:overlap});
+        caseOnly.apply({action:"disable"});
+        assert.equal(await status(),201);
+        caseOnly.apply({action:"disable",name:sequence.name});
+        assert.equal(await status(),404);
+        caseOnly.apply({action:"enable",scenario:revised});
+        assert.equal(await status(),418);
+    } finally { await caseOnly.close(); }
+    assert.equal(host.net.baseUrl,undefined);
+    assert.equal(state.network.rulesEnabled,false);
+    assert.deepEqual(state.network.scenarioLibrary.map(item=>item.name),["Manual"]);
+});
+
 test("preparing B after A disconnects switches the mapping and releases the owned A pair only after A reconnects",async t=>{
     const phones=mappedPhones(),host=await controller(t,{},phones);
     await useDevice(host,phones,"A");
@@ -161,6 +234,27 @@ test("mapping preparation failure restores stopped/running state, preserves rule
     await assert.rejects(host.prepareFlow({uri:"flow"},group),/mapping unavailable/);
     assert.equal(host.net.baseUrl,url);assert.equal(host.activeScenarioId,original);assert.equal(host.net.snapshot().hits[0].count,1);
 });
+test("checking rules previews only the last rule, without executing it or opening its editor",async t=>{
+    const host=await controller(t), model=host.bench.state;
+    const view=await load("networkScenarios"),{listSelectionClick,listSelectionChange}=await load("ui/listSelection");
+    const local=localRule("local","path","/items",418), sc=exampleScenario();
+    const sequence=sc.rules[0];
+    model.network.scenario={...sc,rules:[local,sequence]};
+    const render=()=>view.scenarioView(model,en=>en);
+    global.document={querySelector:()=>null}; t.after(()=>{delete global.document;});
+    render();
+    listSelectionClick({dataset:{listName:"network-rules",listAction:"start"}},()=>assert.fail(),render);
+    const check=(value,checked)=>listSelectionChange({dataset:{listPick:"network-rules"},value,checked},render);
+    check("local",true);
+    assert.match(render(),/sc-rule-effects[^]*?HTTP 418/);
+    check(sequence.id,true);
+    assert.match(render(),/<details class="sc-response-preview"[^>]* open>/);
+    assert.doesNotMatch(render(),/sc-rule-effects|id="ns-enabled"|id="net-draft"|data-net="try"/);
+    check(sequence.id,false);
+    assert.match(render(),/sc-rule-effects[^]*?HTTP 418/);
+    assert.doesNotMatch(render(),/sc-response-preview/);
+});
+
 test("embedded workflow wins over stale bindings; export explicitly chooses between effective and current snapshots",async t=>{
     const plan={steps:[{command:"back"}]}, embedded={...exampleScenario(),name:"Embedded"};
     const bound={...exampleScenario(),name:"Binding"};
@@ -174,8 +268,7 @@ test("embedded workflow wins over stale bindings; export explicitly chooses betw
     file=JSON.stringify(workflowWithScenario(plan,embedded));model.planSummary={scenarioName:"Embedded"};
     await assert.rejects(host.handle({type:"networkBind"}),/embedded/);
     const view=await load("networkScenarios"), html=view.scenarioView(model,x=>x);
-    assert.match(html,/Replay uses the embedded rule group · Embedded/);assert.doesNotMatch(html,/data-net="bind"/);
-    assert.match(html,/Inactive workspace binding · Binding/);
+    assert.match(html,/data-net="saveCase"/);assert.doesNotMatch(html,/data-net="bind"|sc-workflow/);
     await host.handle({type:"networkSaveCase"});assert.equal(written.scenario.name,"Embedded");assert.equal(offered[0].value.name,"Embedded");
     choose=1;await host.handle({type:"networkSaveCase"});assert.equal(written.scenario.name,"Current");
     const reopened=readWorkflow(JSON.stringify(written)),phones=mappedPhones(),other=await controller(t,{},phones);

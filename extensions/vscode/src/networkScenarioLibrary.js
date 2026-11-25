@@ -13,10 +13,10 @@ class ScenarioLibrary {
                 if (typeof id !== "string" || !id || this.entries.has(id)) throw new Error("Invalid rule group ID / 规则组标识无效");
                 this.entries.set(id, validateScenario(scenario));
             }
-            if (this.entries.size && !this.entries.has(saved.activeId)) throw new Error("Active rule group missing / 找不到当前规则组");
-            this.activeId = saved.activeId;
+            if (saved.activeId != null && !this.entries.has(saved.activeId)) throw new Error("Active rule group missing / 找不到当前规则组");
+            this.activeId = saved.activeId ?? this.entries.keys().next().value;
         }
-        if (!this.entries.size) this.add(initial);
+        if (!saved && initial) this.add(initial);
     }
     get active() { return this.entries.get(this.activeId); }
     get(id) {
@@ -58,7 +58,6 @@ class ScenarioLibrary {
         this.entries.delete(id);
         if (this.activeId === id) {
             this.activeId = this.entries.keys().next().value;
-            if (!this.activeId) this.add({version:1,name:this.untitled,rules:[]});
         }
     }
     forFlow(value) {
@@ -74,10 +73,10 @@ class ScenarioLibrary {
         return this.add(normalized);
     }
     listing() {
-        return [...this.entries].map(([id,s]) => ({id,name:s.name,ruleCount:s.rules.length,paused:s.paused===true}));
+        return [...this.entries].map(([id,s]) => ({id,name:s.name,ruleCount:s.rules.length,ruleIds:s.rules.map(rule=>rule.id),paused:s.paused===true}));
     }
     serialize() {
-        return {activeId:this.activeId, entries:[...this.entries].map(([id,scenario])=>({id,scenario}))};
+        return {version:1,activeId:this.activeId, entries:[...this.entries].map(([id,scenario])=>({id,scenario}))};
     }
 }
 module.exports={ScenarioLibrary};

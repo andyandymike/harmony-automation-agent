@@ -157,7 +157,7 @@ function treeNode(editor,node,path,parentType) {
     const add=container ? button(editor,"add",node.type==="array"?w("+ Item","+ 元素"):w("+ Property","+ 属性"),path) : "";
     const open=node.open??root, count=node.children.length, limit=node.limit??40;
     const members=nodeId(editor,path,"children");
-    const fold=container&&count ? button(editor,"fold",(open?"▾ ":"▸ ")+count,path,(open?w("Collapse","收起"):w("Expand","展开"))+" "+desc,false,
+    const fold=container&&count ? button(editor,"fold",String(count),path,(open?w("Collapse","收起"):w("Expand","展开"))+" "+desc,false,
         {"aria-expanded":open,"aria-controls":members}) : "";
     const children=container?'<div class="fe-children" id="'+escape(members)+'" '+(open?"":"hidden")+'>'+
         (open?node.children.slice(0,limit).map((child,i)=>treeNode(editor,child,[...path,i],node.type)).join(""):"")+

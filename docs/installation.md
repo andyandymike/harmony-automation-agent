@@ -46,7 +46,7 @@ This development alpha has not been published to PyPI. If you have a wheel built
 
 ```powershell
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl
+.venv/Scripts/python.exe -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a11-py3-none-any.whl
 .venv/Scripts/harmony-agent.exe --version --json
 ```
 

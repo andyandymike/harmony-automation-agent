@@ -2,6 +2,7 @@
 
 module.exports = {
     stationPreview: ["Device screen", "设备画面"],
+    stationLastTap: ["Last tap", "上次点按"],
     stationPhoneNavigation: ["Phone navigation", "手机导航"],
     stationPhoneKeyboard: ["Keyboard", "键盘"],
     stationPhoneText: ["Text for the phone", "输入到手机的文字"],
@@ -26,7 +27,6 @@ module.exports = {
     stationConnectCable: ["Connect your phone with a USB data cable.", "用 USB 数据线连接手机和电脑。"],
     stationConnectAllow: ["Unlock the phone and allow debugging when prompted.", "解锁手机，并在手机上允许调试。"],
     stationPickHelp: ["Select a phone from the device list above.", "请从上方设备列表选择一台手机。"],
-    stationPauseHelp: ["Resume the preview to control the screen.", "继续预览后，即可操作手机。"],
     stationTask: ["AI assistant", "AI 助手"],
     stationGoal: ["What should the assistant do on this device?", "让助手在这台设备上做什么？"],
     stationRead: ["Interpret screen with AI", "用 AI 解读屏幕"],
@@ -34,7 +34,7 @@ module.exports = {
     stationInspect: ["Inspect controls", "检查控件"],
     stationInspectHelp: ["Find and operate screen controls by name or ID.", "按名称或 ID 查找并操作屏幕控件。"],
     stationWorkflows: ["Workflows", "流程"],
-    stationOpenWorkflow: ["Open workflow…", "打开流程…"],
+    stationOpenWorkflow: ["Open workflow", "打开流程"],
     stationRunHistory: ["Run history", "运行记录"],
     stationCurrentPlan: ["Current workflow", "当前流程"],
     stationRecentRun: ["Latest run", "最近运行"],

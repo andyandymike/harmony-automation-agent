@@ -6,7 +6,7 @@ Operate a connected HarmonyOS phone, inspect the controls on its current screen,
 
 ## Install
 
-Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.25` and uses the Python runtime from this repository. Interactive workflow debugging requires runtime `0.1.0a10` or later.
+Use desktop VS Code 1.101 or later in a trusted workspace. For a connected phone, run VS Code, Python 3.10+ and the official HDC tools on the same computer. This extension is version `0.20.33`. Workflows combining gestures and control steps require runtime `0.1.0a11` or later. Interactive workflow debugging requires at least `0.1.0a10`.
 
 To build from source, clone the [project repository](https://github.com/andyandymike/harmony-automation-agent), install Node.js 22+, and run the following from its root on Windows.
 
@@ -15,10 +15,10 @@ python -m venv .venv
 .venv/Scripts/python.exe -m pip install .
 Set-Location extensions/vscode
 npm run package
-code --install-extension ./harmony-agent-workbench-0.20.25.vsix
+code --install-extension ./harmony-agent-workbench-0.20.33.vsix
 ```
 
-On macOS and Linux, use `.venv/bin/python` and `cd extensions/vscode`. If you already have the wheel and VSIX, use `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a10-py3-none-any.whl` in your chosen environment and install the VSIX with **Extensions → Install from VSIX…**. Node.js is only needed to develop or build the extension.
+On macOS and Linux, use `.venv/bin/python` and `cd extensions/vscode`. If you already have the wheel and VSIX, use `python -m pip install --no-index --no-deps ./harmony_automation_agent-0.1.0a11-py3-none-any.whl` in your chosen environment and install the VSIX with **Extensions → Install from VSIX…**. Node.js is only needed to develop or build the extension.
 
 In VS Code User Settings, set `harmonyAgent.cliPath` to the absolute path of the repository's `.venv/Scripts/harmony-agent.exe` on Windows or `.venv/bin/harmony-agent` on macOS and Linux. Set `harmonyAgent.hdcPath` if HDC is outside PATH. The workbench follows the VS Code display language. Set `harmonyAgent.language` to `en` or `zh-CN` to override it.
 
@@ -38,7 +38,7 @@ A local project can provide `.harmony-agent/runtime.json` at its workspace root.
 
 The launch script can call `main()` from `harmony_agent.cli`. Use `.venv/bin/python` and the local HDC path on macOS or Linux. The chosen `src` goes first on the child process's `PYTHONPATH`.
 
-Open the workbench in a trusted window and confirm the runtime. If more than one workspace folder supplies a file, pick the project first. The choice belongs to the current workspace. Use **Harmony Agent: Select Project Runtime…** or the workbench settings menu to change it. A workspace without a project configuration uses the existing settings and PATH discovery. A selected file that becomes invalid or disappears reports an error. Use the same command to return to VS Code settings.
+Open the workbench in a trusted window and confirm the runtime. If more than one workspace folder supplies a file, pick the project first. The choice belongs to the current workspace. Use **Harmony Agent: Select Project Runtime** or the workbench settings menu to change it. A workspace without a project configuration uses the existing settings and PATH discovery. A selected file that becomes invalid or disappears reports an error. Use the same command to return to VS Code settings.
 
 The selected runtime supplies the CLI, Copilot MCP, workflow debugger, device preview, network tools, pytest, and the copied Codex MCP configuration. Saving an updated configuration applies it after any active run or capture. Refresh devices after changing HDC. If you already pasted a Codex MCP configuration, copy it again to pick up changes.
 
@@ -59,7 +59,9 @@ Checked workflows show the result of the check. Coordinate recordings show the p
 
 In **Elements**, use **Pick element** above the left screen to select a control in the snapshot. Its parents, properties and editable locator appear on the right. Refresh the snapshot to test the locator on a new frame. Pin a property to track changes, or add an action or assertion to a workflow draft. Switch to **Live phone** to send touches from the preview.
 
-Open a control-based workflow and expand **Run settings & debugging → Breakpoints & step debugging**. While paused you can probe a locator, step into the next operation, continue, or stop. The runner retains variables, branches and loop state. Choose **Export run evidence…** from a step's evidence tools or **Export exploration evidence…** from an exploration report to save offline HTML. The **Harmony Agent: Open Exported Evidence…** command opens it in VS Code.
+In Elements, **Open app** and **Screenshot** are in the top-right **Settings** menu. Use **Disconnect** above the phone screen to release the workbench session and clear the live preview and the current control tree. **Reconnect** resumes the phone screen or refreshes the Elements snapshot in the current mode.
+
+Open a control-based workflow and expand **Run settings & debugging → Breakpoints & step debugging**. While paused you can probe a locator, step into the next operation, continue, or stop. The runner retains variables, branches and loop state. Choose **Export run evidence** from a step's evidence tools or **Export exploration evidence** from an exploration report to save offline HTML. The **Harmony Agent: Open Exported Evidence** command opens it in VS Code.
 
 Open the **Network** tab. Use **Requests** to record native HTTP from a debug app, connect ArkWeb or import a HAR. Filter by method, host or status, search retained headers and bodies, compare exchanges, or edit and resend a request through the local test gateway. In **Mock & rewrite**, organize rewrite rules and response sequences into rule groups. Preview a rule against captured requests, then inspect its effect on new gateway traffic. [Network guide](NETWORK.md)
 
@@ -67,50 +69,58 @@ Open the **Network** tab. Use **Requests** to record native HTTP from a debug ap
 
 Open the **AI exploration** tab or run **Harmony Agent: Explore App** from the Command Palette. Open the app on the selected phone and choose a mode.
 
-- **Explore from here** accepts an optional focus such as “try Settings and Help first.” The assistant chooses among observed controls. The workbench records pages, states, attempted entries and return paths. The initial budget is 20 device inputs or three minutes and can be changed before starting.
-- **Explore a flow** accepts the current workflow, a control-based JSON file, or a description of the route and expected result. Review the plan, choose the steps after which to explore, then start. The original flow runs first. Variations reuse its checks and verify the return to the route. For plans with branches, loops or version 2 bindings, exploration starts at the verified endpoint. If your recording uses screen coordinates, choose **Record by control name or ID** to record the route again, or describe it in words.
+- **Explore the current screen** accepts an optional focus such as “try Settings and Help first.” The assistant chooses among observed controls. The workbench records pages, states, attempted entries and return paths. The initial budget is 20 device inputs or three minutes and can be changed before starting.
+- **Explore a case’s other paths**. In AI Exploration, choose a case and a starting point, either the start of the case or immediately after a step. You can also right-click a step in Tests. You can choose the case and position offline. Once started, the script runs through that position, then AI reads the controls on the resulting screen and tries up to two alternative routes. The position list explains any replay limits.
 
-Pause to take over the phone. To continue, select the same device and restore the expected screen. Closing the workbench pauses an exploration. In **AI Exploration**, expand **Exploration history** to open saved reports offline. **Coverage** shows the entries tried or skipped in each observed state. **Findings** distinguishes failed checks, observations needing review and blocked tests. Open **Action trace** for recorded before/after controls. When a failing route has stable selectors and an explicit expectation, choose **Save regression workflow…** and replay it from the same starting state. Reports and run evidence stay on the computer. Your model provider receives the controls and candidates used for the current decision.
+Pause to take over the phone. To continue, select the same device and restore the expected screen. Closing the workbench pauses an exploration. In **AI Exploration**, expand **Exploration history** to open saved reports offline. **Coverage** shows the entries tried or skipped in each observed state. **Findings** distinguishes failed checks, observations needing review and blocked tests. Open **Action trace** for recorded before/after controls. When a failing route has stable selectors and an explicit expectation, choose **Save regression workflow** and replay it from the same starting state. Reports and run evidence stay on the computer. Your model provider receives the controls and candidates used for the current decision.
 
-Add a note to an observation needing review, ignore it, or reopen it. For eligible failed checks, return the original device to its starting page and run an independent recheck. The finding records whether the same discrepancy reproduced, the check passed, or the attempt was inconclusive. The original exploration remains available for comparison.
+The case exploration report shows whether the script reached the starting point and which alternatives were tried. Choose **Preview as a new case** on a recorded branch to review the retained steps and the action taken. Give it a name and save it as a separate case. The new case contains only the path that actually ran. You can add a note to an observation, ignore it, or reopen it. For eligible failed checks, return the original device to its starting page and run an independent recheck.
 
 ## Record by hand
 
-Above the phone preview, choose **Input location** and **Save as**, then select **Start recording**. The recorded steps appear in **Tests**.
+Select **Start recording** above the phone preview. Touch the phone or click the preview to set this recording's input source. The recorder uses that source until you finish. If phone touch capture is unavailable, record in the preview. Recorded steps appear in **Tests**.
 
-| Where you operate | What you save | What gets recorded |
-|---|---|---|
-| **Workbench preview** | **Control locators** | Tap and scroll in the preview, use **Keyboard** to fill the focused field, or press **Back on phone**. A control ID or text identifies the target during replay. In review, **Add checks (optional)** can verify a control's visibility or text. |
-| **Workbench preview** | **Screen coordinates** | The phone's acknowledged taps, gestures, navigation and **Keyboard** input become replay steps with their timings. |
-| **On the phone** | **Screen coordinates** | UiTest captures touches such as taps, long presses and swipes. Recognized back gestures replay as system Back. Use the preview to record text input. |
+Taps that uniquely match a control are saved by locator. Other supported gestures are saved by screen position. UiTest can provide touch-time control information from API 20. A workflow with both kinds of steps requires runtime `0.1.0a11` or later.
 
 To send text, first focus the input field in the phone preview, then type or paste into **Keyboard** and send it. **Recent apps** uses the phone's gesture navigation. Pinch requires a device with multi-finger touch injection.
 
-Select **Finish recording** and review the steps. For screen coordinates, remove any unsupported gestures and replay with the same screen size, orientation and layout. Select **Save recording…** to write a JSON file or **Save as test case** to review the BDD steps in execution order.
+Select **Finish recording** and review the steps. For screen coordinates, remove any unsupported gestures and replay with the same screen size, orientation and layout. Select **Save recording** to write a JSON file or **Save as test case** to review the BDD steps in execution order.
 
 ## Work with test cases
 
-Open **Tests** to find cases saved from a recording or AI exploration. **Open file…** accepts both saved cases and workflow JSON. Select a case name or an editable Given, When or Then row to edit it in place. When a run matches the current workflow, step statuses appear beside those same steps. Select a status to view its evidence. Expand **Case history** to inspect a past run.
+Open **Tests** to find cases saved from a recording or AI exploration. **Open file** accepts both saved cases and workflow JSON. Select a case name or an editable Given, When or Then row to edit it in place. When a run matches the current workflow, step statuses appear beside those same steps. Select a status to view its evidence. Expand **Case history** to inspect a past run.
 
 Select **Save as test case** while reviewing a recording, or select a reproducible route or finding in an exploration report. Review the actions and expected result before saving. Share the entire new case directory to keep the steps and their origin together. A recording with no final assertion can be saved for replay. Coordinate gestures replay using the recorded device layout.
 
-Each supported BDD role appears beside the step it describes. An assertion can follow a prerequisite directly, and another prerequisite can appear later in the case. Right-click a step and choose **Insert a check after…** to add a check at that point. **Organize with AI** uses the case goal, existing checks, and any recorded page context to suggest names, groups, and roles. Review the suggestions before saving. The case metadata travels with `workflow.json`.
+Select **New case** to start with an empty step list. Choose **Insert step → Insert a check** at the desired position. The same form works at the beginning, middle and end of the case. **Organize with AI** uses the case goal, existing checks, and any recorded page context to suggest names, groups, and BDD roles. Review the suggestions before saving.
 
-Double-click a step to edit its action and parameters. Right-click to insert, duplicate, delete, reorder or rename steps. To choose a locator, open the relevant phone page and select **Pick on screen**. Click the highlighted control, or right-click to choose among overlapping controls. **Read current page** opens the searchable control list. Choose **Apply**, then save the case.
+In lists with batch actions, click **Select multiple** or hold the left mouse button on a row. Checking an item displays its details. Unchecking the item on display returns to the last one still checked. Ctrl-click (Cmd-click on macOS) toggles an item and Shift-click selects a range. **Select all** covers the current list or filter results. **Clear selection** keeps selection mode open. Switching tabs, changing filters or starting another task exits selection mode.
+
+The selection toolbar and the context menu on a selected step offer **Save section**, **New case from selected steps**, and **Delete selected**. Selecting all in a case includes its starting conditions and final assertions. A section saves the selected steps from one sequence in workflow order. Deletions stay in the case draft and **Undo deletion** restores the whole selection.
+
+Double-click a step or choose **Edit step** to change its name, BDD role, description and group. Expand **Execution settings** to change its action or checks. To choose a locator, open the relevant phone page and select **Pick on screen**. Click the highlighted control, or right-click to choose among overlapping controls. **Read current page** opens the searchable control list. Choose **Apply to draft** for the current step, then **Save case changes** when you finish editing. Right-click a row or choose **⋯** to see the step name and its editing, duplication and reuse commands. Right-click between two steps or at the end of the list to add steps at that position or start a new case there. Click the divider to open the insertion options.
 
 When a new case has the same name as an existing folder, it is saved in a separate folder with a numeric suffix. Removing a case from the library keeps its files on disk.
 
-Choose **Workbench** or **pytest** in the runner selector, then select **Run**. The report shows step status, expected and actual values, and saved frames. **Generate repair with AI** reads the failure, the preceding step, any available passing run, and local HTTP errors. It can propose a replacement locator, a wait condition, or a tap that advances past an intervening screen. For a locator failure with insufficient evidence, bring the phone to the relevant screen and choose **Use current phone screen**. Select **Open edit draft** to review the changes in the case editor and save them yourself. Cases with a starting condition and a final assertion can also use **Run a copy with this change**. **Apply to case** becomes available after the original runner exercises the changed steps and passes the original final assertions. Both runs remain in the history.
+Choose **Workbench** or **pytest** in the runner selector, then select **Run**. In the failure report, expand **Original failure evidence** to see the saved page and related requests. **Analyze failure with AI** can suggest a locator, a wait, or a navigation step. For a locator failure with insufficient evidence, bring the phone to the relevant screen and choose **Use current phone screen to analyze**. **Try repair** shows progress and **Trial details** in the original report. The trial starts at the beginning of the case and checks the step that failed. Once that step passes, select **Apply to case** to save the change. Use **Run current case** to check the whole case. For a missing test upstream, try the address in the report and select **Save test upstream** after the request reaches it. Expand **Repair change** to open the case editor when you want to adjust a proposed workflow change yourself.
 
 ### Reuse a case or extend it with exploration
 
-Select **+** between steps, or choose **Insert before** or **Insert after** in a step’s context menu. Search case names, step titles and tags, and preview each source’s entry and result checks. **Insert reference** keeps a versioned link. **Copy steps** adds editable steps to this case. To reuse a smaller sequence, choose **Save a reusable section** on its first step and select its last step.
+Point between steps and click the insertion line. You can also right-click a step to choose its insertion side. At the beginning, between steps, or at the end, choose **Write a step description** or **Reference a case**. Descriptions can be saved as a draft alongside existing steps and references. Choose **Generate steps** on a pending row to open AI Exploration at that position. Replay the preceding executable steps or bring the phone to the starting page. Review the proposed actions and assertions, then apply them to the row. The original description remains visible and its executable steps can be expanded. Generate all pending steps before running the case or exporting it to pytest.
+
+Find a reference source by name, step or tag. Expand **Preview steps** to inspect it before inserting the reference. To reuse a sequence, choose **Save a reusable section** on any step in that sequence. Select the **First step** and **Last step** and review the included steps before saving. When a coordinate recording gains control actions or checks, the combined workflow preserves the recorded coordinates and delays and runs in one device session.
+
+For an AI-assisted change, right-click the step and choose **Revise with AI**. Enter your feedback and review the proposed actions and checks at that position before applying them.
+
+Use **Case feedback** for changes that span the workflow. Add all step feedback and insertion descriptions to the draft, then choose **Explore the whole draft**. Exploration follows the updated order in one phone session. Review the combined changes and choose **Verify the full replay** from the case’s starting state. Save the verified plan with **Save as a replayable version**. For a pending change inside a branch or loop, first generate its steps from the phone page where it runs.
 
 A reference runs its saved steps at the insertion point. **References** can filter updates and missing sources, and **Where used** lists saved callers. Case identity follows the source metadata when a case is renamed or moved. Use **Review update** to inspect differences, verify a copy, and adopt a new version. If a source is unavailable, its saved steps can still run. You can locate the same case, replace the reference, or convert it to local steps.
 
-Choose **Explore here** at an insertion point. Replay can reach a top-level position, or you can start from the current phone screen, including inside a branch or loop. Select a control in the preview and use **Verify now** to compare the expected and actual results. Choose **Add to this case** to put the reviewed route or verification in the draft. From a saved exploration report, choose **Add to existing case** to select its destination.
+To extend the current case, choose **Add steps to this case with AI** at the insertion point. Describe what to do or verify, then choose **Replay and explore**. The workbench replays the script up to that point and follows your goal on the device. Review the new steps and insert them into the draft. Any original steps after that position follow the insertion. Run the case when you want to check that the rest still passes.
 
-Save both `workflow.json` and its `.harmony-case.json` metadata with the project. Workbench and standalone pytest run the expanded `workflow.json`. Edit composed cases in the workbench when you want to preserve their reference layout.
+To start a separate draft, choose **New case from here → Copy the steps up to here**. You can rename the new case, edit the copied steps, and add its own actions and assertions. To copy individual steps, select the top-level rows you want, including any starting conditions and final checks, then choose **New case from selected steps**. They keep their original order. To include a condition, loop, description, or reference with its contents, select the whole row. Choose **Explore other paths** when you want the device to try alternative routes from a checkpoint.
+
+Save both `workflow.json` and its `.harmony-case.json` metadata with the project. Workbench replays coordinate cases and runs control cases. Standalone pytest runs the expanded `workflow.json` for control cases with a generated test. Edit composed cases in Workbench to preserve their reference layout.
 
 ## Add a recording to pytest
 
@@ -129,7 +139,7 @@ Choose **Run test case** on a pytest case to run it against the selected device.
 
 The report opens in the workbench and can be reopened from the run history. **Test phases** shows collection errors, setup, test execution and teardown, with failure details. The step timeline shows executed controls and assertions with the available saved pages for both passing and failing runs. A teardown failure marks the case failed even when all device assertions passed. Existing cases generated by 0.16.0 are supported.
 
-An embedded or workspace-bound rule group travels in `workflow.json`. Set `HARMONY_RULE_GROUP_FIXTURE` to a fixture **registered by your project**. The fixture returns a function accepting the keyword arguments `rule_group`, `device` and `state_dir`. That function returns a context manager that prepares the rules and device route on entry and cleans up on exit. Here, the consuming project supplies `project_gateway` and its `route` context manager.
+In **Tests**, insert **Enable rule group** and **Turn off rule group** steps at the positions where the gateway should switch during a workbench run. The enable step saves the selected snapshot in `workflow.json`. For pytest cases with a rule group configured for the entire run, configure the project's rule group fixture. Set `HARMONY_RULE_GROUP_FIXTURE` to a fixture **registered by your project**. The fixture returns a function accepting the keyword arguments `rule_group`, `device` and `state_dir`. That function returns a context manager that prepares the rules and device route on entry and cleans up on exit. Here, the consuming project supplies `project_gateway` and its `route` context manager.
 
 ```python
 # conftest.py
@@ -148,7 +158,7 @@ Use `$env:HARMONY_RULE_GROUP_FIXTURE = "harmony_route"` in the terminal, or ente
 
 In **Tests**, open a local workflow or select a case to view its saved evidence. **Case history** opens earlier reports, and **All runs** lists runs across different cases. Reconnect the intended phone to replay.
 
-Hiding the workbench suspends its screen preview. Returning to the workbench resumes capture if the preview was running. Closing the workbench ends an active recording, cancels the active AI request and stops an active coordinate replay. Reopen the workbench in the same VS Code window to review the recording draft. Use **Save recording…** to keep it on disk before reloading or quitting VS Code.
+Hiding the workbench suspends its screen preview. Returning to the workbench resumes capture if the preview was running. Closing the workbench ends an active recording, cancels the active AI request and stops an active coordinate replay. Reopen the workbench in the same VS Code window to review the recording draft. Use **Save recording** to keep it on disk before reloading or quitting VS Code.
 
 ## Using the AI assistant
 
@@ -165,7 +175,7 @@ The selected provider receives the goal and relevant page controls or run eviden
 
 ## Optional external AI chat and MCP
 
-For a separate conversation in Copilot Chat or the Codex desktop app, run **Harmony Agent: Continue in External AI Chat…** from the Command Palette. Choose a provider and review the draft in that chat before sending it.
+For a separate conversation in Copilot Chat or the Codex desktop app, run **Harmony Agent: Continue in External AI Chat** from the Command Palette. Choose a provider and review the draft in that chat before sending it.
 
 - **Copilot Chat.** Run **MCP: List Servers**, start **Harmony Agent**, and enable its tools in Chat agent mode. The optional `skills/harmony-agent` folder in the project repository can be copied to the app project's `.github/skills/harmony-agent` directory for device and workflow instructions. [MCP in VS Code](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)
 - **Codex desktop.** In the external chat menu, choose **Copy Codex MCP configuration**. Add the generated `[mcp_servers.harmony]` entry to the trusted project's `.codex/config.toml`, then open a new chat there. To send future drafts to that project, set `harmonyAgent.codexProjectPath`. To share saved run evidence across windows, point `harmonyAgent.stateDir` to the same evidence directory. [Codex MCP](https://developers.openai.com/codex/mcp/)

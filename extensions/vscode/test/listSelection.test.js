@@ -1,0 +1,62 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const loadWebview = require("../test-support/loadWebview");
+const english = text=>text;
+
+test("individual, range and bulk selection preserve one preview and fall back to a checked row",async()=>{
+    const {ListSelection,listSelectionChange}=await loadWebview("ui/listSelection");
+    const list=new ListSelection("preview-test");
+    list.update("library",["a","b","c","d"],false);
+    const previews=[];
+    list.tools(english,[],{onPreview:id=>previews.push(id)});
+    const check=(value,checked)=>listSelectionChange({dataset:{listPick:list.name},value,checked},()=>{});
+    list.start();
+    check("b",true);
+    check("a",true);
+    check("c",true);
+    check("b",false);
+    assert.equal(list.previewId,"c");
+    check("c",false);
+    assert.equal(list.previewId,"a");
+    assert.match(list.row("a"),/data-selection-preview/);
+    list.selectAll();
+    assert.equal(list.previewId,"a");
+    assert.equal(list.all,true);
+    list.selectAll();
+    assert.equal(list.previewId,undefined);
+    assert.deepEqual(previews,["b","a","c","a",undefined]);
+    list.check("d",true);
+    list.selectModified("b",true,false);
+    assert.deepEqual(list.values,["b","c","d"]);
+    assert.equal(list.previewId,"b");
+    list.update("library",["a","c","d"],false);
+    assert.ok(list.selected.has(list.previewId));
+    list.reset();
+    assert.doesNotMatch(list.row("d"),/data-selection-(preview|checked|active)/);
+});
+
+test("a library preview can navigate to another case without keeping selection across tabs or devices",async()=>{
+    const {ListSelection,updateListSelectionScope,activeListPreview}=await loadWebview("ui/listSelection");
+    const list=new ListSelection("case-library");
+    list.update("library",["a","b"],false);
+    updateListSelectionScope("recordings-home","device-a");
+    list.start();
+    list.check("b",true);
+    updateListSelectionScope("case-b","device-a");
+    assert.equal(activeListPreview("case-library"),"b");
+    updateListSelectionScope("inspect",undefined);
+    assert.equal(list.active,false);
+    updateListSelectionScope("case-b","device-a");
+    list.start();
+    list.check("a",true);
+    updateListSelectionScope("case-a-device-b","device-b");
+    assert.equal(list.active,false);
+    const steps=new ListSelection("case-steps");
+    steps.update("a",["0"],false);
+    steps.start();
+    steps.check("0",true);
+    updateListSelectionScope("case-c-device-b","device-b");
+    assert.equal(steps.active,false);
+});

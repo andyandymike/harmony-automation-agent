@@ -73,8 +73,8 @@ test("the workspace names the activity, group controls and saved group in both l
     network.scenario.name = network.scenarioLibrary[0].name = savedName;
     click("mock");
     for (const [lang, tab, create, disable, enable, exportGroup] of [
-        ["zh-CN","模拟与改写","新建规则组","停用规则组","启用规则组","导出规则组"],
-        ["en","Mock &amp; rewrite","New rule group","Disable rule group","Enable rule group","Export rule group"],
+        ["zh-CN","模拟与改写","新建规则组","关闭手动模拟","用于手动模拟","导出规则组"],
+        ["en","Mock &amp; rewrite","New rule group","Turn off manual mocking","Use for manual mocking","Export rule group"],
     ]) {
         network.scenario.paused = false;
         const markup = view.networkView(model,lang);
@@ -85,7 +85,7 @@ test("the workspace names the activity, group controls and saved group in both l
     }
 });
 
-test("the scenario owns its rule list and editors under the same primary tab", async () => {
+test("the scenario owns its rule list and returns keyboard focus to the edited row", async t => {
     const {render, click, rewrite, network} = await workspace();
     const last = {...rewrite,id:"Fallback header"};
     network.scenario.rules.push(last);
@@ -95,12 +95,20 @@ test("the scenario owns its rule list and editors under the same primary tab", a
     const priority = [...overview.matchAll(/<button\b[^>]*data-net="(sceneRule|editSequence)"[^>]*data-id="([^"]+)"/g)]
         .map(match=>match[2]);
     assert.deepEqual(priority,network.scenario.rules.map(rule=>rule.id));
+    const focus=[];
+    const previousDocument=global.document;
+    global.document={querySelector:selector=>({focus:()=>focus.push(selector)})};
+    t.after(()=>{global.document=previousDocument;});
     const editor = click("sceneRule",{id:rewrite.id});
+    await Promise.resolve();
+    assert.equal(focus.at(-1),"#ns-id");
     assertPrimary(editor,"mock");
     assert.ok(editor.includes('value="'+rewrite.id+'"'));
     assert.match(editor,/class="sc-rule-list"/);
     assert.ok(editor.includes(last.id));
     const collapsed = click("sceneRule",{id:rewrite.id});
+    await Promise.resolve();
+    assert.equal(focus.at(-1),'.sc-rule[data-order-index="0"] .sc-rule-select');
     assertPrimary(collapsed,"mock");
     assert.match(collapsed,/class="sc-rule-list"/);
     assert.doesNotMatch(collapsed,/id="ns-id"/);
@@ -145,8 +153,8 @@ test("a disabled sequence test shows the next prerequisite next to its button", 
     const rule = network.scenario.rules.find(rule=>rule.steps);
     click("mock");
     for (const [running,paused,enabled,hint] of [
-        [false,false,true,"先启动网关"], [true,true,true,"先启用规则组"],
-        [false,true,true,"先启用规则组"], [true,false,false,"先启用这条规则"], [true,false,true,""]
+        [false,false,true,"先启动网关"], [true,true,true,"先将此组用于手动模拟"],
+        [false,true,true,"先将此组用于手动模拟"], [true,false,false,"先启用这条规则"], [true,false,true,""]
     ]) {
         network.running=running;
         network.scenario.paused=paused;
@@ -157,8 +165,9 @@ test("a disabled sequence test shows the next prerequisite next to its button", 
             const [,id] = action.match(/aria-describedby="([^"]+)" disabled>发送测试请求<\/button>/);
             assert.ok(action.includes('<small id="'+id+'" class="sc-caption">'+hint+'</small>'));
         } else {
-            assert.doesNotMatch(action,/disabled|aria-describedby|<small/);
-            assert.match(action,/>发送测试请求<\/button>/);
+            assert.doesNotMatch(action,/disabled/);
+            assert.match(action,/aria-describedby="sc-test-hint-\d+"/);
+            assert.match(action,/第 1 项响应（HTTP 503），并计入真实命中次数/);
         }
     }
 });
@@ -289,6 +298,39 @@ test("right click on the request details and a retained JSON field exposes targe
     assert.match(render(),/retryAfter/);
 });
 
+test("busy workbench keeps archived inspect and copy actions available",async()=>{
+    const {view,model,render,messages,source}=await workspace();
+    model.busy=true;
+    const send=message=>messages.push(message);
+    const items=view.requestMenuItems({dataset:{recordId:source.id}},model,"en",send,render);
+    items.find(item=>item.label==="Copy request URL").run();
+    items.find(item=>item.label==="View response").run();
+    assert.ok(!items.some(item=>item.label==="Edit & resend" || item.label==="Create rule"));
+    const field=view.requestFieldMenuItems({dataset:{id:source.id,target:"responseJson",ref:'["retryAfter"]',fieldLabel:"retryAfter"}},
+        model,"en",send,render);
+    assert.deepEqual(field.map(item=>item.label),["Copy field name or path","Copy field value"]);
+    field[1].run();
+    assert.deepEqual(messages.map(m=>m.text),[source.request.url,"2"]);
+});
+
+test("a historical rule link opens its retained group without changing manual mocking",async()=>{
+    const {view,network,model,source,render,messages,rewrite}=await workspace();
+    const active=network.activeScenarioId, archived="archived-payments";
+    source.ruleScenarioId=archived;
+    network.scenarioLibrary.push({id:archived,name:"Earlier rules",ruleIds:[rewrite.id],ruleCount:1});
+    assert.match(render(),/data-net="matchedRule"/);
+    view.networkClick({dataset:{net:"matchedRule",id:source.id}},model,m=>messages.push(m),render);
+    assert.deepEqual(messages,[{type:"networkScenarioBrowse",id:archived}]);
+    network.viewedGroup={id:archived,version:1,scenario:{version:1,name:"Earlier rules",rules:[rewrite]}};
+    const editor=render();
+    assertPrimary(editor,"mock");
+    assert.ok(editor.includes('value="'+rewrite.id+'"'));
+    assert.equal(network.activeScenarioId,active);
+    view.networkClick({dataset:{net:"returnExchange",id:source.id}},model,m=>messages.push(m),render);
+    network.viewedGroup.scenario.rules=[];
+    assert.doesNotMatch(render(),/data-net="matchedRule"/);
+});
+
 for (const [action, parent] of [["createRule","mock"], ["fieldRule","mock"], ["resend","requests"], ["matchedRule","mock"]]) {
     test(action+" opens from a scoped request and returns to it with the same URL filter", async () => {
         const {view, network, source, rewrite, click, render, messages} = await workspace();
@@ -329,8 +371,9 @@ for (const [action, parent] of [["createRule","mock"], ["fieldRule","mock"], ["r
 }
 
 test("a response sequence drafted from a request has a route back to that exchange", async () => {
-    const {model, source, network, click, render, messages} = await workspace();
-    click("from",{id:source.id});
+    const {view,model, source, network, click, render, messages} = await workspace();
+    const actions=view.requestMenuItems({dataset:{recordId:source.id,recordDetail:"true"}},model,"en",m=>messages.push(m),render);
+    actions.find(action=>action?.label==="Create response sequence").run();
     assert.equal(messages.length,1);
     assert.equal(messages[0].type,"networkFrom");
     assert.equal(messages[0].id,source.id);
@@ -340,7 +383,9 @@ test("a response sequence drafted from a request has a route back to that exchan
         scenarioId:network.activeScenarioId,scenarioVersion:network.scenarioVersion};
     const editor = render();
     assertPrimary(editor,"mock");
-    assert.match(editor,/id="scenario-editor-title"/);
+    assert.match(editor,/id="ns-compose-title"/);
+    assert.match(editor,/value="503"/);
+    assert.match(editor,/data-ns="destination"/);
     network.records.push(exchange("later","/other"));
     const result = click("returnExchange",{id:source.id});
     assertPrimary(result,"requests");
@@ -354,4 +399,93 @@ test("an exploration receipt opens its network window before network state is lo
         {mode:"exploration"}, msg=>messages.push(msg), ()=>{});
     assert.equal(handled,true);
     assert.deepEqual(messages,[{type:"networkExplorationStep",id:"inspect-cart",index:2}]);
+});
+
+test("returning to either source or field restores its independent rule draft, including a pending save",async()=>{
+    const {view,model,network,source,click,render,messages}=await workspace();
+    const other=network.records[0], send=m=>messages.push(m);
+    source.id=randomUUID();other.id=randomUUID();render();
+    const from=(record,seed)=>view.networkClick({dataset:{net:seed?"fieldRule":"createRule",id:record.id,...seed}},model,send,render);
+    const input=(key,value)=>view.networkInput({dataset:{ns:key},value},render,send);
+    from(source);input("id","One");input("action","local");click("studio-apply");
+    const save=messages.at(-1);assert.equal(save.rule.id,"One");
+    click("returnExchange",{id:source.id});
+    from(other);input("id","Two");
+    network.operation={type:save.type,revision:save.revision};
+    assert.match(render(),/id="ns-id"[^>]+value="Two"/);
+    click("returnExchange",{id:other.id});
+    const seed={target:"responseJson",ref:'["retryAfter"]'};
+    from(source,seed);input("id","Field draft");
+    click("returnExchange",{id:source.id});from(other);
+    assert.match(render(),/id="ns-id"[^>]+value="Two"/);
+    click("returnExchange",{id:other.id});from(source,seed);
+    assert.match(render(),/id="ns-id"[^>]+value="Field draft"/);
+    click("cancelRuleDraft",{id:source.id});
+});
+
+test("captured sequence edits are isolated to one rule and destination even if other rules change",async()=>{
+    const {view,model,network,source,click,render,messages}=await workspace();
+    const owner="destination-"+randomUUID(), destination={version:1,name:"Pending responses",rules:[]};
+    network.scenarioLibrary.push({id:owner,name:destination.name,ruleCount:0});
+    network.viewedGroup={id:owner,scenario:destination,version:4};
+    source.id=randomUUID();render();
+    const send=m=>messages.push(m);
+    view.requestMenuItems({dataset:{recordId:source.id}},model,"en",send,render)
+        .find(item=>item.label==="Create response sequence").run();
+    assert.equal(messages.at(-1).scenarioId,owner);
+    const rule=scenarioFromRecord(source).rules[0];
+    model.networkDraft={revision:randomUUID(),sourceId:source.id,focusRuleId:rule.id,
+        scenario:{...destination,rules:[rule]},scenarioId:owner,scenarioVersion:4};
+    network.viewedGroup.version=5;
+    const html=render();assert.match(html,/Save to Pending responses/);
+    view.networkClick({dataset:{net:"addreply",row:"0"}},model,send,render);
+    view.networkInput({dataset:{ne:"status",row:"0-1"},value:"201"},render,send);
+    click("studio-apply");
+    const saved=messages.at(-1);
+    assert.deepEqual([saved.type,saved.scenarioId,saved.originalRule],["networkUpsertRule",owner,null]);
+    assert.deepEqual(saved.rule.steps.map(step=>step.response.status),[503,201]);
+    assert.equal(saved.scenario,undefined);
+    network.operation={type:saved.type,revision:saved.revision};
+    render();
+});
+
+test("captured response sequences can create the first group without a gateway",async()=>{
+    const {view,model,network,source,render,click,messages}=await workspace();
+    source.id=randomUUID();
+    Object.assign(network,{activeScenarioId:undefined,scenario:{version:1,name:"",rules:[]},scenarioLibrary:[],rulesEnabled:false});
+    render();
+    const [rule]=scenarioFromRecord(source).rules;
+    model.networkDraft={revision:randomUUID(),sourceId:source.id,focusRuleId:rule.id,scenario:{rules:[rule]},scenarioVersion:network.scenarioVersion};
+    assert.match(render(),/id="ns-newGroupName"/);
+    click("studio-apply");
+    assert.equal(messages.length,0);
+    view.networkInput({dataset:{ns:"newGroupName"},value:"Checkout sequences"},render,m=>messages.push(m));
+    click("studio-apply");
+    assert.equal(messages.at(-1).scenarioId,undefined);
+    assert.equal(messages.at(-1).newGroupName,"Checkout sequences");
+    assert.equal(messages.at(-1).rule.steps[0].response.status,503);
+    const saved=messages.at(-1);
+    network.activeScenarioId="first-"+randomUUID();
+    network.scenario={version:1,name:saved.newGroupName,rules:[saved.rule]};
+    network.scenarioLibrary=[{id:network.activeScenarioId,name:saved.newGroupName,ruleCount:1}];
+    network.operation={type:saved.type,revision:saved.revision};
+    render();
+});
+
+test("the shelf context menu acts on the group under the pointer without changing manual mocking",async()=>{
+    const {view,model,network,click,render,messages}=await workspace();
+    const other="other-"+randomUUID();
+    network.scenarioLibrary.push({id:other,name:"Other",ruleCount:0});
+    click("mock");
+    const menu=view.ruleGroupMenuItems({dataset:{groupId:other}},model,"en",m=>messages.push(m),render);
+    menu.find(item=>item?.label==="Rename rule group").run();
+    assert.match(render(),/id="sc-library-name"[^>]*value="Other"/);
+    view.networkInput({id:"sc-library-name",dataset:{},value:"Edited other"},render);
+    click("sc-confirm");
+    assert.deepEqual(messages.map(m=>[m.type,m.id,m.name]),[["networkScenarioRename",other,"Edited other"]]);
+    network.scenarioReceipt={...messages[0]};
+    render();
+    menu.find(item=>item?.label==="Export rule group").run();
+    assert.equal(messages[1].type,"networkSaveScenario");
+    assert.equal(messages[1].scenarioId,other);
 });

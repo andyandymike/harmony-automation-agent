@@ -1,0 +1,1172 @@
+{
+  "format": "harmony-agent.case",
+  "version": 1,
+  "id": "e48ae95a-1706-46a6-9862-cbdcc30f6009",
+  "name": "订单付款失败后重试恢复",
+  "source": "workflow",
+  "testUpstream": "http://127.0.0.1:18991",
+  "composition": [
+    {
+      "digest": "b20856ff3e4650889621f85205429e06c7d5f07479b6ee57cd22af535bdbcaf4",
+      "plan": {
+        "version": "2",
+        "goal": "订单付款失败后重试恢复",
+        "limits": {
+          "maxSteps": 48,
+          "maxActions": 16,
+          "timeoutMs": 90000,
+          "maxCaptures": 72
+        },
+        "preconditions": [
+          {
+            "selector": {
+              "type": "heading",
+              "bundleName": "com.huawei.hmos.browser",
+              "text": "订单回归测试"
+            },
+            "property": "visible",
+            "equals": true
+          }
+        ],
+        "steps": [
+          {
+            "useCase": {
+              "caseId": "d883d53b-d531-4bcb-bb61-68f562017822",
+              "name": "准备测试订单",
+              "app": "com.huawei.hmos.browser",
+              "digest": "d248e7e8a025f91a005d75b56d1f6468ba913953ccd3544ac061839d89022b0a",
+              "plan": {
+                "version": "2",
+                "goal": "准备测试订单",
+                "limits": {
+                  "maxSteps": 14,
+                  "maxActions": 4,
+                  "timeoutMs": 30000,
+                  "maxCaptures": 24
+                },
+                "preconditions": [
+                  {
+                    "selector": {
+                      "type": "button",
+                      "bundleName": "com.huawei.hmos.browser",
+                      "text": "重置用例"
+                    },
+                    "property": "visible",
+                    "equals": true
+                  }
+                ],
+                "steps": [
+                  {
+                    "command": "press",
+                    "input": {
+                      "target": {
+                        "type": "button",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "text": "重置用例"
+                      },
+                      "expect": {
+                        "selector": {
+                          "type": "paragraph",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "textPrefix": "订单状态 "
+                        },
+                        "equals": "订单状态 待确认"
+                      }
+                    }
+                  },
+                  {
+                    "read": {
+                      "name": "order_number",
+                      "selector": {
+                        "type": "paragraph",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "textPrefix": "订单编号 "
+                      },
+                      "stripPrefix": "订单编号 "
+                    }
+                  },
+                  {
+                    "command": "press",
+                    "input": {
+                      "target": {
+                        "type": "textField",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "hint": "输入订单号",
+                        "editable": true
+                      },
+                      "expect": {
+                        "selector": {
+                          "type": "textField",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "hint": "输入订单号",
+                          "editable": true
+                        },
+                        "property": "focused",
+                        "equals": true
+                      }
+                    }
+                  },
+                  {
+                    "command": "deviceGesture",
+                    "before": [
+                      {
+                        "selector": {
+                          "type": "textField",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "hint": "输入订单号",
+                          "editable": true
+                        },
+                        "property": "focused",
+                        "equals": true
+                      }
+                    ],
+                    "input": {
+                      "kind": "typeText",
+                      "text": "QA-042"
+                    }
+                  },
+                  {
+                    "command": "press",
+                    "input": {
+                      "target": {
+                        "type": "button",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "text": "确认订单"
+                      },
+                      "expect": {
+                        "selector": {
+                          "type": "paragraph",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "textPrefix": "订单状态 "
+                        },
+                        "equals": {
+                          "concat": [
+                            "订单状态 已确认 ",
+                            {
+                              "var": "order_number"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ],
+                "goals": [
+                  {
+                    "selector": {
+                      "type": "button",
+                      "bundleName": "com.huawei.hmos.browser",
+                      "text": "提交付款"
+                    },
+                    "property": "enabled",
+                    "equals": true
+                  }
+                ]
+              },
+              "dependencies": [],
+              "presentation": {
+                "version": 1,
+                "steps": {
+                  "steps[0]": {
+                    "fingerprint": "feae51d8728153cd85c66c10b5ece77a1c029bf7d5feb1a69639089284c20895",
+                    "name": "重置页面"
+                  },
+                  "steps[1]": {
+                    "fingerprint": "c19d1100fbe8065c68dfb45fa90252cbc37019fbd4744090965322754d4bc1ab",
+                    "name": "读取当前订单编号"
+                  },
+                  "steps[2]": {
+                    "fingerprint": "5ed0d1db4a92247e76be66ab881498f03c51d161e1e044b54abb2419f99b2113",
+                    "name": "聚焦订单输入框"
+                  },
+                  "steps[3]": {
+                    "fingerprint": "112d9dfd21c4e619235c53399c82f23e0c473d02f7c5375630a4fcb4971a0412",
+                    "name": "键入测试订单号 QA-042"
+                  },
+                  "steps[4]": {
+                    "fingerprint": "958899d6c7fb3723c026059d718ce934b1bf63e1df7f38f0ed4f3af6691cf9f1",
+                    "name": "确认订单并核对页面编号"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "enable",
+              "scenario": {
+                "version": 1,
+                "name": "付款接口重试",
+                "rules": [
+                  {
+                    "id": "order-payment-retry",
+                    "method": "GET",
+                    "path": "/api/workbench-order/payment",
+                    "steps": [
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第一次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第二次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 200,
+                          "json": {
+                            "label": "第三次付款成功"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "enable",
+              "scenario": {
+                "version": 1,
+                "name": "库存不足",
+                "rules": [
+                  {
+                    "id": "order-stock-conflict",
+                    "method": "GET",
+                    "path": "/api/workbench-order/stock",
+                    "steps": [
+                      {
+                        "response": {
+                          "status": 409,
+                          "json": {
+                            "label": "库存不足"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款",
+                "type": "button"
+              },
+              "expect": {
+                "selector": {
+                  "type": "button",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "text": "提交付款"
+                },
+                "property": "enabled",
+                "equals": true
+              }
+            }
+          },
+          {
+            "if": {
+              "selector": {
+                "type": "paragraph",
+                "bundleName": "com.huawei.hmos.browser",
+                "textPrefix": "付款结果 "
+              },
+              "equals": "付款结果 503 第一次付款失败"
+            },
+            "then": [
+              {
+                "repeat": {
+                  "limit": 2,
+                  "until": {
+                    "selector": {
+                      "type": "paragraph",
+                      "bundleName": "com.huawei.hmos.browser",
+                      "textPrefix": "付款结果 "
+                    },
+                    "equals": "付款结果 200 第三次付款成功"
+                  },
+                  "steps": [
+                    {
+                      "command": "press",
+                      "input": {
+                        "target": {
+                          "type": "button",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "text": "提交付款"
+                        }
+                      }
+                    },
+                    {
+                      "command": "wait",
+                      "input": {
+                        "target": {
+                          "type": "button",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "text": "提交付款"
+                        },
+                        "property": "enabled",
+                        "equals": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "assert": {
+              "selector": {
+                "type": "paragraph",
+                "bundleName": "com.huawei.hmos.browser",
+                "textPrefix": "付款结果 "
+              },
+              "equals": "付款结果 200 第三次付款成功"
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "disable",
+              "name": "付款接口重试"
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "付款结果 "
+                },
+                "equals": "付款结果 200 付款接口正常"
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "查询库存"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "库存结果 "
+                },
+                "equals": "库存结果 409 库存不足"
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "enable",
+              "scenario": {
+                "version": 1,
+                "name": "付款接口重试",
+                "rules": [
+                  {
+                    "id": "order-payment-retry",
+                    "method": "GET",
+                    "path": "/api/workbench-order/payment",
+                    "steps": [
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第一次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第二次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 200,
+                          "json": {
+                            "label": "第三次付款成功"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "付款结果 "
+                },
+                "equals": "付款结果 503 第一次付款失败"
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "disable",
+              "name": "付款接口重试"
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "disable",
+              "name": "库存不足"
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "付款结果 "
+                },
+                "equals": "付款结果 200 付款接口正常"
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "查询库存"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "库存结果 "
+                },
+                "equals": "库存结果 200 库存接口正常"
+              }
+            }
+          }
+        ],
+        "goals": [
+          {
+            "selector": {
+              "type": "paragraph",
+              "bundleName": "com.huawei.hmos.browser",
+              "textPrefix": "付款结果 "
+            },
+            "equals": "付款结果 200 付款接口正常"
+          },
+          {
+            "selector": {
+              "type": "paragraph",
+              "bundleName": "com.huawei.hmos.browser",
+              "textPrefix": "库存结果 "
+            },
+            "equals": "库存结果 200 库存接口正常"
+          }
+        ]
+      },
+      "presentation": {
+        "version": 1,
+        "steps": {
+          "steps[3]": {
+            "fingerprint": "601011c4b271b8c5b6ad5217ce2c8305bfe2ac87974fe01fa3bc88333bd93763",
+            "name": "发起首次付款"
+          },
+          "steps[4]": {
+            "fingerprint": "4aebb05f21ed6dd46d7c3e76f872caf3de6245534d445ed6de688ca33b028534",
+            "name": "首次付款失败时重试"
+          },
+          "steps[4].then[0]": {
+            "fingerprint": "813c3a237e4e0153080f53476ea6616d3ba06aa1799fa0f8f81066ae15da73cf",
+            "name": "最多重试两次"
+          },
+          "steps[4].then[0].repeat.steps[0]": {
+            "fingerprint": "034b35d4625dd6c348ee63defa53af5bffb1c4f7f994655f95ed93b1dd7e8422",
+            "name": "重新提交付款"
+          },
+          "steps[4].then[0].repeat.steps[1]": {
+            "fingerprint": "cc46247b2e82b5b6408127050fa98728bf9d53d6d79941815f53a25a2a1f94eb",
+            "name": "等待本次付款响应"
+          },
+          "steps[5]": {
+            "fingerprint": "5b62ef14a33893507bf10c69af0b2948c9dc1d192b132a74b7e92a1d09c728fe",
+            "name": "核对第三次付款成功"
+          },
+          "steps[7]": {
+            "fingerprint": "5451e465be593576b5dcb606abc220b03f6a1dd1445398e6ee9c6dc12461fcd8",
+            "name": "核对关闭付款规则后请求回到上游"
+          },
+          "steps[8]": {
+            "fingerprint": "161ae20098bf7fef25f9cfedd715f6f389b84c267841866b36a327a1e45969f8",
+            "name": "核对库存规则仍返回 409"
+          },
+          "steps[9]": {
+            "fingerprint": "872df31f73a49a65452655a304d53cb69a8da6f60dbcb47af2d34f1114025035",
+            "name": "再次启用付款接口重试"
+          },
+          "steps[10]": {
+            "fingerprint": "f15ca861ee3e20ccf0ba551823443d1e9882fbad3ac3a00952dd13e61d26b746",
+            "name": "核对付款规则从第一次失败重新开始"
+          },
+          "steps[13]": {
+            "fingerprint": "5451e465be593576b5dcb606abc220b03f6a1dd1445398e6ee9c6dc12461fcd8",
+            "name": "核对付款恢复正常"
+          },
+          "steps[14]": {
+            "fingerprint": "94c2cb9bba5d817ab4a81e35576ce2d5ff73a00f27dce6548c38392d70adcf3f",
+            "name": "核对库存恢复正常"
+          }
+        }
+      }
+    },
+    {
+      "digest": "21d6e0cbfb56ff26ba7c2e6c2a107b1ba3644a19265061cd2ab05cde4f09cdac",
+      "plan": {
+        "version": "2",
+        "goal": "订单付款失败后重试恢复",
+        "limits": {
+          "maxSteps": 48,
+          "maxActions": 16,
+          "timeoutMs": 90000,
+          "maxCaptures": 72
+        },
+        "preconditions": [
+          {
+            "selector": {
+              "type": "heading",
+              "bundleName": "com.huawei.hmos.browser",
+              "text": "订单回归测试"
+            },
+            "property": "visible",
+            "equals": true
+          }
+        ],
+        "steps": [
+          {
+            "useCase": {
+              "caseId": "d883d53b-d531-4bcb-bb61-68f562017822",
+              "name": "准备测试订单",
+              "app": "com.huawei.hmos.browser",
+              "digest": "d248e7e8a025f91a005d75b56d1f6468ba913953ccd3544ac061839d89022b0a",
+              "plan": {
+                "version": "2",
+                "goal": "准备测试订单",
+                "limits": {
+                  "maxSteps": 14,
+                  "maxActions": 4,
+                  "timeoutMs": 30000,
+                  "maxCaptures": 24
+                },
+                "preconditions": [
+                  {
+                    "selector": {
+                      "type": "button",
+                      "bundleName": "com.huawei.hmos.browser",
+                      "text": "重置用例"
+                    },
+                    "property": "visible",
+                    "equals": true
+                  }
+                ],
+                "steps": [
+                  {
+                    "command": "press",
+                    "input": {
+                      "target": {
+                        "type": "button",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "text": "重置用例"
+                      },
+                      "expect": {
+                        "selector": {
+                          "type": "paragraph",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "textPrefix": "订单状态 "
+                        },
+                        "equals": "订单状态 待确认"
+                      }
+                    }
+                  },
+                  {
+                    "read": {
+                      "name": "order_number",
+                      "selector": {
+                        "type": "paragraph",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "textPrefix": "订单编号 "
+                      },
+                      "stripPrefix": "订单编号 "
+                    }
+                  },
+                  {
+                    "command": "press",
+                    "input": {
+                      "target": {
+                        "type": "textField",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "hint": "输入订单号",
+                        "editable": true
+                      },
+                      "expect": {
+                        "selector": {
+                          "type": "textField",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "hint": "输入订单号",
+                          "editable": true
+                        },
+                        "property": "focused",
+                        "equals": true
+                      }
+                    }
+                  },
+                  {
+                    "command": "deviceGesture",
+                    "before": [
+                      {
+                        "selector": {
+                          "type": "textField",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "hint": "输入订单号",
+                          "editable": true
+                        },
+                        "property": "focused",
+                        "equals": true
+                      }
+                    ],
+                    "input": {
+                      "kind": "typeText",
+                      "text": "QA-042"
+                    }
+                  },
+                  {
+                    "command": "press",
+                    "input": {
+                      "target": {
+                        "type": "button",
+                        "bundleName": "com.huawei.hmos.browser",
+                        "text": "确认订单"
+                      },
+                      "expect": {
+                        "selector": {
+                          "type": "paragraph",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "textPrefix": "订单状态 "
+                        },
+                        "equals": {
+                          "concat": [
+                            "订单状态 已确认 ",
+                            {
+                              "var": "order_number"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ],
+                "goals": [
+                  {
+                    "selector": {
+                      "type": "button",
+                      "bundleName": "com.huawei.hmos.browser",
+                      "text": "提交付款"
+                    },
+                    "property": "enabled",
+                    "equals": true
+                  }
+                ]
+              },
+              "dependencies": [],
+              "presentation": {
+                "version": 1,
+                "steps": {
+                  "steps[0]": {
+                    "fingerprint": "feae51d8728153cd85c66c10b5ece77a1c029bf7d5feb1a69639089284c20895",
+                    "name": "重置页面"
+                  },
+                  "steps[1]": {
+                    "fingerprint": "c19d1100fbe8065c68dfb45fa90252cbc37019fbd4744090965322754d4bc1ab",
+                    "name": "读取当前订单编号"
+                  },
+                  "steps[2]": {
+                    "fingerprint": "5ed0d1db4a92247e76be66ab881498f03c51d161e1e044b54abb2419f99b2113",
+                    "name": "聚焦订单输入框"
+                  },
+                  "steps[3]": {
+                    "fingerprint": "112d9dfd21c4e619235c53399c82f23e0c473d02f7c5375630a4fcb4971a0412",
+                    "name": "键入测试订单号 QA-042"
+                  },
+                  "steps[4]": {
+                    "fingerprint": "958899d6c7fb3723c026059d718ce934b1bf63e1df7f38f0ed4f3af6691cf9f1",
+                    "name": "确认订单并核对页面编号"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "enable",
+              "scenario": {
+                "version": 1,
+                "name": "付款接口重试",
+                "rules": [
+                  {
+                    "id": "order-payment-retry",
+                    "method": "GET",
+                    "path": "/api/workbench-order/payment",
+                    "steps": [
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第一次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第二次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 200,
+                          "json": {
+                            "label": "第三次付款成功"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "enable",
+              "scenario": {
+                "version": 1,
+                "name": "库存不足",
+                "rules": [
+                  {
+                    "id": "order-stock-conflict",
+                    "method": "GET",
+                    "path": "/api/workbench-order/stock",
+                    "steps": [
+                      {
+                        "response": {
+                          "status": 409,
+                          "json": {
+                            "label": "库存不足"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "bundleName": "com.huawei.hmos.browser",
+                "id": "ftest"
+              },
+              "expect": {
+                "selector": {
+                  "type": "button",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "text": "提交付款"
+                },
+                "property": "enabled",
+                "equals": true
+              }
+            }
+          },
+          {
+            "if": {
+              "selector": {
+                "type": "paragraph",
+                "bundleName": "com.huawei.hmos.browser",
+                "textPrefix": "付款结果 "
+              },
+              "equals": "付款结果 503 第一次付款失败"
+            },
+            "then": [
+              {
+                "repeat": {
+                  "limit": 2,
+                  "until": {
+                    "selector": {
+                      "type": "paragraph",
+                      "bundleName": "com.huawei.hmos.browser",
+                      "textPrefix": "付款结果 "
+                    },
+                    "equals": "付款结果 200 第三次付款成功"
+                  },
+                  "steps": [
+                    {
+                      "command": "press",
+                      "input": {
+                        "target": {
+                          "type": "button",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "text": "提交付款"
+                        }
+                      }
+                    },
+                    {
+                      "command": "wait",
+                      "input": {
+                        "target": {
+                          "type": "button",
+                          "bundleName": "com.huawei.hmos.browser",
+                          "text": "提交付款"
+                        },
+                        "property": "enabled",
+                        "equals": true
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "assert": {
+              "selector": {
+                "type": "paragraph",
+                "bundleName": "com.huawei.hmos.browser",
+                "textPrefix": "付款结果 "
+              },
+              "equals": "付款结果 200 第三次付款成功"
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "disable",
+              "name": "付款接口重试"
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "付款结果 "
+                },
+                "equals": "付款结果 200 付款接口正常"
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "查询库存"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "库存结果 "
+                },
+                "equals": "库存结果 409 库存不足"
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "enable",
+              "scenario": {
+                "version": 1,
+                "name": "付款接口重试",
+                "rules": [
+                  {
+                    "id": "order-payment-retry",
+                    "method": "GET",
+                    "path": "/api/workbench-order/payment",
+                    "steps": [
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第一次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 503,
+                          "json": {
+                            "label": "第二次付款失败"
+                          }
+                        }
+                      },
+                      {
+                        "response": {
+                          "status": 200,
+                          "json": {
+                            "label": "第三次付款成功"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "付款结果 "
+                },
+                "equals": "付款结果 503 第一次付款失败"
+              }
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "disable",
+              "name": "付款接口重试"
+            }
+          },
+          {
+            "ruleGroup": {
+              "action": "disable",
+              "name": "库存不足"
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "提交付款"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "付款结果 "
+                },
+                "equals": "付款结果 200 付款接口正常"
+              }
+            }
+          },
+          {
+            "command": "press",
+            "input": {
+              "target": {
+                "type": "button",
+                "bundleName": "com.huawei.hmos.browser",
+                "text": "查询库存"
+              },
+              "expect": {
+                "selector": {
+                  "type": "paragraph",
+                  "bundleName": "com.huawei.hmos.browser",
+                  "textPrefix": "库存结果 "
+                },
+                "equals": "库存结果 200 库存接口正常"
+              }
+            }
+          }
+        ],
+        "goals": [
+          {
+            "selector": {
+              "type": "paragraph",
+              "bundleName": "com.huawei.hmos.browser",
+              "textPrefix": "付款结果 "
+            },
+            "equals": "付款结果 200 付款接口正常"
+          },
+          {
+            "selector": {
+              "type": "paragraph",
+              "bundleName": "com.huawei.hmos.browser",
+              "textPrefix": "库存结果 "
+            },
+            "equals": "库存结果 200 库存接口正常"
+          }
+        ]
+      },
+      "presentation": {
+        "version": 1,
+        "steps": {
+          "steps[3]": {
+            "fingerprint": "8952a03dc48ac4ea3d8c21bbc612f459e836ac937fe798b8c20bf1870ec88417",
+            "name": "发起首次付款"
+          },
+          "steps[4]": {
+            "fingerprint": "4aebb05f21ed6dd46d7c3e76f872caf3de6245534d445ed6de688ca33b028534",
+            "name": "首次付款失败时重试"
+          },
+          "steps[4].then[0]": {
+            "fingerprint": "813c3a237e4e0153080f53476ea6616d3ba06aa1799fa0f8f81066ae15da73cf",
+            "name": "最多重试两次"
+          },
+          "steps[4].then[0].repeat.steps[0]": {
+            "fingerprint": "034b35d4625dd6c348ee63defa53af5bffb1c4f7f994655f95ed93b1dd7e8422",
+            "name": "重新提交付款"
+          },
+          "steps[4].then[0].repeat.steps[1]": {
+            "fingerprint": "cc46247b2e82b5b6408127050fa98728bf9d53d6d79941815f53a25a2a1f94eb",
+            "name": "等待本次付款响应"
+          },
+          "steps[5]": {
+            "fingerprint": "5b62ef14a33893507bf10c69af0b2948c9dc1d192b132a74b7e92a1d09c728fe",
+            "name": "核对第三次付款成功"
+          },
+          "steps[7]": {
+            "fingerprint": "5451e465be593576b5dcb606abc220b03f6a1dd1445398e6ee9c6dc12461fcd8",
+            "name": "核对关闭付款规则后请求回到上游"
+          },
+          "steps[8]": {
+            "fingerprint": "161ae20098bf7fef25f9cfedd715f6f389b84c267841866b36a327a1e45969f8",
+            "name": "核对库存规则仍返回 409"
+          },
+          "steps[9]": {
+            "fingerprint": "872df31f73a49a65452655a304d53cb69a8da6f60dbcb47af2d34f1114025035",
+            "name": "再次启用付款接口重试"
+          },
+          "steps[10]": {
+            "fingerprint": "f15ca861ee3e20ccf0ba551823443d1e9882fbad3ac3a00952dd13e61d26b746",
+            "name": "核对付款规则从第一次失败重新开始"
+          },
+          "steps[13]": {
+            "fingerprint": "5451e465be593576b5dcb606abc220b03f6a1dd1445398e6ee9c6dc12461fcd8",
+            "name": "核对付款恢复正常"
+          },
+          "steps[14]": {
+            "fingerprint": "94c2cb9bba5d817ab4a81e35576ce2d5ff73a00f27dce6548c38392d70adcf3f",
+            "name": "核对库存恢复正常"
+          }
+        }
+      }
+    }
+  ],
+  "presentation": {
+    "version": 1,
+    "steps": {
+      "steps[3]": {
+        "fingerprint": "8952a03dc48ac4ea3d8c21bbc612f459e836ac937fe798b8c20bf1870ec88417",
+        "name": "发起首次付款"
+      },
+      "steps[4]": {
+        "fingerprint": "4aebb05f21ed6dd46d7c3e76f872caf3de6245534d445ed6de688ca33b028534",
+        "name": "首次付款失败时重试"
+      },
+      "steps[4].then[0]": {
+        "fingerprint": "813c3a237e4e0153080f53476ea6616d3ba06aa1799fa0f8f81066ae15da73cf",
+        "name": "最多重试两次"
+      },
+      "steps[4].then[0].repeat.steps[0]": {
+        "fingerprint": "034b35d4625dd6c348ee63defa53af5bffb1c4f7f994655f95ed93b1dd7e8422",
+        "name": "重新提交付款"
+      },
+      "steps[4].then[0].repeat.steps[1]": {
+        "fingerprint": "cc46247b2e82b5b6408127050fa98728bf9d53d6d79941815f53a25a2a1f94eb",
+        "name": "等待本次付款响应"
+      },
+      "steps[5]": {
+        "fingerprint": "5b62ef14a33893507bf10c69af0b2948c9dc1d192b132a74b7e92a1d09c728fe",
+        "name": "核对第三次付款成功"
+      },
+      "steps[7]": {
+        "fingerprint": "5451e465be593576b5dcb606abc220b03f6a1dd1445398e6ee9c6dc12461fcd8",
+        "name": "核对关闭付款规则后请求回到上游"
+      },
+      "steps[8]": {
+        "fingerprint": "161ae20098bf7fef25f9cfedd715f6f389b84c267841866b36a327a1e45969f8",
+        "name": "核对库存规则仍返回 409"
+      },
+      "steps[9]": {
+        "fingerprint": "872df31f73a49a65452655a304d53cb69a8da6f60dbcb47af2d34f1114025035",
+        "name": "再次启用付款接口重试"
+      },
+      "steps[10]": {
+        "fingerprint": "f15ca861ee3e20ccf0ba551823443d1e9882fbad3ac3a00952dd13e61d26b746",
+        "name": "核对付款规则从第一次失败重新开始"
+      },
+      "steps[13]": {
+        "fingerprint": "5451e465be593576b5dcb606abc220b03f6a1dd1445398e6ee9c6dc12461fcd8",
+        "name": "核对付款恢复正常"
+      },
+      "steps[14]": {
+        "fingerprint": "94c2cb9bba5d817ab4a81e35576ce2d5ff73a00f27dce6548c38392d70adcf3f",
+        "name": "核对库存恢复正常"
+      }
+    }
+  }
+}

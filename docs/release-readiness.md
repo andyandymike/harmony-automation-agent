@@ -1,6 +1,6 @@
 # Release readiness
 
-The `0.1.0a10` runtime adds the step checkpoints required by the [VS Code workbench](../extensions/vscode/README.md). The [alpha9 validation](validation-alpha9.md), [alpha8 measurement record](validation-alpha8.md), and [alpha7 performance record](validation-alpha7.md) describe the runtime and environments tested at those versions. See the [performance guide](performance.md) for measurement procedures.
+The `0.1.0a11` runtime supports workflows that mix recorded gestures and control steps. Version `0.1.0a10` introduced the step checkpoints used by the [VS Code workbench](../extensions/vscode/README.md). The [alpha9 validation](validation-alpha9.md), [alpha8 measurement record](validation-alpha8.md), and [alpha7 performance record](validation-alpha7.md) describe the runtime and environments tested at those versions. See the [performance guide](performance.md) for measurement procedures.
 
 Updated: 2026-11-11. The alpha source is now public on GitHub; it is not a stable v0.1 release. The six work packages below consolidate implementation, validation and distribution work without counting the same check multiple times.
 

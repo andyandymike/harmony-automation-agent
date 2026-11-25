@@ -54,6 +54,8 @@ def harmony_workflow_run(request, tmp_path):
     source = json.loads(WORKFLOW.read_text(encoding="utf-8-sig"))
     if not isinstance(source, dict):
         pytest.fail("workflow.json must contain a Harmony Agent plan")
+    if source.get("format") == "harmony-agent.case-draft":
+        pytest.fail("Generate the remaining case steps in Harmony Agent Workbench before running pytest")
     group = None
     plan = source
     if source.get("format") == "harmony-agent.workflow-scenario":

@@ -49,15 +49,22 @@ test("runs a goal, checks a real property, and returns replayable evidence-based
         if (cmd === "press") assert.deepEqual(input.target, { ref: "@e1~home" });
         return { action: { dispatched: "acknowledged" }, observation: cmd === "back" ? home : menu };
     });
-    const result = await runPhoneTask({ ...ctx, ask: planned(
-        { action: "press", node: 1, name: "Open language settings" }, { action: "check", node: 1, property: "text", equals: "English" },
-        { action: "back" }, { action: "done", text: "The English option was present." }) });
+    const prompts = [];
+    const decide = planned({ action: "press", node: 1, name: "Open language settings" },
+        { action: "check", node: 1, property: "text", equals: "English", name: "Confirm language choice" },
+        { action: "back" }, { action: "done", text: "The English option was present." });
+    const result = await runPhoneTask({ ...ctx, ask: prompt => {
+        prompts.push(prompt);
+        return decide(prompt);
+    } });
     assert.equal(result.status, "completed");
     assert.deepEqual(ctx.calls.map(c => c.command), ["attach", "claim", "observe", "press", "wait", "back", "detach"]);
     assert.equal(ctx.calls[0].input.device, "test-phone");
     assert.equal(new Set(ctx.calls.map(c => c.input.session)).size, 1);
     assert.deepEqual(result.draft.steps.map(s => s.command), ["press", "wait", "back"]);
     assert.equal(result.draft.steps[0].name, "Open language settings");
+    const {history} = JSON.parse(prompts.at(-1).split("\n").at(-1));
+    assert.equal(history[1].name, "Confirm language choice");
     assert.deepEqual(result.draft.steps[0].input.target, { bundleName: "example.app", id: "language" });
     assert(!JSON.stringify(result.draft.steps).includes("@e"));
     assert(ctx.events.some(e => /Verified.*English/.test(e.text)));

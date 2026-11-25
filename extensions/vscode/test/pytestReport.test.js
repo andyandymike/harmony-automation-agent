@@ -120,7 +120,8 @@ test("case reports retain real steps, identify framework phases and validate can
     assert.equal(validated.status,"passed",JSON.stringify(validated.pytest));
     await t.test("a stale locator is proposed from the real frozen failure frame, verified with pytest, then applied", async () => {
         const workflow = path.join(caseEntry.folder,"workflow.json");
-        const oldPlan = {...plan,steps:[{command:"press",input:{target:{id:"fixture.increment-old"}}}]};
+        const oldPlan = {...plan,steps:[{command:"press",input:{target:{id:"fixture.increment-old"}}},
+            {command:"press",input:{target:{id:"fixture.later-missing"}}}]};
         const original = JSON.stringify(oldPlan,null,2) + "\n";
         await fs.writeFile(workflow,original);
         const log = path.join(temp,"fixture-runs.txt");
@@ -133,6 +134,7 @@ test("case reports retain real steps, identify framework phases and validate can
         assert.ok(failure.steps[failure.selected]?.locatorFailure, JSON.stringify(failure.steps));
         failure.entry.sourceDigest = sourceDigest(original);
         bench.state.run = failure;
+        bench.state.runs = [failure.entry];
         bench.networks = {bindings:{}};
         bench.reportAgent = entry => ({call:async(command,input)=>{
             const file = path.join(temp,"inspect-request.json");
@@ -148,11 +150,13 @@ test("case reports retain real steps, identify framework phases and validate can
             assert.equal(await fs.readFile(workflow,"utf8"),original);
             bench.state.run = await run(options);
             bench.state.run.entry.repairOf = options.repairOf;
+            bench.state.run.entry.repairTarget = options.repairTarget;
+            bench.state.runs.unshift(bench.state.run.entry);
             return bench.state.run.entry;
         };
         bench.refreshPlanSummary = async () => {};
         const persisted = [];
-        bench.persistRuns = async () => persisted.push(Boolean(bench.state.run.entry.repairApplied));
+        bench.persistRuns = async () => persisted.push(bench.state.runs.some(entry=>entry.repairOf===failure.entry.id && entry.repairApplied));
         bench.refreshCases = async () => {};
         let contents = original;
         vscode.Uri.parse = s => s;
@@ -179,16 +183,24 @@ test("case reports retain real steps, identify framework phases and validate can
         assert.equal(await fs.readFile(workflow,"utf8"),original);
         await repair.verify({id:failure.entry.id});
         assert.equal(bench.state.repair.stage,"verified",JSON.stringify(bench.state.run.pytest));
-        assert.equal(bench.state.run.goalStatus,"passed");
+        assert.equal(bench.state.run,failure);
+        assert.equal(bench.state.repair.result.goalStatus,"not_requested");
+        const trial = await loadPytestRun(bench.state.runs[0]);
+        assert.deepEqual(trial.steps.map(step=>step.path),["preconditions[0]","steps[0]"]);
         assert.equal(await fs.readFile(workflow,"utf8"),original);
         await repair.apply({id:bench.state.repair.trial});
         assert.deepEqual(persisted,[true]);
         const fixed = JSON.parse(await fs.readFile(workflow,"utf8"));
         assert.equal(fixed.steps[0].input.target.id,"fixture.increment");
+        assert.deepEqual(fixed.steps[1],oldPlan.steps[1]);
         assert.deepEqual(fixed.goals,oldPlan.goals);
         assert.deepEqual((await fs.readFile(log,"utf8")).trim().split(/\r?\n/),["prepare","cleanup","prepare","cleanup"]);
         assert.equal((await loadPytestRun(failure.entry)).status,"failed");
+        const full = await run();
+        assert.equal(full.status,"failed");
+        assert.equal(full.steps[full.selected].path,"steps[1]");
     });
+    await fs.writeFile(path.join(caseEntry.folder,"workflow.json"),JSON.stringify(plan));
     await fs.writeFile(conftest,'import pytest\n@pytest.fixture(autouse=True)\ndef setup():\n    raise RuntimeError("fixture unavailable")\n');
     const setupError = await run();
     assert.equal(setupError.steps.length,0);

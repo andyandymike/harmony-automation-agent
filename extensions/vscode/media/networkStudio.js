@@ -2,6 +2,7 @@ import { actionButton } from "./ui/controls.js";
 import { itemMenu } from "./ui/itemActions.js";
 import { orderGrip, orderActions } from "./ui/listOrder.js";
 import { changedFields, exchangeDifferences } from "./networkInspector.js";
+import { editScenario, drawEditor, updateEditor, editorAction, scenarioValue } from "./networkEditor.js";
 import { diffRows } from "./networkDetail.js";
 import { fieldView, readField, resetField, fieldClick, fieldInput } from "./ui/fieldEditor.js";
 
@@ -21,6 +22,22 @@ export function ruleActionLabel(rule,w) {
 const targets = {query:["Query parameter","查询参数"],requestHeader:["Request header","请求头"],requestJson:["Request JSON field","请求 JSON 属性"],
     responseJson:["Response JSON field","响应 JSON 属性"],responseHeader:["Response header","响应头"],requestBody:["Request body text","请求正文文本"],responseBody:["Response body text","响应正文文本"]};
 const operations = {set:["Set value","设置值"],remove:["Remove field","移除字段"],literal:["Replace text","文本替换"],regex:["Replace by regex","正则替换"]};
+export function ruleEffectRows(rule,w) {
+    if (rule.action==="rewrite") return rule.edits.map(edit=>{
+        const field=edit.path ? JSON.stringify(edit.path) : edit.key;
+        const operation=operations[edit.op];
+        const target=targets[edit.target];
+        const value=typeof edit.value==="string" ? edit.value : JSON.stringify(edit.value);
+        return {label:[target ? w(...target) : edit.target,field].filter(Boolean).join(" · "),
+            value:[operation ? w(...operation) : edit.op,edit.find,edit.find && "→",value].filter(part=>part!==undefined && part!=="").join(" ")};
+    });
+    if (rule.action==="reroute") return [{label:w("Upstream path","上游路径"),value:rule.path}];
+    if (rule.request) return [{label:w("Replacement request","替换请求"),value:rule.request.method+" "+rule.request.path}];
+    if (rule.response) return [{label:w("Response","响应"),value:"HTTP "+rule.response.status},
+        ...(rule.response.fileName ? [{label:w("File","文件"),value:rule.response.fileName}] :
+            rule.response.body ? [{label:w("Response body","响应正文"),value:rule.response.body}] : [])];
+    return [];
+}
 const actionNotes = {
     rewrite:["Edits run from top to bottom. Unedited fields pass through to the configured upstream or back to the app.","从上往下应用编辑。其余字段原样传至已配置的上游或返回应用。"],
     replaceRequest:["Sends the following request to the configured upstream when the match succeeds.","匹配时，用下方的完整请求访问已配置的上游。"],
@@ -102,6 +119,12 @@ function localPath(value,w) {
 }
 export function toRule(form,w) {
     const id=form.id.trim(), value=form.pattern.trim();
+    if(form.sequence) {
+        if(!id)throw Object.assign(new Error(w("Enter a rule name.","请填写规则名称。")),{fieldId:"ns-id"});
+        const editable=form.sequence.rules[0];
+        const combined={...form.sequence,rules:[{...editable,id,method:form.method,path:value,enabled:form.enabled}],order:[id]};
+        return scenarioValue(combined,w).rules[0];
+    }
     if(!Object.hasOwn(actions,form.action))throw new Error(w("Choose what happens when the rule matches.","请先选择命中后的处理方式。"));
     if(!id||!value) throw new Error(w("Enter a rule name and match pattern.","请填写规则名称和匹配表达式。"));
     if(form.type==="regex") try {new RegExp(value);} catch {throw new Error(w("The match pattern is not a valid regular expression.","匹配表达式不是有效的正则表达式。"));}
@@ -160,7 +183,7 @@ export function toReplay(form,w) {
 }
 
 let state={page:"rules",feedback:{}}, replayPanel, composer;
-const rulePanels=new Map(), pendingOperations=new Map();
+const rulePanels=new Map(), pendingOperations=new Map(), composers=new Map();
 const gateway={};
 const translate=(en,zh)=>en;
 function clearFeedback() {
@@ -168,12 +191,12 @@ function clearFeedback() {
     state.feedback={};
 }
 function parkPanel() {
-    if(state===composer) return;
+    if(composers.get(state.key)===state) return;
     if(state.page==="resend") replayPanel=state;
     else rulePanels.set(state.scenarioId,state);
 }
 export function resumeStudioRules(network) {
-    if(state!==composer && state.page!=="resend" && state.scenarioId===network.activeScenarioId) return;
+    if(composers.get(state.key)!==state && state.page!=="resend" && state.scenarioId===network.activeScenarioId) return;
     parkPanel();
     if(network.scenarioLibrary) for(const id of rulePanels.keys()) {
         if(!network.scenarioLibrary.some(scene=>scene.id===id)) rulePanels.delete(id);
@@ -197,21 +220,52 @@ export function closeStudioComposer(network) {
     if(composer?.feedback.busyOperation==="networkUpsertRule")return false;
     if(composer)pendingOperations.delete(composer.feedback.operationId);
     resumeStudioRules(network);
+    if(composer) composers.delete(composer.key);
     composer=undefined;
     return true;
 }
+function sourceDraftKey(id,seed) {
+    return JSON.stringify(["request",id,seed==="sequence" ? "sequence" : seed?.target,seed?.path,seed?.key,seed?.occurrence]);
+}
+export function hasRequestRuleDraft(id,seed) {
+    return composers.has(sourceDraftKey(id,seed));
+}
+export function resumeRequestRuleDraft(id,seed,network,send) {
+    const saved=composers.get(sourceDraftKey(id,seed));
+    if(!saved)return false;
+    parkPanel();
+    composer=state=saved;
+    const owner=saved.form.owner.scenarioId;
+    if(owner && owner!==network.activeScenarioId && network.scenarioLibrary?.some(group=>group.id===owner))
+        send({type:"networkScenarioBrowse",id:owner});
+    return true;
+}
+export function moveComposerResponse(from,to,render) {
+    if(state!==composer || !state.form?.sequence || state.feedback.busyOperation)return false;
+    if(!editorAction(state.form.sequence,{dataset:{net:"moveReply",row:"0-"+from,to:String(to)}}))return false;
+    invalidate();render();return true;
+}
 export function openStudio(page,network,record,rule,seed) {
     if(page==="create") {
-        const key=record ? JSON.stringify([record.id,seed?.target,seed?.path,seed?.key,seed?.occurrence]) : network.activeScenarioId;
-        if(composer && (composer.key===key || composer.feedback.busyOperation==="networkUpsertRule"))return resumeStudioComposer();
+        const key=record ? sourceDraftKey(record.id,seed) : JSON.stringify(["group",network.activeScenarioId]);
         parkPanel();
-        if(composer)pendingOperations.delete(composer.feedback.operationId);
-        const form=ruleDraft(network,record,undefined,seed);
-        form.quickField=Boolean(seed);
-        if(seed) form.id=draftId(network,record.method+" "+record.path+" · "+fieldName(seed));
+        if(composers.has(key)) {
+            composer=state=composers.get(key);
+            return;
+        }
+        const sequence=seed==="sequence";
+        const form=ruleDraft(network,record,undefined,sequence?undefined:seed);
+        form.quickField=Boolean(seed && !sequence);
+        if(sequence) {
+            form.sequence=editScenario({name:"Sequence",rules:[rule]});
+            form.id=rule.id;
+            form.action="sequence";
+        } else if(seed) form.id=draftId(network,record.method+" "+record.path+" · "+fieldName(seed));
         else if(record)form.action="";
         form.owner={scenarioId:network.activeScenarioId,originalRule:null};
+        form.newGroupName="";
         composer=state={page:"rule",form,feedback:{},key};
+        composers.set(key,composer);
         return;
     }
     if(page==="resend") {
@@ -283,18 +337,21 @@ export function observeStudio(n) {
     if(op.type==="networkUpsertRule") {
         panel.savedSourceId=panel.form?.seedId;
         panel.page="rules";f.notice=["Rule saved","规则已保存"];
-        if(panel===composer) {
+        if(composers.get(panel.key)===panel) {
             const focusRules=typeof document!=="undefined" && state===panel && document.getElementById("ns-compose-title");
-            const scenarioId=panel.form.owner.scenarioId;
-            const group=rulePanels.get(scenarioId)||{scenarioId};
-            if(group.page==="rule")group.parkedForm=group.form;
+            const scenarioId=panel.form.owner.scenarioId ?? n.activeScenarioId;
             const name=n.scenarioLibrary?.find(entry=>entry.id===scenarioId)?.name;
             if(name)f.notice=["Rule saved to “"+name+"”","规则已保存到「"+name+"」"];
-            pendingOperations.delete(group.feedback?.operationId);
-            Object.assign(group,{page:"rules",form:undefined,feedback:f,savedSourceId:panel.savedSourceId});
-            rulePanels.set(scenarioId,group);
-            composer=undefined;
-            if(state===panel)state=group;
+            if(state===panel) {
+                const group=rulePanels.get(scenarioId)||{scenarioId};
+                if(group.page==="rule")group.parkedForm=group.form;
+                if(!group.feedback?.busyOperation)
+                    Object.assign(group,{page:"rules",form:undefined,feedback:f,savedSourceId:panel.savedSourceId});
+                rulePanels.set(scenarioId,group);
+                state=group;
+            }
+            composers.delete(panel.key);
+            if(composer===panel)composer=undefined;
             if(focusRules)queueMicrotask(()=>document.getElementById("scenario-title")?.focus());
         }
     }
@@ -320,15 +377,29 @@ function fields(key,title,value,{choices,rows,placeholder="",disabled=false,inde
 const methodOptions=any=>(any?["*",...requestMethods]:requestMethods).map(m=>[m,m]);
 const options=(map,w)=>Object.entries(map).map(([key,v])=>[key,w(...v)]);
 function note(msg){return `<p class="ns-note">${html(msg)}</p>`;}
-export function gatewayView(model,w,{replay=false}={}) {
+export function manualMockStatus(n,w,busy) {
+    const manual = Object.hasOwn(n,"gatewayRuleGroup") ? n.gatewayRuleGroup :
+        n.rulesEnabled!==false && !n.scenario.paused && n.scenario.name;
+    return `<div class="sc-manual-status" data-enabled="${!!manual}"><span>${w("Manual mocking","手动模拟")}</span>
+        <strong>${html(manual || w("Off","已关闭"))}</strong>
+        ${manual ? button("rulesOff",w("Turn off manual mocking","关闭手动模拟"),{disabled:busy}) : ""}</div>`;
+}
+function gatewayIndicator(n,w) {
+    return `<div class="ns-gateway-status"><span class="ns-dot ${n.running?"on":""}" aria-hidden="true"></span>
+        <strong>${w("Test gateway","测试网关")}</strong><span class="ns-quiet">${n.running?w("Running","运行中"):w("Stopped","已停止")}</span></div>`;
+}
+export function gatewayView(model,w,{replay=false,manualInHeader=false}={}) {
     const n=model.network;
     observeStudio(n);
-    const stateText=n.running?w("Running","运行中"):w("Stopped","已停止");
     return `<section class="ns-gateway" aria-label="${w("Test gateway","测试网关")}">
-        <div class="ns-gateway-head"><div><span class="ns-dot ${n.running?"on":""}"></span><strong>${w("Test gateway","测试网关")}</strong> <span class="ns-quiet">${stateText}</span></div>
+        <div class="ns-gateway-head">${gatewayIndicator(n,w)}
         <div class="ns-tools">${!n.running||!replay?button("server",n.running?w("Stop gateway","停止网关"):w("Start gateway","启动网关"),{disabled:model.busy}):""}
         ${!replay && n.running && n.mappedDevice!==model.device?button("map",w("Connect phone","连接手机"),{disabled:!model.device||model.busy}):""}
         ${button("route",w("Configure route","配置路由"))}</div></div>
+        ${!replay && !manualInHeader ? manualMockStatus(n,w,model.busy) : ""}
+        ${!replay && n.caseRules ? `<p class="ns-route"><span>${w("Case run","用例运行")}</span>
+            ${html(n.caseRules.names?.map(name=>name || w("Unnamed rule group","未命名规则组")).join(w(", ","、")) ||
+                w("Rule groups off","规则组已关闭"))}</p>` : ""}
         <p class="ns-route"><span>${w("Upstream","上游")}</span>${n.upstream?`<code>${html(n.upstream)}</code>`:html(w("Local rules only","仅使用本地规则"))}</p>
         ${n.running?`<p class="ns-route"><span>${w("Gateway","网关")}</span><code>${html(n.baseUrl)}</code></p>`:""}
         ${!replay && n.running && n.mapping?`<p class="ns-route"><span>${w("Phone app base URL","手机应用 API 基址")} · ${html(n.mappedDevice)}</span><code>${html(n.mapping)}</code></p>`:""}
@@ -465,7 +536,7 @@ function bodyResponse(form,w,{focused=false}={}) {
     const local=form.action==="local";
     const missing=form.missingResponseStatus?note(w("No usable HTTP response was captured. Enter the status and body for the test response.","此请求未采集到可用的 HTTP 响应。请填写测试响应的状态码和正文。")):"";
     const status=fields("responseStatus",w("Status code","状态码"),form.responseStatus,{mono:true});
-    const file=local?`<label class="ns-file"><span>${w("Import text file…","导入文本文件…")}</span><input type="file" id="ns-file" data-ns="file"></label>`:"";
+    const file=local?`<label class="ns-file"><span>${w("Import text file","导入文本文件")}</span><input type="file" id="ns-file" data-ns="file"></label>`:"";
     const embedded=local&&form.fileName?`<div class="ns-note">${w("Embedded file","已嵌入文件")} <code>${html(form.fileName)}</code></div>`:"";
     const headers=headerFields(form,"responseHeaders",w("Response headers","响应头"),w);
     const body=bodyFields(form,"responseBody","responseHeaders",w("Response body","响应正文"),w);
@@ -541,26 +612,31 @@ function ruleComposer(n,w,model,feedback) {
     const canSave=Boolean(form.action) && form.owner.scenarioId===n.activeScenarioId && !busyOperation && !model.busy;
     const saving=busyOperation==="networkUpsertRule";
     const destinationGroups=(n.scenarioLibrary || []).map(group=>[group.id,
-        group.name+(group.id===(n.gatewayScenarioId||n.activeScenarioId)?w(" (used by gateway)","（网关使用中）"):"")+
-        (group.paused?w(" (disabled)","（已停用）"):"")]);
+        group.name+(n.rulesEnabled!==false && !group.paused && group.id===(n.gatewayScenarioId||n.activeScenarioId)?
+            w(" (manual mocking)","（手动模拟）"):"")]);
+    const firstGroup=!destinationGroups.length;
     if(!destinationGroups.some(([id])=>id===form.owner.scenarioId))
         destinationGroups.unshift([form.owner.scenarioId,w("Select a rule group","请选择规则组")]);
+    const destination=n.scenarioLibrary?.find(group=>group.id===form.owner.scenarioId);
+    const name=destination?.name || form.newGroupName?.trim();
+    const affectsLive=destination && destination.id===(n.gatewayScenarioId||n.activeScenarioId) &&
+        n.running && form.enabled && n.rulesEnabled!==false && !destination.paused;
     const matchMethod=form.method==="*"?w("Any method","所有方法"):form.method;
     return `<article class="ns-compose" aria-labelledby="ns-compose-title">
         <header class="ns-compose-head">
             ${returnExchange(n,form.seedId,w,true) || actionButton(w("Back to rule group","返回规则组"),{quiet:true,className:"ns-parent",attrs:{"data-net":"parentScene"}})}
-            <h2 id="ns-compose-title" tabindex="-1">${form.seedId?w("Create rule from request","从请求创建规则"):w("New rule","新建规则")}</h2>
+            <div class="ns-compose-title-row"><h2 id="ns-compose-title" tabindex="-1">${form.sequence?w("Create response sequence","创建顺序响应"):form.seedId?w("Create rule from request","从请求创建规则"):w("New rule","新建规则")}</h2>${gatewayIndicator(n,w)}</div>
         </header>
         <fieldset class="ns-compose-fields" ${saving?"disabled":""} aria-labelledby="ns-compose-title">
         <section class="ns-compose-match" aria-labelledby="ns-compose-match-title">
             <h3 id="ns-compose-match-title">${w("Which requests match?","匹配哪些请求")}</h3>
             <div class="ns-match-summary"><span class="net-method">${html(matchMethod)}</span><code>${html(form.pattern||w("No match pattern entered","尚未填写匹配表达式"))}</code>
                 <small>${w(...matchTypes[form.type])} · ${w(...matchFields[form.field])}</small></div>
-            ${form.quickField?"":`<details id="ns-compose-match"><summary>${w("Edit match conditions","修改匹配条件")}</summary><div class="ns-match-fields">${ruleMatchFields(form,w)}</div></details>`}
+            ${form.quickField?"":`<details id="ns-compose-match"><summary>${w("Edit match conditions","修改匹配条件")}</summary><div class="ns-match-fields">${form.sequence?fields("method",w("Method","方法"),form.method)+fields("pattern",w("Match path","匹配路径"),form.pattern):ruleMatchFields(form,w)}</div></details>`}
         </section>
         <section class="ns-compose-action" aria-labelledby="ns-compose-action-title">
             <h3 id="ns-compose-action-title">${w("What happens on a match?","命中后怎么处理")}</h3>
-            ${form.quickField?`<div class="ns-action-fields"><h4>${w(...targets[form.edits[0].target])} <code>${html(fieldName(form.edits[0]))}</code></h4>
+            ${form.sequence?drawEditor(form.sequence,w,0,{single:true,locked:saving}):form.quickField?`<div class="ns-action-fields"><h4>${w(...targets[form.edits[0].target])} <code>${html(fieldName(form.edits[0]))}</code></h4>
                 ${editRow(form.edits[0],0,1,w,true)}${button("expand",w("Edit matching and other fields","编辑匹配条件和其他字段"))}</div>`:
             `<div role="group" aria-labelledby="ns-compose-action-title">
                 <div class="ns-action-choices">${mainActions.map(key=>actionChoice(key,form,w)).join("")}</div>
@@ -572,9 +648,12 @@ function ruleComposer(n,w,model,feedback) {
         </section>
         <section class="ns-compose-destination" aria-labelledby="ns-compose-destination-title">
             <h3 id="ns-compose-destination-title">${w("Save to rule group","保存到规则组")}</h3>
-            <div class="ns-destination-fields">${fields("destination",w("Rule group","规则组"),form.owner.scenarioId,{choices:destinationGroups,disabled:saving})}
+            <div class="ns-destination-fields">${firstGroup ? fields("newGroupName",w("New rule group name","新规则组名称"),form.newGroupName,{disabled:saving}) :
+                fields("destination",w("Rule group","规则组"),form.owner.scenarioId,{choices:destinationGroups,disabled:saving})}
                 ${fields("id",w("Rule name","规则名称"),form.id,{disabled:saving})}</div>
             ${enableRule(form,w)}
+            ${note(w("New rules take first priority.","新规则排在组内第一位。")+(affectsLive?w(" Saving affects the running gateway immediately.","保存后立即影响当前网关。"):""))}
+            ${destination && form.owner.scenarioId!==n.activeScenarioId?button("browse-destination",w("Open destination","查看目标规则组")):""}
         </section>
         </fieldset>
         ${scopePreview(n,w)}
@@ -583,7 +662,7 @@ function ruleComposer(n,w,model,feedback) {
             ${actionButton(w("Cancel","取消"),{disabled:saving,attrs:{"data-net":"cancelRuleDraft","data-id":form.seedId}})}
             <div class="ns-tools">
                 ${button("preview",busyOperation==="networkPreviewRule"?w("Previewing…","正在预览…"):w("Preview on captured requests","预览历史匹配"),{disabled:!canSave})}
-                ${button("apply",saving?w("Saving…","正在保存…"):w("Save rule","保存规则"),{primary:true,disabled:!canSave})}
+                ${button("apply",saving?w("Saving…","正在保存…"):name?w("Save to ","保存到 ")+name:w("Save rule","保存规则"),{primary:true,disabled:!canSave})}
             </div>
         </footer></article>`;
 }
@@ -702,9 +781,13 @@ function requestFile(input,render) {
     }).catch(()=>{if(state.form===form){setError(new Error(w("Could not read this file as UTF-8 text. Check the file and response headers.","无法导入为 UTF-8 文本。请检查文件内容与响应头。")));render();}});
 }
 export function studioInput(el,render,send) {
+    if(state===composer && state.form?.sequence && el.dataset.ne && updateEditor(state.form.sequence,el)) {
+        invalidate();
+        return true;
+    }
     const {notice,preview,replayId}=state.feedback;
     if(el.dataset.fe && el.dataset.prop) {
-        const studio=el.dataset.fe.startsWith("ns-"),clear=studio && !!(notice||preview||replayId);
+        const studio=el.dataset.fe.startsWith("ns-") || state===composer && state.form?.sequence && el.dataset.fe.startsWith("ne-"),clear=studio && !!(notice||preview||replayId);
         if(studio){invalidate();if(el.dataset.fe==="ns-responseBody"&&state.form)state.form.fileName="";}
         const handled=fieldInput(el,render);
         if(handled && clear)render();
@@ -712,6 +795,7 @@ export function studioInput(el,render,send) {
     }
     const key=el.dataset.ns;
     if(!key)return false;
+    if(key==="newGroupName" && state===composer)state.form.owner.scenarioId=undefined;
     if(key==="destination"){
         if(state===composer && state.form.owner.scenarioId!==el.value && send){
             invalidate();
@@ -750,13 +834,18 @@ export function studioInput(el,render,send) {
     if(key==="target"&&target.target.endsWith("Body")&&target.op==="remove")target.op="set";
     if(key==="target"&&target.target.endsWith("Json")&&!["set","remove"].includes(target.op))target.op="set";
     if(key==="responseBody")target.fileName="";
-    if(defaultMethodChoices(key)||hadFeedback||(key==="pattern"&&state===composer))render();
+    if(defaultMethodChoices(key)||hadFeedback||(state===composer && ["pattern","newGroupName","enabled"].includes(key)))render();
     return true;
 }
 export function studioClick(el,model,send,render) {
     const action=el.dataset.net;
+    if(state===composer && state.form?.sequence && ["addreply","rmreply","moveReply"].includes(action)) {
+        if(!state.feedback.busyOperation && editorAction(state.form.sequence,el)){invalidate();render();}
+        return true;
+    }
     if(action?.startsWith("field-")){
-        if(el.dataset.fe?.startsWith("ns-") && !["field-mode","field-fold","field-more"].includes(action)){
+        if((el.dataset.fe?.startsWith("ns-") || state===composer && state.form?.sequence && el.dataset.fe?.startsWith("ne-")) &&
+            !["field-mode","field-fold","field-more"].includes(action)){
             invalidate();if(el.dataset.fe==="ns-responseBody"&&state.form)state.form.fileName="";
         }
         return fieldClick(el,render);
@@ -766,8 +855,10 @@ export function studioClick(el,model,send,render) {
     const {busyOperation}=state.feedback;
     try {
         switch(key) {
+        case "browse-destination":if(state===composer && state.form.owner.scenarioId)send({type:"networkScenarioBrowse",id:state.form.owner.scenarioId});break;
         case "server":send({type:"networkServer"});break;
         case "map":send({type:"networkMap"});break;
+        case "rulesOff":send({type:"networkManualRulesOff"});break;
         case "route":gateway.open=!gateway.open;gateway.upstream=n.upstream||"";gateway.notice=undefined;break;
         case "save-route":
             if(!gateway.revision){
@@ -815,7 +906,11 @@ export function studioClick(el,model,send,render) {
             const rule=toRule(state.form,w);
             if(key==="apply"&&!state.form.existing&&n.scenario.rules.some(r=>r.id===rule.id))
                 throw new Error(w("A rule with this name already exists. Choose another name.","已存在同名规则，请使用其他名称。"));
-            request(send,key==="apply"?"networkUpsertRule":"networkPreviewRule",{rule,...state.form.owner,...(key==="preview"&&state.form.seedId&&{seedId:state.form.seedId})});break;
+            const newGroupName=state.form.owner.scenarioId===undefined && key==="apply" ? state.form.newGroupName?.trim() : undefined;
+            if(key==="apply" && state===composer && state.form.owner.scenarioId===undefined && !newGroupName)
+                throw Object.assign(new Error(w("Enter a rule group name.","请填写规则组名称。")),{fieldId:"ns-newGroupName"});
+            request(send,key==="apply"?"networkUpsertRule":"networkPreviewRule",{rule,...state.form.owner,
+                ...(newGroupName && {newGroupName}),...(key==="preview"&&state.form.seedId&&{seedId:state.form.seedId})});break;
         }
         case "send":if(!busyOperation&&n.running)request(send,"networkReplay",{request:toReplay(state.form,w)});break;
         }

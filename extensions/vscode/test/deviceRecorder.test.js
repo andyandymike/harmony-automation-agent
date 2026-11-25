@@ -29,6 +29,31 @@ test("UiTest records become replayable device gestures with coordinate-only labe
     ] });
 });
 
+test("opt-in control recording sends only touch-down attributes alongside the gesture", async t => {
+    const { adapter, child, calls } = fakeHdc(t);
+    const records = [];
+    const started = adapter.startRecorder({ device: "phone", hdcPath: "mock", withControls: true,
+        onStep: (step, control) => records.push([step, control]) });
+    const bounds = {left:300, top:620, right:360, bottom:680};
+    const tap = pointer("click", { BUNDLE: "test.phone", fingerList: [{...finger,
+        W1_ID: "open", W1_Text: "Open", W1_Type: "Button", W1_BOUNDS: JSON.stringify(bounds),
+        W2_ID: "after-navigation", W2_Text: "Other page", W1_HIER: "ROOT,0,1",
+    }] });
+    const withoutControl = pointer("click", {fingerList:[{...finger,W1_Type:"Image"}]});
+    child.stdout.write("HA_READY\n" + tap + "\n" + withoutControl + "\n");
+    const handle = await started;
+    await handle.stop();
+
+    assert.match(calls[0][3], /uiRecord record -W true -c false/);
+    assert.deepEqual(records, [
+        [parseRecordLine(tap), {id:"open",text:"Open",type:"Button",bundleName:"test.phone",bounds}],
+        [parseRecordLine(withoutControl), undefined],
+        [parseRecordLine(pointer("longClick")), undefined],
+    ]);
+    const malformed = pointer("click", {fingerList:[{...finger,W1_ID:"open",W1_BOUNDS:"?"}]});
+    assert.deepEqual(parseRecordLine(malformed,true),parseRecordLine(malformed));
+});
+
 test("unsupported or unreadable rows stay visible and never retain raw keys or execute", async () => {
     assert.equal(parseRecordLine("windowBounds,0,0,320,640"), undefined);
     for (const line of [pointer("pinch"), pointer("click", { fingerNumber: "2" }),

@@ -206,6 +206,15 @@ test("real pytest collects and checks generated tests with an offline CLI and ex
     const prepared = run(withGroup, [], {HARMONY_RULE_GROUP_FIXTURE: "selected_fixture", HARMONY_STATE_DIR: path.join(parent, "separate cli state")});
     assert.equal(prepared.code, 0, prepared.text);
     assert.match(await fs.readFile(recorder, "utf8"), /prepare\r?\nexecute\r?\nteardown/);
+    const candidate = path.join(parent,"run-without-rules.json");
+    await fs.writeFile(candidate,JSON.stringify(plan));
+    const skipped = run(withGroup,["-p","harmony_workbench_reporter"],{
+        PYTHONPATH:path.resolve(__dirname,"../src/templates"),HARMONY_PYTEST_WORKFLOW_OVERRIDE:candidate,
+        HARMONY_PYTEST_SKIP_RULE_GROUP:"1",HARMONY_PYTEST_TARGET:path.join(withGroup.folder,withGroup.filename),
+        HARMONY_PYTEST_RESULT:path.join(parent,"skip-rule-group-results.json"),
+    });
+    assert.equal(skipped.code,0,skipped.text);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(withGroup.folder,"workflow.json"),"utf8")).scenario,group);
     await fs.writeFile(path.join(withGroup.folder, "workflow.json"), JSON.stringify(plan));
     const removed = run(withGroup, []);
     assert.equal(removed.code, 1, removed.text);

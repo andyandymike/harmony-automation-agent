@@ -5,8 +5,7 @@ const { pageView, runView } = require("./model");
 const { runGuided } = require("./explorationGuided");
 
 const projection = { compact: true, max_nodes: 240 };
-const mutations = new Set(["press", "back", "scroll", "fill", "open"]);
-const sensitive = /(?:delete|erase|reset|remove|destroy|pay(?:ment)?|purchase|buy|transfer|withdraw|submit|send|confirm|checkout|order now|sign[\s_-]*(?:in|out|up)|log[\s_-]*(?:in|out|off)|\bexit\b|register|authenticate|authorize|allow|install|uninstall|subscribe|unbind|注销|登[录出]|退出|付款|支付|转[帐账]|购买|提交|删除|清除|清空|发送|汇款|取款|确认|同意|授权|注册|卸载|下单|重置|解绑|开启权限)/i;
+const {mutations, sensitive, restrictedInput} = require("./explorationScope");
 const overlayType = /(?:dialog|popover|popup|sheet|menu|option)/i;
 const systemBar = /(?:^|\.)(?:systemui|sceneboard|navigationbar|statusbar|launcher|softkeyboard|inputmethod)(?:\.|$)/i;
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 20);
@@ -246,7 +245,7 @@ function inputTargets(steps, prefix = "steps", found = {}) {
     return found;
 }
 
-function scopePlan(plan, bundle, local) {
+function scopePlan(plan, bundle, local, {trustedPrefix=false}={}) {
     const result = structuredClone(plan);
     const onlySelectedApp = () => { throw new ExplorationStop("blocked", local("The workflow leaves the selected app.", "流程涉及当前探索范围外的应用。")); };
     function selector(value) {
@@ -266,7 +265,7 @@ function scopePlan(plan, bundle, local) {
             if (s.command === "open") onlySelectedApp();
             if (s.input?.target) {
                 s.input.target = selector(s.input.target);
-                if (mutations.has(s.command) && sensitive.test([s.input.target.id, s.input.target.text, s.input.target.description].join(" "))) {
+                if (!trustedPrefix && restrictedInput(s) === "data") {
                     throw new ExplorationStop("blocked", local("This step would change an account, submit or delete data.", "该步骤涉及账号或提交、删除数据，探索已停止。"));
                 }
             }
@@ -389,7 +388,8 @@ async function runExploration({ report, agent, ask, signal, onUpdate = async () 
             const item = source?.entries.find(e => e.id === step.entryId);
             if (item) item.status = step.status === "completed" ? "tried" : "unknown";
         }
-        report.inputs += step.actionCount;
+        if (step.phase==="prefix") report.prefixInputs=step.actionCount;
+        else report.inputs += step.actionCount;
         report.steps.push(step);
         delete report.pending;
         if (step.status === "completed" && finalView) {
@@ -429,10 +429,11 @@ async function runExploration({ report, agent, ask, signal, onUpdate = async () 
         guard();
         const prior = report.steps.find(s => s.key === meta.key);
         if (prior) return prior;
-        if (report.inputs >= report.maxInputs && containsInput(plan.steps)) {
+        const prefix=meta.phase==="prefix" && report.mode==="flow" && report.routeMode==="fork";
+        if (!prefix && report.inputs >= report.maxInputs && containsInput(plan.steps)) {
             stop("completed", local("Input budget reached. Remaining entries were not tested.", "已用完设备输入预算，剩余入口尚未测试。"));
         }
-        const scoped = scopePlan(plan, report.bundle, local);
+        const scoped = scopePlan(plan, report.bundle, local,{trustedPrefix:Boolean(prefix && report.sourceCase?.uri)});
         if (meta.entryId) {
             const expected = current.id;
             await observe();
@@ -443,9 +444,9 @@ async function runExploration({ report, agent, ask, signal, onUpdate = async () 
         }
         const limits = scoped.limits || {};
         scoped.limits = { ...limits, timeoutMs: Math.min(limits.timeoutMs || 60000, Math.max(1, timeLeft())),
-            maxActions: Math.max(1, Math.min(limits.maxActions || 20, report.maxInputs - report.inputs)) };
+            ...(!prefix && {maxActions:Math.max(1, Math.min(limits.maxActions || 20, report.maxInputs - report.inputs))}) };
         const pending = { ...meta, id: randomUUID(), runId: randomUUID(), targets: inputTargets(scoped.steps), fromStateId: current.id,
-            ...(meta.phase === "free" && {replayStep: structuredClone(scoped.steps[0])}),
+            ...((meta.phase === "free" || (meta.phase==="variant" && report.routeMode==="fork")) && {replayStep: structuredClone(scoped.steps[0])}),
             from: current.label, startedAt: now() };
         // Intent is durable BEFORE native dispatch. A process restart recovers by runId,
         // including the window where a response or a local save was lost.
@@ -454,7 +455,8 @@ async function runExploration({ report, agent, ask, signal, onUpdate = async () 
         try { guard(); } catch (e) { delete report.pending; throw e; }
         let data;
         try {
-            data = await agent.call("run", { session, run_id: pending.runId, plan: scoped, output: "full", ...projection });
+            data = await agent.call("run", { session, run_id: pending.runId, plan: scoped, output: "full", ...projection },
+                prefix ? {signal:combined} : undefined);
         } catch (error) {
             return recover(pending, error);
         }

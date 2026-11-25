@@ -12,6 +12,7 @@ import threading
 
 from . import SCHEMA_VERSION, __version__, DEFAULT_INPUT_TIMEOUT_MS
 from .errors import AgentError
+from .gestures import COMMAND as GESTURE_COMMAND
 from .observation import (normalize_layout, project_observation, resolve_target,
                           select_nodes, diff_observations, project_diff,
                           parse_selector, selector_uses_refs)
@@ -271,7 +272,7 @@ class Agent:
             return {"session": name, "device": session["device"], "epoch": session["epoch"],
                     "resumed": not attached, "observationReady": True,
                     "contract": {"planVersions": ["1", "2"], "runOutputs": ["full", "decision"],
-                                 "boundValues": ["read", "var", "concat"]},
+                                 "boundValues": ["read", "var", "concat"], "planFeatures": [GESTURE_COMMAND]},
                     "observation": observation}
 
     def _execute_locked(self, name, session, command, params):
@@ -867,6 +868,17 @@ class Agent:
         result["input"]["phase"] = "verifying"
         return selector, remaining()
 
+    def _wait_gesture_delay(self, duration_ms):
+        deadline = time.monotonic() + duration_ms / 1000
+        while True:
+            self._interrupt()
+            if self._budget is not None:
+                self._budget.check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.05))
+
     def _action(self, name, session, command, params):
         started = time.monotonic()
         operation = uuid.uuid4().hex
@@ -887,6 +899,8 @@ class Agent:
             device = session["device"]
             node = None
             previous_capture = self._last_capture
+            if command == GESTURE_COMMAND and params.get("_gesture_delay_ms"):
+                self._wait_gesture_delay(params["_gesture_delay_ms"])
             if command in {"press", "fill"}:
                 node, observation = self._fresh_target(session, params.get("target"), refresh=params.get("_plan_refresh", False))
             if command == "fill":
@@ -952,6 +966,8 @@ class Agent:
                 session["app"] = params["app"]
             elif command == "back":
                 self.transport.key(device, "Back")
+            elif command == GESTURE_COMMAND:
+                self.transport.gesture(device, params)
             elif command == "scroll":
                 b = node["bounds"]
                 x, y = node["center"]["x"], node["center"]["y"]
